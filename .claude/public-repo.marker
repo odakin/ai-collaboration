@@ -1,0 +1,2 @@
+# claude-public-repo-marker
+# この repo は public。 claude-config の 2 層 leak gate (pre-commit + commit-msg) の対象。
