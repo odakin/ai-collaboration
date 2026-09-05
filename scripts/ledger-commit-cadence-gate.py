@@ -11,7 +11,7 @@ into an exit code too.
 
 Usage (from a repo's hooks/pre-commit):
 
-    python3 ~/Claude/claude-config/scripts/ledger-commit-cadence-gate.py --pre-commit \\
+    python3 ~/Claude/ai-collaboration/scripts/ledger-commit-cadence-gate.py --pre-commit \\
         --glob 'campaigns/*/ledger.yaml' --max 3 --escape-env CAMPAIGN_BATCH_OK --log-name hygiene.txt \\
         --worker-scope-env CAMPAIGN_WORKER_DIR
 
