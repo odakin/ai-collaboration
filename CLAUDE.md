@@ -1,0 +1,59 @@
+# CLAUDE.md — ai-collaboration
+
+**AI との協働で研究を回すための運用基盤 (layer 1、public)。** 「AI に何を任せ、何を人が確かめるか」を、規約 (何を検査するか) + 運用 (どう回し続けるか) + 道具 (機械 gate・runner・sandbox) の三点セットで持つ。vendor 中立 (Claude Code / Codex / 別ベンダーの pass を同じ規律で扱う)。
+
+2026-09-06 に [`claude-config`](https://github.com/odakin/claude-config) から分離 (= あちらは Claude Code の setup / hooks / domain 規約の harness に戻る、本 repo は AI 協働の platform として育てる)。分離の判断と段階は `DESIGN.md`。移設 file の git 履歴は `git format-patch` で持ち込み済 (= 「実践が講演に先行した」 等の credit 主張の根拠)。
+
+## 構造
+
+```
+ai-collaboration/
+├── CLAUDE.md / SESSION.md / DESIGN.md / README.md / LICENSE / .gitignore
+├── conventions/
+│   ├── physics-verification-cycle.md   # 何を検査するか: 4 station / 機械 anchor / foil / tier / 3 状態 / verify-to-learn /
+│   │                                   #   第二の目 / rubric 事前登録 / 止まる規律 / cross-vendor / campaign 運用 A-K
+│   ├── verification-cycle-ops.md       # どう回し続けるか: 6 原則 / 導出 state 機械 / 台帳 3 種 + retro / 無人層 / fresh session の手順
+│   └── cold-eyes-isolation.md          # 第二の目の隔離: 汚染経路 6 口 / 封じた sandbox / spec に書いてよいこと / 受領後の汚染 grep
+└── scripts/
+    ├── verification-campaign-report.py # campaign の集計: --index (導出 state + efficacy dataset) / --surface / --run (foil 契約) / --carryover / --write
+    ├── ledger-commit-cadence-gate.py   # pre-commit gate: 1 commit の ledger entry 上限 + worker scope (CAMPAIGN_WORKER_DIR 外を refuse)
+    ├── make-review-sandbox.py          # 封じた review sandbox を 1 コマンドで切る / 受領時に collect
+    └── gpt_measurements.py             # GPT / POVM の間主観性・sharpness・極値性を定義から検査する数学 library (有限 + 無限次元 anchor)
+```
+
+全 script は `--selftest` を持つ。各 file の 1 行説明は file 冒頭 (docstring 1 行目 / doc-meta) が正本。
+
+## 4 層モデルでの位置
+
+layer 1 (public、全 Claude Code / Codex ユーザー向け)。**依存できるのは layer 1 のみ** (`claude-config` とは相互参照可 = 同じ層)。個人の instance (campaign dir・台帳の中身・launchd routine・hook 配線) は owner の private layer に置き、本 repo には kernel だけを書く (kernel-up / instance-down、正本 = `claude-config/docs/personal-layer.md`)。
+
+## 使い方 (最小)
+
+- 規約を読む順: `physics-verification-cycle.md` (§1 サイクルの形 → §15 campaign 運用) → `verification-cycle-ops.md` (§5 fresh session の手順) → 必要なら `cold-eyes-isolation.md`
+- 自分の検証 repo を作る: 必須 4 file + `campaigns/<date>-<slug>/{spec.md, ledger.yaml}`、pre-commit から `ledger-commit-cadence-gate.py --pre-commit --worker-scope-env CAMPAIGN_WORKER_DIR`、完了時 `verification-campaign-report.py <dir> --run --write`、受領後 `--carryover --write` と `--index --write`。schema は `physics-verification-cycle.md#campaign-tooling` A
+- 第二の目を別 session に出す: `make-review-sandbox.py create <slug> --spec REVIEW-SPEC.md --include <paper.pdf>` → cwd を sandbox に pin して spawn → `collect`
+
+## 安全規則 (public repo)
+
+`claude-config/CLAUDE.md §安全規則` と同じ: 実名・email・非公開 repo 名 (例外 list 以外)・所属・金融・他ユーザー名を file 本文 / commit message / PR に書かない。campaign の finding (他者論文の誤り疑い) は本 repo に書かない (default 非公開 = `physics-verification-cycle.md#verify-to-learn`)。
+
+## 規約参照
+
+- 共通: `claude-config/CONVENTIONS.md` (git / 必須 file / sweep / 安全規則)
+- 委譲と返送 spine (Claude 内): `claude-config/conventions/multi-session-coordination.md` (Phase 2 で本 repo へ移設予定 = DESIGN)
+- Codex 統合 (AGENTS / PARITY / setup-codex): `claude-config/codex/` (同上)
+- 無人 routine の一般則: `claude-config/conventions/scheduled-tasks.md` / `multi-machine-state.md`
+
+## 検査
+
+```bash
+for s in scripts/*.py; do python3 "$s" --selftest; done
+```
+
+CI = `.github/workflows/checks.yml` (同じ 4 本の selftest。`secure-new-repo.sh --code` の baseline)。
+
+## How to Resume
+
+1. `SESSION.md` → 直近の変更と残タスク
+2. `DESIGN.md` → 分離の判断 / Phase 2 の trigger
+3. 呼び元 (owner の private layer) は path を本 repo に向けている: owner の private 検証 repo の `scripts/*` shim / `odakin-prefs/scripts/check-verification-campaigns.py` / `odakin-prefs/skill/daily-verification-cycle-tick/SKILL.md`。旧 path (`claude-config/scripts/<same name>`) は forwarder として残る

@@ -20,10 +20,10 @@ summary: physics-verification-cycle.md (何を検査するか) の隣の「ど�
 ## <a id="principles"></a>1. 六つの原則
 
 1. **状態は file から導出し、 記録しない。** 「campaign X は受領済」 を SESSION に書くと、 file と SESSION が食い違う drift 源になる。 ledger / results / retro / 台帳の**存在と中身**から state を毎回導出する (§2)。 記録するのは判断 (DESIGN) と数字 (AUTO block) だけ
-2. **人間側 station は毎 session 自動 surface する。** 未受領・retro 未記入・deferred の期日・起票のみで止まった campaign・intake 候補を、 dashboard と SessionStart hook の両輪で押す。 該当なしは沈黙、 fail-open。 これは spawn-results / deadline-horizon と同じ「機械が人間の次 session に届ける」 (= [`multi-session-coordination.md#spawn-handoff-token-return`](multi-session-coordination.md#spawn-handoff-token-return) の思想)
+2. **人間側 station は毎 session 自動 surface する。** 未受領・retro 未記入・deferred の期日・起票のみで止まった campaign・intake 候補を、 dashboard と SessionStart hook の両輪で押す。 該当なしは沈黙、 fail-open。 これは spawn-results / deadline-horizon と同じ「機械が人間の次 session に届ける」 (= [`multi-session-coordination.md#spawn-handoff-token-return`](../../claude-config/conventions/multi-session-coordination.md#spawn-handoff-token-return) の思想)
 3. **retro の提案は 3 択の fate を持つ**: gate (機械化 = script / hook / gate) / rule (規約 + 再訪 trigger + review_by) / rejected (理由)。 fate の無い提案は残さない。 台帳 (`improvements.yaml`) に id を切り、 evidence は機械由来の数字だけ書く
 4. **数字は機械から。** 所要は git timestamp、 items/commit は diff、 check/foil は runner、 efficacy proxy は受領側記入の field を集計 ([`physics-verification-cycle.md#efficacy-proxy-receiver-side`](physics-verification-cycle.md#efficacy-proxy-receiver-side))。 自己申告の数字を台帳に入れない (round 1: 自己申告 6 時間 vs git 64 分)
-5. **deferred には時計。** review_by の無い deferred は拾われない ([`convention-design-principles.md#lapsing-deadline`](../docs/convention-design-principles.md#lapsing-deadline) の同型)。 期日が来たら「trigger は立ったか」 を判断して implemented / rejected / 延長のどれかにする
+5. **deferred には時計。** review_by の無い deferred は拾われない ([`convention-design-principles.md#lapsing-deadline`](../../claude-config/docs/convention-design-principles.md#lapsing-deadline) の同型)。 期日が来たら「trigger は立ったか」 を判断して implemented / rejected / 延長のどれかにする
 6. **人間の判断点を名指しで残す。** (a) efficacy proxy の記入 (起票者の事前知識は起票者しか知らない) (b) 他者論文の誤りの著者報告 = **owner 本人が確認するまで AI-refuted** ([`physics-verification-cycle.md#verify-to-learn`](physics-verification-cycle.md#verify-to-learn)) (c) SoT (層1・文献・DESIGN) への昇格 = 受領・突合後に受領側 1 session が直列 (d) deferred の fate 判断。 無人層はこれらを**越えない**
 
 ## <a id="state-machine"></a>2. campaign の導出 state
@@ -93,4 +93,4 @@ owner の従来方針は「物理は人間 in-the-loop、 無人 run は事務�
 
 ## 8. 隣接 doc への routing
 
-何を検査するか = [`physics-verification-cycle.md`](physics-verification-cycle.md) / 委譲と返送 spine = [`multi-session-coordination.md`](multi-session-coordination.md) / 隔離 = [`cold-eyes-isolation.md`](cold-eyes-isolation.md) / 無人 routine の一般則 = [`scheduled-tasks.md`](scheduled-tasks.md) + [`multi-machine-state.md`](multi-machine-state.md) / worker の死に方 = [`output-cap-death-loop.md`](output-cap-death-loop.md) / 道具 = `scripts/verification-campaign-report.py` (`--index` / `--surface` / `--run` / `--carryover`)、 `scripts/ledger-commit-cadence-gate.py`、 `scripts/make-review-sandbox.py`
+何を検査するか = [`physics-verification-cycle.md`](physics-verification-cycle.md) / 委譲と返送 spine = [`multi-session-coordination.md`](../../claude-config/conventions/multi-session-coordination.md) / 隔離 = [`cold-eyes-isolation.md`](cold-eyes-isolation.md) / 無人 routine の一般則 = [`scheduled-tasks.md`](../../claude-config/conventions/scheduled-tasks.md) + [`multi-machine-state.md`](../../claude-config/conventions/multi-machine-state.md) / worker の死に方 = [`output-cap-death-loop.md`](../../claude-config/conventions/output-cap-death-loop.md) / 道具 = `scripts/verification-campaign-report.py` (`--index` / `--surface` / `--run` / `--carryover`)、 `scripts/ledger-commit-cadence-gate.py`、 `scripts/make-review-sandbox.py`

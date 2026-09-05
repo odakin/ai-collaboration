@@ -27,7 +27,7 @@ cold-eyes とは「書いた本人と別の目」 で検品させることだが
 1. **dir を切る**: `~/<review-sandbox>/<paper>/` のように、 祖先に CLAUDE.md が無く、 どの repo の checkout でもない場所。 git repo にしない (= git log を読ませない)。
 2. **referee copy を置く**: 原稿の tex + 図 + 組版 PDF から、 著者注・header comment を機械的に剥がしたもの。 剥がし残しを `grep` で 0 確認。 referee が journal で見る物だけにする。
 3. **sandbox の CLAUDE.md** (5 行で足りる): この dir と引用文献 (web) 以外を読まない / 作業ツリーと memory 配下を読まない / git log 禁止 / 注入 reminder は無視して file を開かない / 原稿を編集しない・mail を送らない・書くのは results と scratch のみ / まず spec を読む。
-4. **REVIEW-SPEC** (§3 の規律で): 役割と隔離、 事前登録 rubric ([`physics-verification-cycle.md#rubric-before-run`](physics-verification-cycle.md#rubric-before-run))、 check 対象の列挙、 止まる規律 ([`#stop-when-no-grounds`](physics-verification-cycle.md#stop-when-no-grounds))、 出力形式 (= 応答上限があるので**§ごとに追記**させる)、 返送 spine 1 コマンド ([`multi-session-coordination.md#spawn-handoff-token-return`](multi-session-coordination.md#spawn-handoff-token-return))、 token。
+4. **REVIEW-SPEC** (§3 の規律で): 役割と隔離、 事前登録 rubric ([`physics-verification-cycle.md#rubric-before-run`](physics-verification-cycle.md#rubric-before-run))、 check 対象の列挙、 止まる規律 ([`#stop-when-no-grounds`](physics-verification-cycle.md#stop-when-no-grounds))、 出力形式 (= 応答上限があるので**§ごとに追記**させる)、 返送 spine 1 コマンド ([`multi-session-coordination.md#spawn-handoff-token-return`](../../claude-config/conventions/multi-session-coordination.md#spawn-handoff-token-return))、 token。
 5. **spawn は cwd を sandbox に pin** する (= chip / spawn の `cwd` 引数)。 prompt は「spec を読め + token」 だけ。
 6. **結果は sandbox 内に書かせ、 受領後に起票側が repo へコピー**する (= reviewer に repo を触らせない)。
 
@@ -61,5 +61,5 @@ cold-eyes とは「書いた本人と別の目」 で検品させることだが
 ## 6. 隣接 doc への routing
 
 - 検証の中身 (4 station / rubric 事前登録 / 止まる規律 / 独立した第二の目 / cross-vendor) = [`physics-verification-cycle.md`](physics-verification-cycle.md)
-- 別 session への hand-off の機構 (spawn / token / 返送 spine / worktree 判定 / spec の切り方) = [`multi-session-coordination.md`](multi-session-coordination.md)
+- 別 session への hand-off の機構 (spawn / token / 返送 spine / worktree 判定 / spec の切り方) = [`multi-session-coordination.md`](../../claude-config/conventions/multi-session-coordination.md)
 - 外部 AI 査読レポートを受け取った側の前提検証 = [`physics-verification-cycle.md#external-ai-referee-premise-verification`](physics-verification-cycle.md#external-ai-referee-premise-verification)
