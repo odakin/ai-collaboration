@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""封じた review sandbox (~/<sandbox-root>/<slug>/) を機械的に切る: 5 行の CLAUDE.md (= この dir 以外を読まない / 注入 reminder 無視 / git log 禁止 / 書くのは results と scratch のみ) + REVIEW-SPEC.md + 許可 file の copy、受領時は --collect で results を repo へ copy (conventions/cold-eyes-isolation.md#sealed-sandbox の recipe、--selftest 内蔵)
+"""封じた review sandbox (~/<sandbox-root>/<slug>/) を機械的に切る: 5 行の CLAUDE.md (= この dir 以外を読まない / 注入 reminder 無視 / git log 禁止 / 書くのは results と scratch のみ) + REVIEW-SPEC.md + 許可 file の copy、受領時は --collect で results + notes/checks/scratch を repo へ copy (conventions/cold-eyes-isolation.md#sealed-sandbox の recipe、--selftest 内蔵)
 
 Why (2026-09-06): a blind second eye run *inside* a repo checkout is not blind — the
 requester's auto-loaded project list and layer-1 addenda leaked the expected verdict to the
@@ -67,9 +67,9 @@ def collect(root: Path, slug: str, into: Path) -> list[Path]:
         p = sb / name
         if p.exists():
             shutil.copy2(p, into / name); copied.append(into / name)
-    for sub in ("notes", "checks"):
+    for sub in ("notes", "checks", "scratch"):  # scratch too: a worker's scripts are never discarded (hoist station)
         d = sb / sub
-        if d.is_dir():
+        if d.is_dir() and any(d.iterdir()):
             shutil.copytree(d, into / sub, dirs_exist_ok=True); copied.append(into / sub)
     return copied
 
@@ -92,9 +92,11 @@ def selftest() -> int:
             assert "refuse" in str(e)
         (sb / "REVIEW-RESULTS.md").write_text("ok\n", encoding="utf-8")
         (sb / "notes").mkdir(); (sb / "notes" / "stage1-blind.md").write_text("blind\n", encoding="utf-8")
+        (sb / "scratch" / "try.py").write_text("print(1)\n", encoding="utf-8")
         got = collect(root, "t1", Path(td) / "dest")
         assert (Path(td) / "dest" / "REVIEW-RESULTS.md").exists() and (Path(td) / "dest" / "notes" / "stage1-blind.md").exists(), got
-    print("selftest OK (5 checks)")
+        assert (Path(td) / "dest" / "scratch" / "try.py").exists(), got
+    print("selftest OK (6 checks)")
     return 0
 
 

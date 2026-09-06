@@ -34,7 +34,8 @@ summary: physics-verification-cycle.md (何を検査するか) の隣の「ど�
 | `running` | ledger に item、 results.md なし | worker (無人でも人間側でも) |
 | `done` (= 未受領) | results.md あり、 かつ refuted に `novel_to_requester` 未記入 or AUTO block なし | **受領側**: 汚染 grep → 主要 finding の独立再実装 → `novel_to_requester` / `second_eye` 記入 → `--run --write` → marker consume ([board 経路の場合](#board-receipt-boundary)) |
 | `received` (= retro 未記入) | 受領完了、 だが `campaigns/retros/*.md` の front matter `campaigns:` に無い | **受領側**: retro (§3) |
-| `retro'd` | retro に載った | 終端。 改善は improvements.yaml が引き継ぐ |
+| `retro'd` (= 未昇格) | retro に載った、 だが retro front matter `hoist:` に無い | **受領側**: 昇格 station (§3.5) — 子 session が作った物を捨てず、 知見を上層へ。 記録するまで毎 session 📤 surface |
+| `hoisted` | retro front matter `hoist: {<campaign>: "<date> <where>"}` に載った | 終端。 改善は improvements.yaml が引き継ぐ |
 
 導出と surface の実体 = [`scripts/verification-campaign-report.py`](../scripts/verification-campaign-report.py) `--index [--write]` (INDEX.md = efficacy dataset) / `--surface` (finding のみ)。 「起票のみ 3 日」 は git の最初の commit 日から。
 
@@ -47,6 +48,18 @@ summary: physics-verification-cycle.md (何を検査するか) の隣の「ど�
 | `improvements.yaml` | retro の提案 1 件 | 受領側 (retro を書く人) | 手書き。 status ∈ {implemented, deferred (+review_by), rejected} |
 
 **retro** = round ごとに `campaigns/retros/<date>-round<N>.md`、 front matter に `campaigns:` (この retro が閉じる campaign) / `contamination:` / `gate_violations:` を機械可読で持つ (INDEX.md に汚染 hit として出る)。 本文は「数字 (AUTO block から写す) / 効いたこと (観測事実で) / 壊れたこと / まだ言えないこと / 提案 → fate 表 / 持ち越す問い」 の 6 節 (雛形 = owner repo の `TEMPLATE-retro.md`)。 **retro を書かないと state が `received` で止まり、 毎 session surface される** = 書く carrier はここ。
+
+### <a id="hoist-station"></a>3.5 昇格 station — 子 session が作った物は捨てない、 知見は上層へ (2026-09-06、 owner 指示「毎度そういうサイクルで回す」)
+
+campaign の worker (別 session / sandbox / 別ベンダー) は、 結果と一緒に **script・導出 note・判断**を産む。 受領で verdict だけ拾って終わると、 それらは campaign dir か sandbox に埋まり、 次の campaign が同じ道具を作り直す。 ∴ retro の後に **昇格 station** を置き、 state 機械の終端を `hoisted` にする (= 記録するまで機械が 📤 で押し続ける)。 5 点を順に:
+
+1. **script は捨てない**: worker の `checks/` `notes/` `scratch/` は campaign dir に commit (sandbox は `make-review-sandbox.py collect` が scratch/ も copy)。 受領側の独立 script は `receipt/`。 削除は improvements に理由を書いた時だけ。
+2. **再利用できる関数は層1 library へ** (例: `gpt_measurements.py`)、 campaign 側は shim か alias。 判断基準 = 2 campaign 目で同じ形が要ったら (層1 `#second-example-refine`)。
+3. **kernel (定義から独立に導いた一般則・壊れ方) は層1 規約へ** (§ を切るか既存 § に追記)、 instance は private に残す。 汚染を避けるため、 進行中の別 campaign の verdict 方向を漏らす記述は受領後まで待つ (physics-verification-cycle C′)。
+4. **文献の verdict は refs の notes へ**、 **判断は DESIGN へ**、 **状態は SESSION へ** (状態は file から導出、 SESSION は resume 用 highlight のみ)。
+5. **retro front matter に `hoist: {<campaign>: "<date> <where>"}`** を書く = 機械が読む終端 marker。 どこへ何を上げたかを 1 行で (無ければ「保存のみ、 kernel 無し」 と正直に)。
+
+この station は「知見を極力上層に」 (owner の standing 指示) を cycle の構造にしたもので、 人間の判断点 (著者連絡・公開) は越えない。
 
 ## <a id="autonomous-layer"></a>4. 無人層 — 何を無人にし、 何を越えないか (日高氏 #17「完全自律 run」 の部分採用、 2026-09-06)
 
@@ -105,5 +118,7 @@ board の主体・遷移・引継ぎは
 既存の無人 tick は marker 契約のままで、board 投稿は起動や無人実行を有効化しない。
 
 ## 8. 隣接 doc への routing
+
+昇格 station の道具 = `verification-campaign-report.py --surface` (📤 未昇格) + `make-review-sandbox.py collect` (scratch 込み)。
 
 何を検査するか = [`physics-verification-cycle.md`](physics-verification-cycle.md) / 委譲と返送 spine = [`multi-session-coordination.md`](../../claude-config/conventions/multi-session-coordination.md) / 隔離 = [`cold-eyes-isolation.md`](cold-eyes-isolation.md) / 無人 routine の一般則 = [`scheduled-tasks.md`](../../claude-config/conventions/scheduled-tasks.md) + [`multi-machine-state.md`](../../claude-config/conventions/multi-machine-state.md) / worker の死に方 = [`output-cap-death-loop.md`](../../claude-config/conventions/output-cap-death-loop.md) / 道具 = `scripts/verification-campaign-report.py` (`--index` / `--surface` / `--run` / `--carryover`)、 `scripts/ledger-commit-cadence-gate.py`、 `scripts/make-review-sandbox.py`

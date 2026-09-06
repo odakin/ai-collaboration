@@ -30,6 +30,9 @@ Legacy foils without the marker are classified by phrase (`expected for a foil` 
 `FAIL as expected` / `EXPECTED FAIL` ⇒ teeth) and reported as `legacy`.  `--run` executes
 check_*.py (expect exit 0) and foil_*.py under this contract with a per-script timeout and
 records the result in the AUTO block, so the receiver never hand-rolls the loop again.
+Unknown nonzero exits are failures, not evidence of rejection. A standard marker must
+start a line, have exit 0, and not coexist with FOIL-BROKEN. --run returns nonzero on
+any failed/unknown result (even with --write); an empty inventory is not a coverage check.
 
 State machine (derived, never recorded — conventions/verification-cycle-ops.md):
   spec      spec.md only, no ledger items           → worker not started
@@ -37,7 +40,9 @@ State machine (derived, never recorded — conventions/verification-cycle-ops.md
   done      results.md exists but receipt incomplete (refuted without novel_to_requester,
             or no AUTO block)                        → 未受領 (requester action)
   received  receipt complete, but no retro lists it   → retro 未記入
-  retro'd   listed in campaigns/retros/*.md front matter `campaigns:`
+  retro'd   listed in campaigns/retros/*.md front matter `campaigns:` but not in any `hoist:` → 未昇格
+  hoisted   retro front matter `hoist: {<campaign>: "<date> <where>"}` records where scripts were kept and
+            what was promoted (layer-1 kernels / tools / refs notes / SESSION) → terminal
 `improvements.yaml` (repo root) is the fate ledger of retro proposals: status deferred items
 with review_by ≤ today (or none) are surfaced; implemented items are inert.
 
@@ -240,25 +245,29 @@ def run_checks(camp: Path, timeout: int = 600) -> dict:
         except subprocess.TimeoutExpired:
             out["foils"].append((f.name, f"TIMEOUT({timeout}s)", "-")); continue
         text = (pr.stdout or "") + (pr.stderr or "")
-        if "FOIL-TEETH" in text:
-            verdict, conv = ("teeth" if pr.returncode == 0 else "teeth(marker, but exit≠0)"), "standard"
-        elif "FOIL-BROKEN" in text:
+        if re.search(r"^FOIL-BROKEN\b", text, re.MULTILINE):
             verdict, conv = "BROKEN", "standard"
+        elif re.search(r"^FOIL-TEETH\b", text, re.MULTILINE):
+            verdict, conv = ("teeth" if pr.returncode == 0 else f"FAIL(marker with exit {pr.returncode})"), "standard"
         elif any(k in text for k in FOIL_LEGACY_TEETH):
             verdict, conv = "teeth", "legacy"
         else:
-            verdict, conv = ("teeth?" if pr.returncode != 0 else "BROKEN?"), "legacy-exit-only"
+            verdict, conv = f"UNKNOWN(exit {pr.returncode})", "unrecognized"
         out["foils"].append((f.name, verdict, conv))
     return out
+
+
+def run_failed(r: dict) -> bool:
+    return any(v != "PASS" for _, v in r["checks"]) or any(v != "teeth" for _, v, _ in r["foils"])
 
 
 def render_run(r: dict) -> str:
     if not r["checks"] and not r["foils"]:
         return ""
     c_pass = sum(1 for _, v in r["checks"] if v == "PASS")
-    f_teeth = sum(1 for _, v, _ in r["foils"] if v.startswith("teeth"))
+    f_teeth = sum(1 for _, v, _ in r["foils"] if v == "teeth")
     convs = sorted({c for _, _, c in r["foils"]})
-    bad = [f"{n}:{v}" for n, v in r["checks"] if v != "PASS"] + [f"{n}:{v}" for n, v, _ in r["foils"] if not v.startswith("teeth")]
+    bad = [f"{n}:{v}" for n, v in r["checks"] if v != "PASS"] + [f"{n}:{v}" for n, v, _ in r["foils"] if v != "teeth"]
     return (f"| **実走 (--run)** | checks {c_pass}/{len(r['checks'])} PASS, foils {f_teeth}/{len(r['foils'])} teeth "
             f"(contract: {', '.join(convs) or '—'})" + (f" ⚠️ {'; '.join(bad)}" if bad else "") + " |")
 
@@ -358,6 +367,7 @@ def campaign_state(camp: Path, repo: Path, retros: list[dict]) -> dict:
     has_auto = AUTO_BEGIN in text or LEGACY_BEGIN in text
     unrated = [x["id"] for x in ledger if x.get("status") == "refuted" and "novel_to_requester" not in x]
     in_retro = [r["_file"] for r in retros if camp.name in (r.get("campaigns") or [])]
+    hoist = next((h.get(camp.name) for r in retros for h in [r.get("hoist") or {}] if isinstance(h, dict) and h.get(camp.name)), None)
     if not ledger and not has_results:
         state = "spec"
     elif not has_results:
@@ -366,15 +376,17 @@ def campaign_state(camp: Path, repo: Path, retros: list[dict]) -> dict:
         state = "done"
     elif not in_retro:
         state = "received"
-    else:
+    elif not hoist:
         state = "retro'd"
+    else:
+        state = "hoisted"
     st = stats(camp, repo) if ledger else {"items": 0, "status": {}, "tier": {}, "novel_to_requester": [], "second_eye_open": [], "checks": 0, "foils": 0, "git": git_timeline(camp, repo)}
     contamination = 0
     for r in retros:
         c = r.get("contamination") or {}
         if isinstance(c, dict):
             contamination += int(c.get(camp.name, 0) or 0)
-    return {"campaign": camp.name, "state": state, "unrated": unrated, "retro": in_retro, "contamination": contamination, **{k: st[k] for k in ("items", "status", "tier", "novel_to_requester", "second_eye_open", "checks", "foils", "git")}}
+    return {"campaign": camp.name, "state": state, "unrated": unrated, "retro": in_retro, "hoist": hoist, "contamination": contamination, **{k: st[k] for k in ("items", "status", "tier", "novel_to_requester", "second_eye_open", "checks", "foils", "git")}}
 
 
 def index(root: Path) -> dict:
@@ -387,7 +399,7 @@ def index(root: Path) -> dict:
 
 def render_index(ix: dict) -> str:
     L = ["# campaigns/INDEX.md — 導出 state と efficacy dataset (verification-campaign-report.py --index --write が再生成、手編集しない)", "",
-         f"生成 {_dt.date.today()}。state は file から導出 (spec / running / done=未受領 / received=retro 未記入 / retro'd)。数字は ledger + git 由来。", "",
+         f"生成 {_dt.date.today()}。state は file から導出 (spec / running / done=未受領 / received=retro 未記入 / retro'd=未昇格 / hoisted)。数字は ledger + git 由来。", "",
          "| campaign | state | items | verified / refuted / unverified | 👁 | novel (受領側) | checks / foils | 所要 (分) | items/commit max | 汚染 hit | retro |",
          "|---|---|---|---|---|---|---|---|---|---|---|"]
     tot = {"items": 0, "novel": 0, "refuted": 0}
@@ -410,6 +422,8 @@ def surface(ix: dict, today: "_dt.date | None" = None) -> list[str]:
     for r in ix["campaigns"]:
         if r["state"] == "done":
             out.append(f"📥 未受領: `{r['campaign']}` に results.md あり、受領未完 (refuted の novel_to_requester 未記入: {', '.join(r['unrated']) or '—'} / AUTO block) → 汚染 grep → 独立再実装 → ledger 記入 → --run --write → marker consume")
+        elif r["state"] == "retro'd":
+            out.append(f"📤 未昇格: `{r['campaign']}` は retro 済だが hoist 未記録 → 子 session の script は捨てずに campaign dir (sandbox は collect で scratch/ も) / 再利用可能な関数は層1 library / kernel は層1 規約 / 判断は DESIGN / 文献 note は refs / SESSION、を済ませて retro front matter `hoist: {{<campaign>: \"<date> <where>\"}}` に記録")
         elif r["state"] == "received":
             out.append(f"📝 retro 未記入: `{r['campaign']}` は受領済だが campaigns/retros/*.md の front matter `campaigns:` に無い → TEMPLATE-retro.md から書く (提案は gate / rule+trigger / rejected の 3 択 + improvements.yaml)")
         elif r["state"] == "spec":
@@ -519,6 +533,24 @@ def selftest() -> int:
         assert f["foil_std.py"] == ("teeth", "standard") and f["foil_broken.py"] == ("BROKEN", "standard") and f["foil_legacy.py"] == ("teeth", "legacy"), f
         row = render_run(r)
         assert "checks 1/2 PASS" in row and "foils 2/3 teeth" in row and "foil_broken.py:BROKEN" in row, row
+        (camp / "checks" / "foil_crash.py").write_text("raise RuntimeError('unexpected crash')\n", encoding="utf-8")
+        (camp / "checks" / "foil_marker_crash.py").write_text("print('FOIL-TEETH: rejected'); raise RuntimeError('later crash')\n", encoding="utf-8")
+        (camp / "checks" / "foil_both.py").write_text("print('FOIL-TEETH: rejected'); print('FOIL-BROKEN')\n", encoding="utf-8")
+        (camp / "checks" / "foil_embedded.py").write_text("print('example: FOIL-TEETH')\n", encoding="utf-8")
+        r = run_checks(camp, timeout=30)
+        f = {n: v for n, v, _ in r["foils"]}
+        assert f["foil_crash.py"] == "UNKNOWN(exit 1)"
+        assert f["foil_marker_crash.py"] == "FAIL(marker with exit 1)"
+        assert f["foil_both.py"] == "BROKEN" and f["foil_embedded.py"] == "UNKNOWN(exit 0)"
+        assert run_failed(r) and "foils 2/7 teeth" in render_run(r)
+        (camp / "ledger.yaml").write_text("[]\n", encoding="utf-8")
+        cli = subprocess.run([sys.executable, __file__, str(camp), "--run", "--write"], capture_output=True, text=True)
+        assert cli.returncode == 1 and "UNKNOWN(exit 1)" in (camp / "results.md").read_text(), cli.stderr
+        for path in (camp / "checks").glob("*.py"):
+            if path.name not in {"check_ok.py", "foil_std.py", "foil_legacy.py"}:
+                path.unlink()
+        cli = subprocess.run([sys.executable, __file__, str(camp), "--run"], capture_output=True, text=True)
+        assert cli.returncode == 0, cli.stderr
     with tempfile.TemporaryDirectory() as td:
         root = Path(td); (root / "campaigns" / "retros").mkdir(parents=True)
         def mk(name, ledger=None, results=None):
@@ -533,7 +565,8 @@ def selftest() -> int:
         mk("c-done", [{"id": "X", "status": "refuted", "tier": "🔧"}], "# r\n" + AUTO_BEGIN + "\nx\n" + AUTO_END + "\n")
         mk("d-received", [{"id": "X", "status": "refuted", "tier": "🔧", "novel_to_requester": True}], "# r\n" + AUTO_BEGIN + "\nx\n" + AUTO_END + "\n")
         mk("e-retrod", [{"id": "X", "status": "verified", "tier": "👁"}], "# r\n" + AUTO_BEGIN + "\nx\n" + AUTO_END + "\n")
-        (root / "campaigns" / "retros" / "r1.md").write_text("---\nround: 1\ncampaigns: [e-retrod]\ncontamination: {e-retrod: 2}\n---\n# retro\n", encoding="utf-8")
+        mk("f-hoisted", [{"id": "X", "status": "verified", "tier": "🔧"}], "# r\n" + AUTO_BEGIN + "\nx\n" + AUTO_END + "\n")
+        (root / "campaigns" / "retros" / "r1.md").write_text("---\nround: 1\ncampaigns: [e-retrod, f-hoisted]\ncontamination: {e-retrod: 2}\nhoist: {f-hoisted: '2026-09-06 layer1 §x + scripts kept'}\n---\n# retro\n", encoding="utf-8")
         (root / "improvements.yaml").write_text(yaml.safe_dump([
             {"id": "I-1", "status": "implemented", "origin": "r1"},
             {"id": "I-2", "status": "deferred", "origin": "r1", "trigger": "n>=2", "review_by": "2020-01-01"},
@@ -541,15 +574,16 @@ def selftest() -> int:
         ]), encoding="utf-8")
         ix = index(root)
         states = {r["campaign"]: r["state"] for r in ix["campaigns"]}
-        assert states == {"a-spec": "spec", "b-running": "running", "c-done": "done", "d-received": "received", "e-retrod": "retro'd"}, states
+        assert states == {"a-spec": "spec", "b-running": "running", "c-done": "done", "d-received": "received", "e-retrod": "retro'd", "f-hoisted": "hoisted"}, states
         assert [r for r in ix["campaigns"] if r["campaign"] == "e-retrod"][0]["contamination"] == 2
         lines = surface(ix, today=_dt.date(2026, 9, 6))
         joined = "\n".join(lines)
         assert "未受領: `c-done`" in joined and "retro 未記入: `d-received`" in joined, joined
+        assert "未昇格: `e-retrod`" in joined and "f-hoisted" not in joined, joined
         assert "I-2" in joined and "見直し期日" in joined and "I-3" in joined and "時計なし" in joined and "I-1" not in joined, joined
         assert "a-spec" not in joined  # no git history in tempdir → no age → silent
         txt = render_index(ix); assert "| `c-done` | **done** |" in txt and "I-2" in txt
-    print("selftest OK (19 checks)")
+    print("selftest OK (21 checks)")
     return 0
 
 
@@ -598,7 +632,7 @@ def main(argv: list[str]) -> int:
     if write:
         write_block(camp, block)
         print(f"→ {camp / 'results.md'} updated")
-    return 0
+    return int("run" in st and run_failed(st["run"]))
 
 
 if __name__ == "__main__":
