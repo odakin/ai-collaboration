@@ -63,6 +63,34 @@ Continuous-outcome addendum (standard countably additive POVMs on the Borel spac
   and -V keep a common lower bound A(V)/2 — the mechanism visibly fails there).  Same caveat: these
   are finite anchors for the *mechanism* of the continuous proof, not a proof of it.
 
+  Third, independent route (sealed-sandbox blind second eye, next day) that needs neither compactness,
+  uniform non-parallelism, nor trace class, and weakens continuity to measurability:  for a rank-one
+  family A(U) = ∫_U |φ_z><φ_z| μ(dz) (A(X) = 1) with pairwise non-parallel φ_z, (i) a self-joint B is
+  canonical iff B(Δ^c) = 0; (ii) domination lemma — an operator measure 0 <= C <= A has
+  C = ∫ g |φ_z><φ_z| dμ with a Borel g: X -> [0,1] (scalar Radon–Nikodym densities on a countable dense
+  (Q+iQ)-subspace extend a.e. to a bounded positive form Q with Q(ψ,ψ) <= |<φ_z|ψ>|², hence Q ∝ |φ_z><φ_z|
+  by Cauchy–Schwarz); (iii) with a faithful state ρ and τ := tr(ρ B(·)) (B << τ), applying (ii) to
+  U -> B(U×V) and to V -> B(U×V) gives two expressions for dν_{ψχ}/dτ, namely <ψ|φ_z><φ_z|χ>/r(z) and
+  <ψ|φ_w><φ_w|χ>/r(w)  (r = <φ|ρ|φ> > 0; rectangles are a π-system, μ σ-finite), so
+  |φ_z><φ_z|/r(z) = |φ_w><φ_w|/r(w) τ-a.e. and non-parallelism forces z = w: τ(Δ^c) = 0, B(Δ^c) = 0.
+  Hypotheses actually used: measurability of z -> <φ_z|ψ>, second countability of X
+  (Borel(X²) = Borel(X)⊗Borel(X), σ-finite μ), separable H (faithful state, countable dense set), pairwise
+  non-parallelism only (a violating pair set whose first projection is μ-null is harmless; a positive-measure
+  violation — two copies φ_{z+2} = φ_z — admits the swap joint ½(B_c + (id×σ)_*B_c)).  Density of rank >= 2
+  breaks it: A(U) = |U|·1 on C² has the non-canonical joint B(U×V) = |U∩V| |0><0| + |U||V| |1><1|
+  (`rank_two_density_noncanonical_joint`).  The purely atomic case is the finite rank-one POVM, where
+  "JM(A,A) is a singleton" has an exact finite witness (pairwise trivial range intersections,
+  `supports_intersect_trivially`) and a solver-free CONSISTENCY anchor (`dykstra_self_joint`: alternating
+  projections land on the canonical joint from any start iff the feasible set is that one point — a
+  heuristic, declared as such; the foil `split_rank_one_effect` / `parallel_pair_joint` makes it land
+  elsewhere).  Verbatim transfer of the cell-partition route to a general separable metric X has two gaps —
+  "bounded ⇒ μ-finite" and uniform bounds on bounded sets both need a proper (locally compact) space —
+  repaired by choosing the covering rectangles through continuity of the overlap and summing countably many
+  cells (normality of the trace); the theorem itself holds without them.  Closed-form Stokes twin of the
+  ∂̄-witness on a disc split into halves (bump (1-|z|²)³): ψ_n(left) = i^n B((n+1)/2, 4) / (2π √n!) for even
+  n, 0 for odd n (`husimi_disc_dbar_witness_exact`; quadrature twin `husimi_disc_dbar_witness`, whose
+  compressed inequality ||1_U k||² A_N(U) - |ψ><ψ| >= 0 is exact for the discrete measure).
+
 Infinite-dimensional addendum (second-eye campaign on the finite-outcome criterion, 2026-09):
   * Exact criterion (dimension-free, proof needs only Cauchy–Schwarz and the easy half of Douglas'
     lemma):  a nonzero c with 0 <= c <= a, c <= b exists  <=>  ran(a^{1/2}) ∩ ran(b^{1/2}) != {0}.
@@ -806,6 +834,174 @@ def husimi_dbar_witness(N, right=True, z0=0.0):
     return psi, f2
 
 
+# ----------------------------------------------------------------------------
+# Finite anchors for "JM(A,A) is a singleton" and its foils (rank-one families; docstring "Third route")
+# ----------------------------------------------------------------------------
+def canonical_joint(A):
+    """Canonical self-joint B_kl = δ_kl a_k as a block array of shape (n, n, d, d)."""
+    n, d = len(A), A[0].shape[0]
+    B = np.zeros((n, n, d, d), dtype=complex)
+    for k in range(n):
+        B[k, k] = A[k]
+    return B
+
+
+def blocks_to_lists(B):
+    """Block array (n, n, d, d) -> list-of-lists form used by `check_joint` / `witness_joint_from_common_lower_bound`."""
+    n = B.shape[0]
+    return [[B[i, j] for j in range(n)] for i in range(n)]
+
+
+def joint_marginal_projection(B, A):
+    """Frobenius projection of a block array B onto the affine space {Σ_l B_kl = a_k, Σ_k B_kl = a_l}:
+    closed form B + u_k + v_l (the correction lives in the span of row/column-constant block arrays, which is
+    the normal space of the constraints; both marginal totals equal Σ_k a_k, so the system is consistent)."""
+    n = B.shape[0]
+    target = np.stack(A)
+    row, col = B.sum(axis=1), B.sum(axis=0)
+    st = (target.sum(axis=0) - B.sum(axis=(0, 1))) / (2 * n)
+    u = (target - row) / n - st[None] / n
+    v = (target - col) / n - st[None] / n
+    return B + u[:, None] + v[None, :]
+
+
+def psd_projection_blocks(B):
+    """Blockwise Frobenius projection onto the PSD cone (Hermitian part, negative eigenvalues clipped)."""
+    out = np.empty_like(B, dtype=complex)
+    for k in range(B.shape[0]):
+        for l in range(B.shape[1]):
+            H = (B[k, l] + B[k, l].conj().T) / 2
+            w, V = np.linalg.eigh(H)
+            out[k, l] = (V * np.clip(w, 0, None)) @ V.conj().T
+    return out
+
+
+def dykstra_self_joint(A, start, iters=20000, tol=1e-9):
+    """Dykstra alternating projections onto JM(A,A) = {marginals = A} ∩ {all blocks PSD}, from `start`
+    (block array (n, n, d, d)).  Boyle–Dykstra: converges to the Frobenius projection of `start` onto the
+    intersection, so if JM(A,A) is a singleton every start ends at the canonical joint.  Solver-free
+    CONSISTENCY anchor for "A is intersubjective" — a heuristic (finite iterations, no certificate), not a
+    proof; the proof-grade finite witness for rank-one POVMs is pairwise `supports_intersect_trivially`
+    (a block B_kl is a common lower bound of a_k and a_l).  Foil: `split_rank_one_effect` (two parallel
+    copies) turns JM(A,A) into a segment and a random start lands off the canonical point
+    (`parallel_pair_joint` is one explicit non-canonical joint there).
+    Returns (B, info), info = dict(iters, marginal_err, min_eig, offdiag_mass, dist_to_canonical)."""
+    B = np.asarray(start, dtype=complex).copy()
+    p = np.zeros_like(B)
+    q = np.zeros_like(B)
+    it = 0
+    for it in range(1, iters + 1):
+        Y = joint_marginal_projection(B + p, A)
+        p = B + p - Y
+        Bn = psd_projection_blocks(Y + q)
+        q = Y + q - Bn
+        done = np.linalg.norm(Bn - B) < tol
+        B = Bn
+        if done:
+            break
+    n = B.shape[0]
+    target = np.stack(A)
+    info = dict(
+        iters=it,
+        marginal_err=float(max(np.linalg.norm(B.sum(axis=1) - target), np.linalg.norm(B.sum(axis=0) - target))),
+        min_eig=float(min(eigmin(B[k, l]) for k in range(n) for l in range(n))),
+        offdiag_mass=float(sum(np.linalg.norm(B[k, l]) for k in range(n) for l in range(n) if k != l)),
+        dist_to_canonical=float(np.linalg.norm(B - canonical_joint(A))),
+    )
+    return B, info
+
+
+def split_rank_one_effect(A, k, fraction=0.5):
+    """Foil for the singleton claim: replace a_k by two parallel copies fraction·a_k and (1-fraction)·a_k
+    (still a measurement).  Pairwise non-parallelism fails at exactly one pair and JM(A,A) acquires a
+    non-canonical joint (`parallel_pair_joint`)."""
+    A = list(A)
+    a = A[k]
+    return A[:k] + [fraction * a, (1 - fraction) * a] + A[k + 1:]
+
+
+def parallel_pair_joint(A, k1, k2):
+    """Explicit non-canonical self-joint when a_{k1} = w1 P and a_{k2} = w2 P are proportional (P >= 0 fixed):
+    randomise the label inside the pair — B_{k1k1} = w1² P/(w1+w2), B_{k1k2} = B_{k2k1} = w1 w2 P/(w1+w2),
+    B_{k2k2} = w2² P/(w1+w2), every other block canonical.  Row k1 sums to w1 P = a_{k1}, so it is a joint;
+    it is not canonical because B_{k1k2} != 0.  Returns the block array; raises if the pair is not parallel."""
+    A = list(A)
+    w1, w2 = float(np.trace(A[k1]).real), float(np.trace(A[k2]).real)
+    if w1 <= 0 or w2 <= 0:
+        raise ValueError("effects must be nonzero")
+    P1, P2 = A[k1] / w1, A[k2] / w2
+    if np.linalg.norm(P1 - P2) > 1e-9 * max(1.0, np.linalg.norm(P1)):
+        raise ValueError("effects a_k1, a_k2 are not parallel")
+    B = canonical_joint(A)
+    B[k1, k1] = w1 * w1 / (w1 + w2) * P1
+    B[k2, k2] = w2 * w2 / (w1 + w2) * P1
+    B[k1, k2] = w1 * w2 / (w1 + w2) * P1
+    B[k2, k1] = w1 * w2 / (w1 + w2) * P1
+    return B
+
+
+def rank_two_density_noncanonical_joint(n=8):
+    """Discretised counterexample to the rank-one generalisation once the density has rank 2:
+    X = [0,1] in n cells, μ = Lebesgue, density 1 on C² (a_k = 1/n), and
+    B_kl = δ_kl |0><0|/n + |1><1|/n²  (perfectly correlated on |0>, independent on |1>) is a joint
+    measurement of A with itself that is not canonical.  Returns (A, B) as (list, block array)."""
+    P0, P1 = np.diag([1.0, 0.0]).astype(complex), np.diag([0.0, 1.0]).astype(complex)
+    A = [np.eye(2, dtype=complex) / n for _ in range(n)]
+    B = np.zeros((n, n, 2, 2), dtype=complex)
+    for k in range(n):
+        for l in range(n):
+            B[k, l] = (P0 / n if k == l else 0) + P1 / n ** 2
+    return A, B
+
+
+def husimi_disc_dbar_witness(N, n_r=300, n_t=600, bump_center=0.0, bump_radius=1.0):
+    """∂̄-witness for the unit disc D split into halves U_L = {Re z < 0} ∩ D and U_R = D \\ U_L (third cell =
+    exterior).  Bump m(z) = (ρ² - |z-c|²)³ on |z-c| < ρ (C² at the rim, enough for Stokes),
+    k = e^{|z|²/2} ∂̄m, so k <n|z> = ∂̄m · z^n/√n! carries no Gaussian.  Polar midpoint quadrature on D
+    (n_t divisible by 4 puts the interface Re z = 0 on cell edges).  Returns dict(psi_left, psi_right,
+    psi_full, k2_left, k2_right, A_left, A_right):  psi_side = J*E(U_side)k in the Fock basis (n <= N),
+    psi_full = J*k (≈ 0 by Stokes), k2_side = ||1_{U_side} k||², A_side = P_N A(U_side) P_N by the SAME
+    quadrature — so k2_side · A_side - |psi_side><psi_side| >= 0 holds exactly for the discrete measure
+    (Cauchy–Schwarz), i.e. |ψ><ψ|/||1_U k||² is a common lower bound of A(U_L), A(U_R).
+    Default bump (c = 0, ρ = 1) straddles the interface and ψ != 0 (closed form `husimi_disc_dbar_witness_exact`);
+    foil: a bump inside one half (c = -0.5, ρ = 0.2) gives psi_left = psi_full = 0."""
+    r = (np.arange(n_r) + 0.5) / n_r
+    t = (np.arange(n_t) + 0.5) * 2 * math.pi / n_t
+    R, T = np.meshgrid(r, t, indexing="ij")
+    Z = R * np.exp(1j * T)
+    w = R * (1.0 / n_r) * (2 * math.pi / n_t)
+    s = bump_radius ** 2 - np.abs(Z - bump_center) ** 2
+    dm = np.where(s > 0, -3 * s ** 2 * (Z - bump_center), 0.0)      # ∂̄ (ρ² - |z-c|²)³ = -3 (ρ² - |z-c|²)² (z - c)
+    left = Z.real < 0
+    fock = np.array([math.sqrt(math.factorial(n)) for n in range(N + 1)])
+    zn = np.stack([Z ** n for n in range(N + 1)])
+    base = dm * w / math.pi
+    out = {}
+    for name, mask in (("left", left), ("right", ~left), ("full", np.ones_like(left))):
+        out["psi_" + name] = np.array([(base * zn[n])[mask].sum() for n in range(N + 1)]) / fock
+    k = np.exp(np.abs(Z) ** 2 / 2) * dm
+    g = np.exp(-np.abs(Z) ** 2) * w / math.pi
+    for name, mask in (("left", left), ("right", ~left)):
+        out["k2_" + name] = float((np.abs(k) ** 2 * w / math.pi)[mask].sum())
+        M = np.array([[(g * zn[a] * np.conj(zn[b]))[mask].sum() for b in range(N + 1)] for a in range(N + 1)])
+        M = M / np.outer(fock, fock)
+        out["A_" + name] = (M + M.conj().T) / 2
+    return out
+
+
+def husimi_disc_dbar_witness_exact(N):
+    """Closed form of `husimi_disc_dbar_witness(N)['psi_left']` for the default bump (c = 0, ρ = 1) by Stokes:
+    ∫_{U_L} ∂̄m · z^n d²z = (1/2i) ∮_{∂U_L} m z^n dz and only the interface Γ = i[-1, 1] (traversed upward for
+    the counter-clockwise boundary of the left half) contributes, so
+    ψ_n = (1/(2πi √n!)) ∫_{-1}^{1} (1-y²)³ (iy)^n i dy = i^n B((n+1)/2, 4) / (2π √n!)  for even n, 0 for odd n
+    (B = Euler beta; ψ_0 = 96/(210π) ≈ 0.1455).  The right half gives -ψ (opposite orientation)."""
+    psi = np.zeros(N + 1, dtype=complex)
+    for n in range(0, N + 1, 2):
+        beta = math.gamma((n + 1) / 2) * math.gamma(4) / math.gamma((n + 1) / 2 + 4)
+        psi[n] = (1j) ** n * beta / (2 * math.pi * math.sqrt(math.factorial(n)))
+    return psi
+
+
 class Polytope:
     def __init__(self, V):
         self.V = np.asarray(V, dtype=float)
@@ -1052,6 +1248,42 @@ def _selftest():
     Xs, Ys = symmetrised_coherent_cell(0.5, 0.4, 9), symmetrised_coherent_cell(-0.5, 0.4, 9)
     cs = 0.5 * coherent_cell_matrix(0.5, 0.4, 9)      # foil model: A(V)/2 is a common lower bound of A'(V), A'(-V)
     okk &= eigmin(Xs - cs) > -1e-12 and eigmin(Ys - cs) > -1e-12 and abs(np.trace(cs).real / np.trace(Xs).real - 0.5) < 1e-12
+    # (v) rank-one family anchors (docstring "Third route"): 4 non-parallel qubit directions — exact pairwise
+    # range witness + Dykstra lands on the canonical joint; foil = split copies (a segment of joints appears).
+    A4 = [0.5 * np.outer(v, v.conj()) for v in
+          (np.array([math.cos(t), math.sin(t)], complex) for t in np.arange(4) * math.pi / 4)]
+    okk &= report("rank-one 4-direction POVM: measurement + pairwise trivial range intersections",
+                  is_measurement(A4) and all(supports_intersect_trivially(A4[i], A4[j]) for i in range(4) for j in range(i + 1, 4)))
+    rng3 = np.random.default_rng(3)
+    start = psd_projection_blocks(rng3.normal(size=(4, 4, 2, 2)) + 1j * rng3.normal(size=(4, 4, 2, 2))) / 4
+    _, info = dykstra_self_joint(A4, start, iters=10000, tol=1e-11)
+    okk &= report("Dykstra from a random start lands on the canonical joint (singleton JM(A,A), heuristic anchor)",
+                  info["marginal_err"] < 1e-4 and info["min_eig"] > -1e-9 and info["offdiag_mass"] < 2e-3 and info["dist_to_canonical"] < 2e-3,
+                  f"offdiag {info['offdiag_mass']:.1e}, dist {info['dist_to_canonical']:.1e}, iters {info['iters']}")
+    A5 = split_rank_one_effect(A4, 0, 0.5)
+    Bw = parallel_pair_joint(A5, 0, 1)
+    okk &= report("foil: parallel copies -> explicit non-canonical joint passes the definition",
+                  is_measurement(A5) and not supports_intersect_trivially(A5[0], A5[1])
+                  and check_joint(A5, blocks_to_lists(Bw)) and np.linalg.norm(Bw - canonical_joint(A5)) > 0.1)
+    start5 = psd_projection_blocks(rng3.normal(size=(5, 5, 2, 2)) + 1j * rng3.normal(size=(5, 5, 2, 2))) / 5
+    _, info5 = dykstra_self_joint(A5, start5, iters=10000, tol=1e-11)
+    okk &= report("foil: Dykstra lands off the canonical point when a parallel pair exists",
+                  info5["marginal_err"] < 1e-3 and info5["offdiag_mass"] > 1e-2, f"offdiag {info5['offdiag_mass']:.2e}")
+    A2, B2 = rank_two_density_noncanonical_joint(6)
+    okk &= report("rank-2 density: explicit non-canonical joint of the discretised coin-like POVM",
+                  is_measurement(A2) and check_joint(A2, blocks_to_lists(B2)) and np.linalg.norm(B2 - canonical_joint(A2)) > 0.1)
+    # (vi) ∂̄-witness on the split disc: quadrature vs closed-form Stokes, J*k = 0, exact compressed inequality; foil.
+    wd = husimi_disc_dbar_witness(6, n_r=150, n_t=300)
+    ex = husimi_disc_dbar_witness_exact(6)
+    okk &= report("split-disc dbar witness: J*k = 0, psi_left = -psi_right, quadrature matches Stokes closed form",
+                  np.linalg.norm(wd["psi_full"]) < 1e-9 and np.allclose(wd["psi_left"], -wd["psi_right"], atol=1e-9)
+                  and np.linalg.norm(wd["psi_left"] - ex) < 1e-4 and abs(ex[0] - 96 / (210 * math.pi)) < 1e-12,
+                  f"|psi_0| = {abs(wd['psi_left'][0]):.5f}, max |quad - exact| = {np.abs(wd['psi_left'] - ex).max():.1e}")
+    okk &= report("split-disc dbar witness: ||1_U k||^2 A_N(U) - |psi><psi| >= 0 on both halves",
+                  all(eigmin(wd["k2_" + s] * wd["A_" + s] - np.outer(wd["psi_" + s], wd["psi_" + s].conj())) > -1e-10
+                      for s in ("left", "right")))
+    okk &= report("foil: bump inside one half -> no witness (psi_left = 0)",
+                  np.linalg.norm(husimi_disc_dbar_witness(4, n_r=100, n_t=200, bump_center=-0.5, bump_radius=0.2)["psi_left"]) < 1e-9)
     print("gpt_measurements selftest:", "PASS" if okk else "FAIL")
     return 0 if okk else 1
 
