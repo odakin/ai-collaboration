@@ -1,0 +1,57 @@
+name: Dependabot auto-merge
+
+# Auto-merges Dependabot PRs that are low risk:
+#   - All github-actions ecosystem bumps (workflow-only changes)
+#   - Patch + minor semver updates in other ecosystems
+# Major-version updates are NOT auto-merged — they remain open for review.
+#
+# NOTE: fetch-metadata outputs package-ecosystem with UNDERSCORE
+# ('github_actions', 'npm_and_yarn', 'pip'), not the hyphenated name used in
+# dependabot.yml ('github-actions'). The original hyphen comparison never
+# matched = auto-merge never fired (found 2026-07-17, 16 days x 25 PRs stuck).
+#
+# Uses pull_request_target so the workflow runs from the base branch
+# (= no checkout of untrusted PR head; safe). With `--auto`, merge is
+# gated on any required status checks.
+#
+# If `allow_auto_merge` is not enabled on the repo (e.g. Free plan
+# private repo), the merge step is skipped with a notice rather than
+# failing — the PR stays open for manual merge.
+
+on: pull_request_target
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check auto-merge capability
+        id: capability
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          available=$(gh api "repos/${{ github.repository }}" --jq '.allow_auto_merge')
+          echo "available=$available" >> "$GITHUB_OUTPUT"
+          if [ "$available" != "true" ]; then
+            echo "::notice::auto-merge unavailable on this repo (likely Free plan + private). PR will remain open for manual merge."
+          fi
+
+      - name: Get Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@21025c705c08248db411dc16f3619e6b5f9ea21a  # v2
+
+      - name: Auto-merge safe updates
+        if: |
+          steps.capability.outputs.available == 'true' && (
+            steps.meta.outputs.update-type == 'version-update:semver-patch' ||
+            steps.meta.outputs.update-type == 'version-update:semver-minor' ||
+            steps.meta.outputs.package-ecosystem == 'github_actions'
+          )
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr merge --auto --squash --delete-branch "$PR_URL"
