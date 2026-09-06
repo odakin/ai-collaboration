@@ -32,7 +32,7 @@ summary: physics-verification-cycle.md (何を検査するか) の隣の「ど�
 |---|---|---|
 | `spec` | spec.md のみ、 ledger に item なし、 results なし | 起票側: worker を spawn / queue に載せる。 3 日超なら「走っていない」 を surface |
 | `running` | ledger に item、 results.md なし | worker (無人でも人間側でも) |
-| `done` (= 未受領) | results.md あり、 かつ refuted に `novel_to_requester` 未記入 or AUTO block なし | **受領側**: 汚染 grep → 主要 finding の独立再実装 → `novel_to_requester` / `second_eye` 記入 → `--run --write` → marker consume |
+| `done` (= 未受領) | results.md あり、 かつ refuted に `novel_to_requester` 未記入 or AUTO block なし | **受領側**: 汚染 grep → 主要 finding の独立再実装 → `novel_to_requester` / `second_eye` 記入 → `--run --write` → marker consume ([board 経路の場合](#board-receipt-boundary)) |
 | `received` (= retro 未記入) | 受領完了、 だが `campaigns/retros/*.md` の front matter `campaigns:` に無い | **受領側**: retro (§3) |
 | `retro'd` | retro に載った | 終端。 改善は improvements.yaml が引き継ぐ |
 
@@ -90,6 +90,19 @@ owner の従来方針は「物理は人間 in-the-loop、 無人 run は事務�
 - efficacy proxy は主観の事後判定。 対照実験 (手法なしで同じ論文を読む) は cost が高く未実施
 - 無人層の安全は「対外 action ゼロ・SoT 書込みゼロ」 の設計に依存。 別ベンダー worker は spec より自分の既定に従った実績があるので、 無人層の worker は同ベンダー (spec を読む) に限る
 - state 導出は file の**存在**に依存する。 worker が results.md を書かずに死ねば `running` のまま — その検出は marker 経済 (`--status partial`) と heartbeat の側
+
+## <a id="board-receipt-boundary"></a>Session 宛て board との接続
+
+board の主体・遷移・引継ぎは
+[`multi-session-coordination.md §13`](../../claude-config/conventions/multi-session-coordination.md#git-immutable-event-board)
+が正本。本書の campaign state は研究上の受領・retro の進み具合を表し、board は担当 session と
+次の行動を表す。board の accept だけで campaign の独立検証・人間 gate が済んだことにはしない。
+
+既存 campaign の marker 経路はそのまま使う。新たに board-native な依頼を選ぶ場合は、spec に
+受領経路を明記し、worker は成果物の所在を submit、指定された確認 session が本書の受領検査を
+行ってから accept / revise を記録する。本書の marker 発行・consume 指示を同じ義務に重ねない
+([1 義務 1 受領経路](../../claude-config/conventions/multi-session-coordination.md#board-receipt-carrier))。
+既存の無人 tick は marker 契約のままで、board 投稿は起動や無人実行を有効化しない。
 
 ## 8. 隣接 doc への routing
 
