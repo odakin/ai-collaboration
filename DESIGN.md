@@ -11,6 +11,10 @@
 **claude-config 側**: 移した規約は **anchor id を保った stub** (旧 `<a id>` を全部列挙し「移設先はこちら」)、script は **forwarder** (同名で新 path を exec)。∴ 496 件の literal path も `#anchor` link も壊れない。呼び元は順次新 path へ。
 **限界**: 規約 corpus が 2 repo に割れる → routing cost。生成 tool (`generate-tree.py` 等) は claude-config 側にあり、本 repo の index は当面手書き (file が 7 本なので足りる)。
 
+## 状態識別の certificate の正本 (2026-09-06)
+
+状態識別の一般数式・certificate は `docs/state-discrimination.md`、実装は `scripts/state_discrimination.py` に置く (2026-09-06)。`gpt_measurements.py` の joint-measurement / solver 系に混ぜず、NumPy だけで使える小さな module とする。private caller は shim から呼び、特定の論文の行列・番号・verdict は caller に残す。実行・集計は既存 campaign reporter が正本で、別の汎用 runner は増やさない。受領後の再実行は受領 metadata を保存する。
+
 ## Phase 2 (trigger 付き、speculative 実行禁止)
 
 | 移設候補 | trigger |

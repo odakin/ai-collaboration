@@ -14,11 +14,13 @@ ai-collaboration/
 │   │                                   #   第二の目 / rubric 事前登録 / 止まる規律 / cross-vendor / campaign 運用 A-K
 │   ├── verification-cycle-ops.md       # どう回し続けるか: 6 原則 / 導出 state 機械 / 台帳 3 種 + retro / 無人層 / fresh session の手順
 │   └── cold-eyes-isolation.md          # 第二の目の隔離: 汚染経路 6 口 / 封じた sandbox / spec に書いてよいこと / 受領後の汚染 grep
+├── docs/state-discrimination.md       # 状態識別の一般数式・凸錐と座標の仮定・certificate の正本
 └── scripts/
     ├── verification-campaign-report.py # campaign の集計: --index (導出 state + efficacy dataset) / --surface / --run (foil 契約) / --carryover / --write
     ├── ledger-commit-cadence-gate.py   # pre-commit gate: 1 commit の ledger entry 上限 + worker scope (CAMPAIGN_WORKER_DIR 外を refuse)
     ├── make-review-sandbox.py          # 封じた review sandbox を 1 コマンドで切る / 受領時に collect
-    └── gpt_measurements.py             # GPT / POVM の間主観性・sharpness・極値性を定義から検査する数学 library (有限 + 無限次元 anchor)
+    ├── gpt_measurements.py             # GPT / POVM の間主観性・sharpness・極値性を定義から検査する数学 library (有限 + 無限次元 anchor)
+    └── state_discrimination.py         # NumPy のみで 2 状態識別の下界・slack・最適 POVM・qubit / cube を検査
 ```
 
 全 script は `--selftest` を持つ。各 file の 1 行説明は file 冒頭 (docstring 1 行目 / doc-meta) が正本。
@@ -47,10 +49,11 @@ layer 1 (public、全 Claude Code / Codex ユーザー向け)。**依存でき�
 ## 検査
 
 ```bash
+set -e
 for s in scripts/*.py; do python3 "$s" --selftest; done
 ```
 
-CI = `.github/workflows/checks.yml` (同じ 4 本の selftest。`secure-new-repo.sh --code` の baseline)。
+CI = `.github/workflows/checks.yml` (全 script の selftest。`secure-new-repo.sh --code` の baseline)。失敗した script の終了値を loop で失わない。
 
 ## How to Resume
 
