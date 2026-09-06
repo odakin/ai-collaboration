@@ -1,0 +1,19 @@
+# QUEUE.yaml — campaigns waiting for the unattended tick (see ../UNATTENDED-TICK.md).
+#
+# A human writes the spec (in the shape of TEMPLATE-spec.md). Only entries with `autorun: true`
+# run unattended, and only while the repo-level kill switch is ON (default OFF). The tick takes
+# the first eligible entry, expands it into campaigns/<dir>/, executes the four verify-to-learn
+# steps up to the cap, drops the return marker, and stamps `consumed: <date>` here.
+# Human gates (receipt / author contact / hoist) are never crossed by the tick
+# (layer-1 conventions/verification-cycle-ops.md §4).
+#
+# schema (one entry):
+#   dir:        campaigns/<YYYY-MM-DD>-<slug>     (may not exist yet; the tick creates it)
+#   spec:       path to the spec (campaigns/QUEUE-specs/<slug>.md)
+#   autorun:    true | false    (false = a human spawns the worker the usual way)
+#   token:      VERIFY-<SLUG>-<YYYYMMDD>-<RAND6> (null → the tick generates one)
+#   cap:        {items: N, minutes: M}
+#   vendor:     claude | codex | ...   (optional; the tick only runs same-vendor entries)
+#   spawned / received / consumed:   dates written by hand or by the tick
+#   note: |     free text
+[]

@@ -25,6 +25,16 @@ Verification-first collaboration: every claim an AI produces is either machine-a
 
 ## Quick start
 
+Start your own (private) verification repo from the shipped skeleton, then read the worked example:
+
+```bash
+python3 scripts/init-verification-repo.py ~/my-verification   # template/ → git init → pre-commit gate → selftests
+```
+
+- [`template/`](template/) — the runnable skeleton (CLAUDE.md, spec/retro templates, queue + fate ledger schema, hooks, shims, unattended-tick procedure)
+- [`examples/verification-repo/`](examples/verification-repo/) — one complete tiny campaign: spec → ledger → check + foil → results with the generated stats block → retro with hoist record
+
+
 ```bash
 set -e
 for s in scripts/*.py; do python3 "$s" --selftest; done

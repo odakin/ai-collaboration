@@ -1,0 +1,6 @@
+.DS_Store
+__pycache__/
+*.pyc
+# paper PDFs are re-fetchable from arXiv / DOI
+campaigns/*/pdfs/
+# scratch/ is tracked on purpose: a worker's scripts are never discarded (hoist station)

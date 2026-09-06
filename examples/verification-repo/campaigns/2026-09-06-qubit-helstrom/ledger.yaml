@@ -1,0 +1,20 @@
+# claim ledger — 2026-09-06-qubit-helstrom (worked example). Top-level list; three states only.
+- id: E-01
+  source: "standard (Helstrom 1976; Nielsen–Chuang §9.2), qubit specialisation"
+  statement: "For qubits ρᵢ=(I+rᵢ·σ)/2 with priors p,1−p: ½‖pρ₀−(1−p)ρ₁‖₁ = ½·max(|2p−1|, |p r₀ − (1−p) r₁|), and this equals the minimum error probability over all POVMs."
+  class: machine
+  tier: "🔧"
+  status: verified
+  check: checks/check_E-01.py
+  readings: []
+  note: "Derivation from the definition: X = pρ₀−(1−p)ρ₁ = ½(2p−1)I + ½ v·σ with v = p r₀ − (1−p) r₁; eigenvalues ½(2p−1 ± |v|); ‖X‖₁ = |v| if |v| ≥ |2p−1| else |2p−1|. The optimum is attained by the projector onto the positive eigenspace of X (or the trivial measurement when |v| < |2p−1|). The check optimises Err over random POVMs plus the Helstrom projector and compares with the closed form on 600 random instances; the foil feeds a non-positive 'effect' that beats the bound and confirms the check rejects it."
+  novel_to_requester: false
+- id: E-02
+  source: "requester's question C"
+  statement: "The same closed form holds for qutrits with the generalised (Gell-Mann) Bloch vector."
+  class: prose
+  tier: "📄"
+  status: unverified
+  readings:
+    - "‘Same closed form’ read as |v| with the Euclidean norm of the 8-dimensional Bloch vector."
+  note: "No grounds either way within the cap: the trace norm of a 3×3 Hermitian matrix is not a function of the Euclidean norm of its Bloch vector alone (it depends on all three eigenvalues), so the qubit argument does not transfer; a counterexample was not constructed. Left unverified; a real campaign would carry this to the next round via carryover.yaml if it were 👁."

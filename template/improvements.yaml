@@ -1,0 +1,17 @@
+# improvements.yaml — fate ledger of retro proposals (= the source of truth of the cycle's own improvement cycle)
+#
+# One entry per proposal that came out of a retro. Three fates plus a holding state:
+#   implemented  landed as a machine gate / script / convention (where = path#anchor); inert afterwards
+#   deferred     waiting for a trigger. **review_by (a date) is mandatory** — a deferred item without
+#                a clock is never picked up (verification-campaign-report.py --surface reports overdue ones)
+#   rejected     not adopted, with the reason (add a revisit trigger if one exists)
+# Only machine-derived numbers as evidence. General rule: layer-1 conventions/verification-cycle-ops.md.
+#
+# - id: R1-01
+#   origin: round1
+#   problem: "one commit per item" was prose discipline and 41 items landed in 2 commits
+#   mechanism: pre-commit gate (≤ 3 ledger entries per commit, escape env → hygiene.txt)
+#   status: implemented
+#   where: ai-collaboration/scripts/ledger-commit-cadence-gate.py + hooks/pre-commit
+#   evidence: next round, max items/commit ≤ 3 (git-derived)
+[]

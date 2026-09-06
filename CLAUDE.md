@@ -15,6 +15,8 @@ ai-collaboration/
 │   ├── verification-cycle-ops.md       # どう回し続けるか: 6 原則 / 導出 state 機械 / 台帳 3 種 + retro / 無人層 / fresh session の手順
 │   └── cold-eyes-isolation.md          # 第二の目の隔離: 汚染経路 6 口 / 封じた sandbox / spec に書いてよいこと / 受領後の汚染 grep
 ├── docs/state-discrimination.md       # 状態識別の一般数式・凸錐と座標の仮定・certificate の正本
+├── template/                           # clone-and-run skeleton of a private verification repo (scripts/init-verification-repo.py が展開)
+├── examples/verification-repo/         # 完結した見本 campaign 1 本 (spec / ledger / check+foil / results AUTO block / retro + hoist)
 └── scripts/
     ├── verification-campaign-report.py # campaign の集計: --index (導出 state + efficacy dataset) / --surface / --run (foil 契約) / --carryover / --write
     ├── ledger-commit-cadence-gate.py   # pre-commit gate: 1 commit の ledger entry 上限 + worker scope (CAMPAIGN_WORKER_DIR 外を refuse)

@@ -1,0 +1,7 @@
+#!/bin/bash
+# pre-commit — verification repo
+# 1. commit-cadence gate (≤ 3 ledger entries per commit) + worker scope gate (CAMPAIGN_WORKER_DIR)
+# 2. (optional) chain any other repo-local pre-commit here
+set -e
+REPO="$(git rev-parse --show-toplevel)"
+python3 "$REPO/scripts/campaign_hygiene.py" --pre-commit --worker-scope-env CAMPAIGN_WORKER_DIR
