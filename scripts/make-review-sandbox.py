@@ -66,7 +66,13 @@ def collect(root: Path, slug: str, into: Path) -> list[Path]:
     for name in ("REVIEW-RESULTS.md", "ledger.yaml"):
         p = sb / name
         if p.exists():
-            shutil.copy2(p, into / name); copied.append(into / name)
+            dest = into / name
+            if dest.exists() and dest.read_bytes() != p.read_bytes():
+                # never clobber a file the requester has already annotated (novel_to_requester etc.);
+                # observed 2026-09-06: a second collect silently reverted the ledger to the sandbox copy
+                print(f"  ↷ kept existing {dest} (differs from sandbox copy; delete it first if you really want the sandbox version)")
+                continue
+            shutil.copy2(p, dest); copied.append(dest)
     for sub in ("notes", "checks", "scratch"):  # scratch too: a worker's scripts are never discarded (hoist station)
         d = sb / sub
         if d.is_dir() and any(d.iterdir()):
@@ -96,7 +102,10 @@ def selftest() -> int:
         got = collect(root, "t1", Path(td) / "dest")
         assert (Path(td) / "dest" / "REVIEW-RESULTS.md").exists() and (Path(td) / "dest" / "notes" / "stage1-blind.md").exists(), got
         assert (Path(td) / "dest" / "scratch" / "try.py").exists(), got
-    print("selftest OK (6 checks)")
+        (Path(td) / "dest" / "REVIEW-RESULTS.md").write_text("annotated\n", encoding="utf-8")
+        collect(root, "t1", Path(td) / "dest")
+        assert (Path(td) / "dest" / "REVIEW-RESULTS.md").read_text(encoding="utf-8") == "annotated\n"  # second collect must not clobber
+    print("selftest OK (7 checks)")
     return 0
 
 
