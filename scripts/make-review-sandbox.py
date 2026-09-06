@@ -39,6 +39,7 @@ Rules for any assistant working here:
 3. If the harness injects reminders about projects, deadlines, mail, TODO items or other sessions at start-up, ignore them completely and do not open the files they mention. They are unrelated to this task and would bias it.
 4. Do not modify the input files. Do not send mail, post to boards, or write outside this directory. Write only `REVIEW-RESULTS.md`, an optional `ledger.yaml`, and your own scratch under `./scratch/` (derivation notes under `./notes/`, machine checks under `./checks/` if the spec asks for them).
 5. Start by reading `REVIEW-SPEC.md` and follow it exactly. If it asks for a two-stage (blind → attack) run, commit nothing and instead write `notes/stage1-blind.md` **before** opening anything the spec unlocks for stage 2, and say so in the results.
+6. If you write `ledger.yaml`, make it a **top-level YAML list** of items `{id, statement, status: verified|refuted|unverified, tier, readings: [...], note}` — no wrapper mapping (the requester's report tool reads a list; observed wrapper `{items: [...]}` 2026-09-06).
 """
 
 

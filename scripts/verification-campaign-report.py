@@ -193,8 +193,26 @@ def stats(camp: Path, repo: Path) -> dict:
         "novel_to_requester": [x["id"] for x in L if x.get("novel_to_requester") is True],
         "novel_unrated_refuted": [x["id"] for x in L if x.get("status") == "refuted" and "novel_to_requester" not in x],
         "second_eye_open": open_eye_ids(L),
-        "git": git_timeline(camp, repo),
+        "git": _timeline_with_sandbox_fallback(camp, repo),
     }
+
+
+def _timeline_with_sandbox_fallback(camp: Path, repo: Path) -> dict:
+    """Sandbox campaigns (make-review-sandbox.py) are written outside git, then collected in one
+    commit: the git timeline then reads 0 min. Fall back to file mtimes (copy2 preserves them):
+    earliest of notes/*, checks/*, ledger.yaml → REVIEW-RESULTS.md. Marked source=sandbox-mtime."""
+    g = git_timeline(camp, repo)
+    rr = camp / "REVIEW-RESULTS.md"
+    if g.get("duration_min", 0) == 0 and rr.exists():
+        cands = [f for sub in ("notes", "checks") for f in (camp / sub).glob("*") if f.is_file()]
+        cands += [f for f in (camp / "ledger.yaml",) if f.exists()]
+        if cands:
+            import datetime as _dt
+            t0 = min(f.stat().st_mtime for f in cands); t1 = max(rr.stat().st_mtime, max(f.stat().st_mtime for f in cands))
+            if t1 > t0:
+                iso = lambda t: _dt.datetime.fromtimestamp(t).strftime("%Y-%m-%dT%H:%M")
+                g = dict(g, first=iso(t0), last=iso(t1), duration_min=int(round((t1 - t0) / 60)), source="sandbox-mtime")
+    return g
 
 
 def open_eye_ids(L: list[dict]) -> list[str]:
@@ -252,7 +270,7 @@ def render(s: dict) -> str:
     lines.append("| tier | " + " / ".join(f"{k} {v}" for k, v in sorted(s['tier'].items())) + f" (readings 列挙 {s['readings']}) |")
     lines.append(f"| checks / foils | {s['checks']} / {s['foils']} |")
     if g.get("commits"):
-        lines.append(f"| 所要 (git: 最初の commit → results.md 初出) | {g['first'][:16]} → {g['last'][:16]} = **{g['duration_min']} 分**, campaign work commits {g['commits']} (AUTO-only refresh 除外) |")
+        lines.append(f"| 所要 ({'sandbox file mtime: 最初の note → REVIEW-RESULTS' if g.get('source') == 'sandbox-mtime' else 'git: 最初の commit → results.md 初出'}) | {g['first'][:16]} → {g['last'][:16]} = **{g['duration_min']} 分**, campaign work commits {g['commits']} (AUTO-only refresh 除外) |")
         lines.append(f"| ledger items / commit | max {g['max_items_per_commit']} (規律 = ≤ 3; " + ("違反あり" if g['max_items_per_commit'] > 3 else "OK") + ") |")
         if g["hygiene_log"]:
             lines.append(f"| hygiene.txt | {len(g['hygiene_log'])} 件の batch 許可 |")
