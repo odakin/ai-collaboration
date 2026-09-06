@@ -57,7 +57,7 @@ summary: 物理主張の検証サイクル (= 生成 → 機械検査 → 独立
 
 **ルール:** 外部論文を「使う」前提で読むときは、(1) 式・主張を item 化して抽出 → (2) 機械検査可能 (式・極限・数値・コード) と根拠追加が要る (散文主張) に分類 → (3) 機械検査可能分を 1 item ずつ独立導出で check → (4) 3 状態 ledger に記録、の順で読む。初回 run は**隔離した scratch ledger** で行い、本番の知識ベースへは verified のみ昇格させる。
 
-- **他者の論文の誤り finding は default 非公開**: 検証で誤り (misprint・係数・式) を見つけたら、公開の前に (a) 自前の独立導出で refuted を確定 (b) 著者・管理元へ報告 (c) 先方の応答 / 訂正を経てから公開の順。 **(a) の「自前」 は人間を含む** — AI pass が何本一致しても (別 session・別ベンダー・機械 anchor 付きでも) それは「AI-refuted」 であって、 著者に伝える根拠にはならない。 owner が自分の手で反例・導出を確認して初めて (b) に進める (2026-09-06 owner 判断「自分で確認したわけじゃない、 AI のみ。 言うのは無理」 — 独立 3 pass で決着した定理レベルの finding に対して)。 ledger の status は refuted のままでよいが、 対外発信の gate は別 (= 人間の独立確認)。 実務: 人間が 10-30 分で追える形 (反例を 1 頁、 使う定理は標準のもの 1-2 個) に worker が整えておくと、 この gate を通す cost が下がる。実例: 標準的参照文献の式の誤りを機械検証 → 報告 → 管理元が承認し web 版修正、の全 flow が通った。引用・再利用する側の防御は「既知 misprint の SoT (RETRACTIONS 相当) を repo に持ち、その式を引く前に必読」。
+- **他者の論文の誤り finding は default 非公開**: 検証で誤り (misprint・係数・式) を見つけたら、公開の前に (a) 自前の独立導出で refuted を確定 (b) 著者・管理元へ報告 (c) 先方の応答 / 訂正を経てから公開の順。 **(a) の「自前」 は人間を含む** — AI pass が何本一致しても (別 session・別ベンダー・機械 anchor 付きでも) それは「AI-refuted」 であって、 著者に伝える根拠にはならない。 owner が自分の手で反例・導出を確認して初めて (b) に進める (2026-09-06 owner 判断「自分で確認したわけじゃない、 AI のみ。 言うのは無理」 — 独立 3 pass で決着した定理レベルの finding に対して)。 **受領側 AI の独立再実装も「AI-refuted」 の側にある** (2026-09-06 同日 2 例目: requester 側の Claude が worker とは別 script で Thm の等号条件の反転を恒等式 + 2×2 最小反例まで追認したが、 owner 判断は「言わない。自分で理解してないんだもん」)。 gate は **owner 本人の理解**であって、 AI pass の本数・ベンダー数・requester 側の手追認では埋まらない。 ledger の status は refuted のままでよいが、 対外発信の gate は別 (= 人間の独立確認)。 実務: 人間が 10-30 分で追える形 (反例を 1 頁、 使う定理は標準のもの 1-2 個) に worker が整えておくと、 この gate を通す cost が下がる。実例: 標準的参照文献の式の誤りを機械検証 → 報告 → 管理元が承認し web 版修正、の全 flow が通った。引用・再利用する側の防御は「既知 misprint の SoT (RETRACTIONS 相当) を repo に持ち、その式を引く前に必読」。
 - 読み方の多義で真理値が変わる主張 (「N 大なら補正小」型) は、読みを 1 つに決める前に候補読みを列挙して各々の帰結を分ける — 強い結論は全候補読みで確認できた時だけ ([`paper-audit.md#claim-strength-three-tests`](../../claude-config/conventions/paper-audit.md#claim-strength-three-tests) が自著側の同型)。
 
 ## <a id="independent-second-eye"></a>7. 独立した第二の目 — 自己検査は独立検証ではない
@@ -163,6 +163,14 @@ spec 側の教訓 (= 起票者向け): 環境の道具の欠落 (SDP solver 不�
 
 **使用定理 / 出典候補の置き方**: load-bearing な theorem 名を ledger に書く (minimal-Naimark extremality criterion / scalar または POVM Radon--Nikodym / multiplication spectral measure の commutant / dominated convergence または Fubini--Tonelli / Fourier--Stieltjes uniqueness / \(\pi\)-\(\lambda\) uniqueness / polarization)。極値性 criterion の候補は Pellonpää, *J. Phys. A* **44** (2011) 085304、測度論は Folland, *Real Analysis* または Bogachev, *Measure Theory*、積測度一意性は Folland または Kallenberg。候補を挙げただけなら定理番号・適用条件を照合済みと書かない。
 
+### <a id="state-discrimination-certificates"></a>状態識別・凸錐の検証で再利用する certificate
+
+- **下界と等号条件を別々に導く**: 差を正作用素の積の trace の和に分解し、各項が 0 になる support 条件を取る。最小の対角例で max/min の交換を foil にする。偏った prior、ゼロ固有空間、常に同じ答えを返す最適測定も踏む。
+- **双対が見るのは閉包**: 分離定理・最小分解の達成・compact base を使った箇所に閉性の仮定を対応させる。欠ける場合は literal な錐と閉包の読みを分ける。端点だけで値が 0/1 の線形汎関数と、全状態上で [0,1] に入る effect も区別する。
+- **座標と量化を固定する**: 確率保存の座標変換でも ambient norm は変わり得る。固定埋め込みの性質 B(f) と ∃f[A(f)∧B(f)] を区別し、状態 inclusion A を独立に確認する。補助系の追加は座標変更ではなく対象 model の変更。
+
+数式・証明・反例の一般形の正本 = [state-discrimination.md](../docs/state-discrimination.md)、実装 = [state_discrimination.py](../scripts/state_discrimination.py)。同 library は全状態錐への membership を標本だけから主張しない。論文を特定する判定・出典番号は private campaign の台帳に残す。
+
 ## <a id="campaign-tooling"></a>15. Verify-to-learn campaign の運用 kernel — ledger・2 段階第二の目・繰り越し・機械 gate (2026-09)
 
 初回 campaign (外部論文 2 本、41 item、64 分、別 session worker) とその retro から。 **一般則はここ、 instance (campaign dir・check script・finding) は private repo に残置**。 道具の実体は層1 `scripts/`。
@@ -192,6 +200,10 @@ spec 側の教訓 (= 起票者向け): 環境の道具の欠落 (SDP solver 不�
 **K. foil の exit 契約 + runner**: 4 campaign で foil の exit 規約が 3 通りに割れ (「検出したら exit 1」 / 「検出したら exit 0」 / assert で落とす)、 受領側の手書き loop の `$?` 取り違えが「foil に歯が無い」 の偽 finding を出した (再走で救済)。 → 契約 = **foil は check のテスト**: 壊した入力を check が弾いたら `FOIL-TEETH` を出力して exit 0、 弾かなければ `FOIL-BROKEN` で exit 1。 受領・完了時は [`scripts/verification-campaign-report.py`](../scripts/verification-campaign-report.py) `<dir> --run --write` が check (exit 0 期待) と foil (契約) を timeout 付きで走らせて AUTO block に焼く (legacy foil は語句で分類し `legacy` と表示)。 検査する側の道具も selftest を持つ (= 計測器の foil)。
 
 **G′. worker の repo 状態の自己報告は信じない**: 「あなたの hunk が残っている」 「私の 1 文があなたの commit に入った」 はどちらも事実と違った (2 周目)。 受領側は `git status` / `git show --stat` / `--run` で見る。 自己報告が正しいのは finding の中身 (数学) で、 それも独立再実装で確かめる ([§7](#independent-second-eye))。
+
+<a id="campaign-rerun-lifecycle"></a>**再実行と版の境界**: 版を固定し、版間で番号が変わるときは item id を保ったまま source ごとの番号を併記する。出版版だけにある追加段落も独立 item にする。worker が受領側の field を書くことと、受領後にその field が存在することは別問題。runner は既存の `novel_to_requester` / `second_eye` を保ち、worker 完了時だけ必要なら `--worker` で未記入を検査する。機械検査を rerun しても受領 metadata を削除しない。
+
+**K の失敗伝播**: standard foil は行頭の成功 marker **かつ exit 0** が必要で、失敗 marker との共存は失敗。marker のない crash を「歯がある」と推定しない。reporter の `--run` は失敗・不明・timeout を非ゼロ exit にし、`--write` 時も診断を保存した上で失敗を返す。caller の shell loop も `set -e` 等で終了値を伝播させる (一般則 = [batch-text-edits.md](../../claude-config/conventions/batch-text-edits.md))。成功数とは別に、campaign ごとの期待 item/check/foil inventory を検査する。
 
 **正直な限界**: A-H は n=1〜2 (2 campaign + retro 2 回)。 I-K は 2 周目の事故からの機械化で、 効果は 3 周目で見る。 efficacy proxy は傾向指標。 cadence gate は「entries per commit」 しか見ない (時間・token は git に無い)。
 
