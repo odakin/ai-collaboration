@@ -74,7 +74,12 @@ def repo_root(start: Path) -> Path:
 
 
 def load_ledger(camp: Path) -> list[dict]:
+    """ledger.yaml = top-level list of items (canonical). A sandbox worker may wrap it as
+    {token, date, items: [...]} (observed 2026-09-06, campaign 3): accept that too instead of
+    silently counting 0 items."""
     data = yaml.safe_load((camp / "ledger.yaml").read_text(encoding="utf-8")) or []
+    if isinstance(data, dict):
+        data = data.get("items") or []
     return [x for x in data if isinstance(x, dict) and "id" in x]
 
 
