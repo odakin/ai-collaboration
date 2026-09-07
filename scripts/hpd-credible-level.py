@@ -6,9 +6,11 @@ region when a model sits at the edge; the honest question is which highest-poste
 (HPD) contour of the *joint* 2D marginal a model point reaches.  This tool computes, for each
 point (or for every point of a trajectory), the posterior mass of the region whose density
 exceeds the density at that point, using a binned Gaussian KDE with boundary reflection
-(the same construction as GetDist, but without the dependency), reports the 2-dof Delta chi^2
-equivalent, a Gaussian-approximation cross-check, and a smoothing-sensitivity sweep so that
-tail levels (99.9x%) are not quoted beyond their robustness.
+(a construction similar to GetDist's, without the dependency; the bandwidth is Scott's rule, so
+levels differ from GetDist's by a few 0.1% -- measured on a public 66k-sample chain: 95.4% vs
+95.95%, 99.57% vs 99.74%, 99.995% vs 99.98% -- which is exactly why tails must not be quoted to
+0.01%).  It reports the 2-dof Delta chi^2 equivalent, a Gaussian-approximation cross-check, and
+a smoothing-sensitivity sweep so that tail levels (99.9x%) are quoted only to their robustness.
 
 Inputs:  a GetDist / Cobaya-style chain root (<root>.txt with columns weight, -loglike, params;
          <root>.paramnames; optional <root>.ranges for hard bounds), or a CSV via --csv x,y[,w].

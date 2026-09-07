@@ -233,7 +233,7 @@ spec 側の教訓 (= 起票者向け): 環境の道具の欠落 (SDP solver 不�
 **kernel** (reviewer 側で観測した一般則、 受領側の §12 と対):
 
 1. **「閾値の上」 には完了予算を書く**: 共鳴が再加熱を完了するには占有数 $n_k\sim\rho/k^4$ (Planck 規格化の例で $(M_\text{P}/m)^2\sim e^{25\text{–}30}$) が要る。 線形成長の e-fold 数を膨張との競争 ($q\propto a^{-3/2}$、 振動開始時 $H\sim m$ なら 1 振動で 1/7) で数え、 引用先の $q$ と $H/m$ の regime と照合する。 数 e-fold と 25 の差は非線形では埋まらない ([`paper-audit.md#threshold-is-not-regime-onset`](../../claude-config/conventions/paper-audit.md#threshold-is-not-regime-onset) の reviewer 側計算)。
-2. **別実装との 0.1% 差は手法差**: 同じ公開 chain で 99.9x% の信用水準が 0.05–0.13% ずれても順序と $\Delta\chi^2$ の大小は不変。 差を「反証」 と書かず、 tail の桁を落とす方を提案する。
+2. **別実装との数 0.1% 差は手法差**: 同じ公開 chain (66k sample) でも KDE の実装で信用水準は動く — getdist 同士の設定差で 0.05–0.13%、 getdist と Scott 帯域の反射 KDE (`hpd-credible-level.py`) で 95.4 vs 95.95% / 99.57 vs 99.74% / 99.995 vs 99.98% (実測)。 順序と $\Delta\chi^2$ の桁 (6 vs 11–20) は不変だが、 tail では $\Delta\chi^2$ も 2 以上動く。 差を「反証」 と書かず、 tail の桁を落とす (「$\gtrsim99.7\%$」 / 「$\Delta\chi^2\gtrsim10$」) 方を提案する。
 3. **図の等高線は自己較正 + 2 本目で残差**: 目盛り読みより、 同図の公開等高線の bbox で affine を決める方が確実 (実測 1e-4)。 stroke path の transform を落とすと 2–3% ずれる。
 4. **引用文献の verdict は refs の notes へ**: 引用先が扱う regime ($q=20$–$100$ の tachyonic、 heavy-species の和、 $M=0.08\,M_\text{P}$ の lattice) や data product の定義 (chain の likelihood 構成・pivot・prior) は review で確認した時点で文献 SoT の notes に書く。 次の review が同じ確認を繰り返さない。
 5. **隔離は review 中だけ、 hoist は受領後**: reviewer session は review 中は sandbox と web しか読まないが、 受領後に owner が指示すれば同じ session が層1・refs・private repo へ昇格できる (= [`verification-cycle-ops.md#hoist-station`](verification-cycle-ops.md#hoist-station))。 その際も別 session の受領記録 (DESIGN / 規約追補) を先に読み、 重複しない項目だけ上げる。
