@@ -29,3 +29,7 @@
 ## index は当面手書き (2026-09-06)
 
 **判断**: README / CLAUDE.md の file 一覧は手書き。**Why**: file 7 本で生成 tool を持ち込む cost に見合わない。**再訪 trigger**: file が 15 本を超えたら claude-config の `generate-tree.py` を `--root` 引数で共用できるよう hoist する。
+
+## 盲検 reviewer 側の数値道具を層1 に置く (2026-09-07)
+
+**判断**: 自著の blind review を書いた session が作った scratch のうち、 論文に依らない 3 つ (公開 chain の HPD 信用水準 / 図の等高線の自己較正復元 / 厳密周期背景の Floquet 指数) を一般化して `scripts/` に置く。 campaign 由来の `gpt_measurements.py` と同じ扱い (kernel-up / instance-down、 ops `#hoist-station`)。 **Why**: 次の blind review・verify-to-learn が同じ道具を作り直すのを防ぐ。 chain・PDF・図の実 data は本 repo に入れない (公開物でも scope 外、 selftest は合成 data で閉じる)。 **代替案**: private paper repo に置く → 他 campaign から見えない / claude-config に置く → 数値道具は vendor 中立なので本 repo。 **境界**: 論文固有の再現 script (表 1・軌跡・図) は private repo の scratch copy に残し、 ここへは上げない。

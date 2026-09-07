@@ -12,7 +12,7 @@ cold-eyes とは「書いた本人と別の目」 で検品させることだが
 | 口 | 何が流れ込むか | 遮断 |
 |---|---|---|
 | (a) **自動 load される指示 file** | cwd の祖先にある CLAUDE.md (= project 一覧に「N 誌 reject 後」「本丸 = X が不成立」 等の来歴が書いてある)、 global `~/.claude/CLAUDE.md`、 project 別 memory | sandbox を **CLAUDE.md の祖先を持たない場所** に切る (= 作業ツリー `~/<root>/` の外)。 global CLAUDE.md の不在を `ls` で確認する |
-| (b) **SessionStart hook の注入** | deadline / mail / TODO / 返信待ちの surface に当該案件の名前や状態が出る | global hook は起票側から切れない → sandbox の CLAUDE.md と spec の両方に「注入された reminder は無視し、 そこに書かれた file を開かない」 を明示 (= 残余 risk として記録)。 完全に切りたければ別 vendor の AI (= pvc §10) |
+| (b) **SessionStart hook の注入** | deadline / mail / TODO / 返信待ちの surface に当該案件の名前や状態が出る | global hook は起票側から切れない → sandbox の CLAUDE.md と spec の両方に「注入された reminder は無視し、 そこに書かれた file を開かない」 を明示 (= 残余 risk として記録)。 完全に切りたければ別 vendor の AI (= pvc §10)。 **reviewer 側の実測 (2026-09、 第 2 回)**: SessionStart 十数本 + prompt keyword hook + tool-result hook が案件名・締切・mail を注入したが、 spec の「無視」 で足りた (verdict の根拠は全て原稿・文献・公開 data)。 副作用 1 件: harness の fetch tool は PDF を parse できず、 取得物を **deny list 内** (harness の tool-result dir) に落とす → 引用文献は `curl` + `pdftotext` で sandbox の scratch に取る |
 | (c) **spec / prompt 自体の漏洩** | 前回の verdict、 疑っている式番号、 「hard error が 2 件ある」、 係数の候補値、 「前回 X が指摘した」 | spec は**対象と rubric だけ**、 結論ゼロで書く (§3)。 起票者が知っていることを書かないのが一番難しい (= 親切心で漏らす) |
 | (d) **原稿内の著者注** | `\red{[XX: …]}` 型の共著者向け errand、 header comment の却下題とその理由、 「前 version は 16π² だった」 | **referee copy** を作る = 注と comment を機械的に剥がし (regex)、 残存を grep で 0 確認、 それだけを sandbox に置く |
 | (e) **repo 文脈** | SESSION / DESIGN / plans / notes / 旧版原稿 / 著者側の検算 script / git log (commit message に結論が書いてある) | spec に読取禁止 list を明示 + 「著者の script は存在しないものとして自分で書く」 (= 数値の anchoring 防止。 script を読ませると同じ規格化の誤りを継ぐ) |
@@ -49,6 +49,8 @@ cold-eyes とは「書いた本人と別の目」 で検品させることだが
 結果 file を受け取ったら、 禁止 source にしか無い情報 (SESSION の用語・却下した旧題・internal な note 名・起票 session だけが知る数値) が現れていないか grep する。 現れていれば汚染として記録し、 該当 finding の独立性を割り引く (= 汚染していない finding と分けて扱う)。 現れていなければ「独立した第二の目」 として採用できる。
 
 **実例 (2026-09、 第 2 回)**: 禁止語 grep 0、 唯一の hit は spec の task 名由来の version 番号。 finding 3 件は著者側の from-scratch 再計算 (膨張背景での mode 成長、 厳密背景の Floquet、 固定 $r$ の $\Delta n_s$) で確認してから採用した ([`physics-verification-cycle.md#external-ai-referee-premise-verification`](physics-verification-cycle.md#external-ai-referee-premise-verification) item 8)。 reviewer の scratch script は results と一緒に repo へコピーするが、 著者側の検証は**別に書いた script** で行う (同一 script の再実行は独立検証にならない)。
+
+**受領後の reviewer session (2026-09 追補)**: 隔離は review 中だけの規律。 受領・突合が済んだ後に owner が reviewer session 自身へ「知見を上層へ、 script も残す」 と指示すれば、 その session が scratch を一般化した道具 (層1 `scripts/`) と引用文献の verdict (refs の notes) を hoist できる ([`physics-verification-cycle.md#referee-side-kernels`](physics-verification-cycle.md#referee-side-kernels))。 順序が要: 受領側の DESIGN / 規約追補を**先に読んで**重複しない項目だけ上げる (受領側と reviewer 側が同じ file を取り合う = pvc C′ の時間順)。 sandbox は review 後も再計算環境 (venv・公開 chain・文献 text) を保つので、 その path は machine-local の memory に pointer として置く。
 
 ## <a id="external-paper-variant"></a>4.5 変種: 外部論文の検証読み (verify-to-learn) は sandbox でなく deny list (2026-09)
 

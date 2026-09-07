@@ -21,7 +21,7 @@ Verification-first collaboration: every claim an AI produces is either machine-a
 - `conventions/cold-eyes-isolation.md` — how to keep a second eye actually blind
 - [Session coordination and board receipt](https://github.com/odakin/claude-config/blob/main/conventions/multi-session-coordination.md#git-immutable-event-board) — session identities, submission versus acceptance, explicit handover and one receipt carrier. The authoritative convention remains in `claude-config` pending the Phase 2 trigger in `DESIGN.md`.
 - [Binary state discrimination](docs/state-discrimination.md) — derivations, equality and cone certificates, coordinate scope and biased qubits; code in `scripts/state_discrimination.py`.
-- `scripts/` — `verification-campaign-report.py`, `ledger-commit-cadence-gate.py`, `make-review-sandbox.py`, `gpt_measurements.py`, `state_discrimination.py` (each has `--selftest`)
+- `scripts/` — `verification-campaign-report.py`, `ledger-commit-cadence-gate.py`, `make-review-sandbox.py`, `gpt_measurements.py`, `state_discrimination.py`, `hpd-credible-level.py`, `svg-contour-extract.py`, `floquet-monodromy.py` (each has `--selftest`)
 
 ## Quick start
 

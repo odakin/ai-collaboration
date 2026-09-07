@@ -1,7 +1,7 @@
 <!-- doc-meta
 when: 論文・研究ノートの主張を機械検査で守る体制を組むとき / 外部論文を検証読みするとき / 検証系 AI workflow (verify-to-learn・adversarial pass) を設計するとき / 検証 campaign の repo・ledger・spec・第二の目・繰り越しを整備するとき / 連続 outcome の rank-one POVM の極値性・joint 一意性を検証するとき
 category: research-domain
-summary: 物理主張の検証サイクル (= 生成 → 機械検査 → 独立した第二の目 → 人間の判断) — 主張ごとの機械 anchor / foil (negative control) / 検証 tier 宣言 / claim 3 状態 / verify-to-learn / 第二の目の独立性 / rubric 事前登録 / 止まる規律 / cross-vendor 盲検 (= 同系統 AI の N 実装一致は独立でない) / campaign 運用 (ledger schema・2 段階第二の目・👁 繰り越し・cadence gate・git 由来 stats・efficacy proxy) / 近似階層の妥当性は判断でなく計算 / 外部 AI 査読レポートの前提検証 pass / verify-to-learn campaign の実測 kernel (certificate ベース定性判定・正規化検査・無限次元 supp→range・問いと主張の refuted 分離・foil の前提・WLOG 分岐・連続 rank-one POVM の極値性→joint 一意性)。 数ヶ月の paper-anchored audit fleet 運用 + 2026-08 の散文主張 RCA + 2026-09 campaign からの hoist
+summary: 物理主張の検証サイクル (= 生成 → 機械検査 → 独立した第二の目 → 人間の判断) — 主張ごとの機械 anchor / foil (negative control) / 検証 tier 宣言 / claim 3 状態 / verify-to-learn / 第二の目の独立性 / rubric 事前登録 / 止まる規律 / cross-vendor 盲検 (= 同系統 AI の N 実装一致は独立でない) / campaign 運用 (ledger schema・2 段階第二の目・👁 繰り越し・cadence gate・git 由来 stats・efficacy proxy) / 近似階層の妥当性は判断でなく計算 / 外部 AI 査読レポートの前提検証 pass / verify-to-learn campaign の実測 kernel (certificate ベース定性判定・正規化検査・無限次元 supp→range・問いと主張の refuted 分離・foil の前提・WLOG 分岐・連続 rank-one POVM の極値性→joint 一意性) / 盲検 reviewer 側の道具と kernel (公開 chain の HPD 信用水準・図の等高線復元・厳密背景の Floquet・完了予算)。 数ヶ月の paper-anchored audit fleet 運用 + 2026-08 の散文主張 RCA + 2026-09 campaign からの hoist
 -->
 # 物理主張の検証サイクル (verification cycle)
 
@@ -217,6 +217,26 @@ spec 側の教訓 (= 起票者向け): 環境の道具の欠落 (SDP solver 不�
 **K の失敗伝播**: standard foil は行頭の成功 marker **かつ exit 0** が必要で、失敗 marker との共存は失敗。marker のない crash を「歯がある」と推定しない。reporter の `--run` は失敗・不明・timeout を非ゼロ exit にし、`--write` 時も診断を保存した上で失敗を返す。caller の shell loop も `set -e` 等で終了値を伝播させる (一般則 = [batch-text-edits.md](../../claude-config/conventions/batch-text-edits.md))。成功数とは別に、campaign ごとの期待 item/check/foil inventory を検査する。
 
 **正直な限界**: A-H は n=1〜2 (2 campaign + retro 2 回)。 I-K は 2 周目の事故からの機械化で、 効果は 3 周目で見る。 efficacy proxy は傾向指標。 cadence gate は「entries per commit」 しか見ない (時間・token は git に無い)。
+
+## <a id="referee-side-kernels"></a>17. 盲検 reviewer 側の道具と kernel — sandbox review の受領後に reviewer session が hoist したもの (2026-09)
+
+§12 は report を**受け取る側**の規律。 本節は sandbox で report を**書いた側** (= 別 session の reviewer) が、 受領後に owner の指示「知見を上層へ、 script も残す」 で hoist したもの (起源 = 2026-09、 private paper repo の 2 回目 blind review。 実 instance = 原稿・reviewer scratch 11 本・promotion note は private repo、 ここには一般化した道具と kernel だけ)。
+
+**道具** (`scripts/`、 NumPy/SciPy のみ、 各 `--selftest`):
+
+| 道具 | 何を機械化するか | 規律の正本 |
+|---|---|---|
+| [`hpd-credible-level.py`](../scripts/hpd-credible-level.py) | 観測論文の author repo の公開 chain (`.txt/.paramnames/.ranges`) から、 模型の点 / $\gamma$ 軌跡の各点が到達する最小 HPD 等高線 (信用水準) を境界反射 KDE で出す。 帯域 sweep (×0.7 / ×1.5)・Gaussian 近似の照合・2 dof $\Delta\chi^2$ を並記 | tail を 0.01% 刻みで引用しない = [`paper-audit.md#box-test-vs-joint-posterior`](../../claude-config/conventions/paper-audit.md#box-test-vs-joint-posterior) |
+| [`svg-contour-extract.py`](../scripts/svg-contour-extract.py) | chain が非公開の等高線を図 (`pdftocairo -svg`) の path から復元。 `<g>` と element の `matrix()` を合成し、 同じ図にある**公開等高線の bbox で affine を自己較正**、 2 本目で残差、 点内判定と固定 $y$ の隙間 | 精度は線幅 ≈ 0.001 / 距離は物理軸で = [`scientific-computing.md#figure-vector-extraction`](../../claude-config/conventions/scientific-computing.md#figure-vector-extraction) / [`#contour-distance-axis`](../../claude-config/conventions/scientific-computing.md#contour-distance-axis) |
+| [`floquet-monodromy.py`](../scripts/floquet-monodromy.py) | Mathieu / gauge kinetic-function / conformal 再スケーリングの質量項の Floquet 指数を、 event で周期を取った**厳密**周期背景上の monodromy で。 selftest = 第 1 帯 $\mu=q/2$、 $a=0$ の縁 $q\simeq0.91$、 $k=0$ の marginality と線形化背景の偽成長 | [`scientific-computing.md#floquet-exact-background`](../../claude-config/conventions/scientific-computing.md#floquet-exact-background) |
+
+**kernel** (reviewer 側で観測した一般則、 受領側の §12 と対):
+
+1. **「閾値の上」 には完了予算を書く**: 共鳴が再加熱を完了するには占有数 $n_k\sim\rho/k^4$ (Planck 規格化の例で $(M_\text{P}/m)^2\sim e^{25\text{–}30}$) が要る。 線形成長の e-fold 数を膨張との競争 ($q\propto a^{-3/2}$、 振動開始時 $H\sim m$ なら 1 振動で 1/7) で数え、 引用先の $q$ と $H/m$ の regime と照合する。 数 e-fold と 25 の差は非線形では埋まらない ([`paper-audit.md#threshold-is-not-regime-onset`](../../claude-config/conventions/paper-audit.md#threshold-is-not-regime-onset) の reviewer 側計算)。
+2. **別実装との 0.1% 差は手法差**: 同じ公開 chain で 99.9x% の信用水準が 0.05–0.13% ずれても順序と $\Delta\chi^2$ の大小は不変。 差を「反証」 と書かず、 tail の桁を落とす方を提案する。
+3. **図の等高線は自己較正 + 2 本目で残差**: 目盛り読みより、 同図の公開等高線の bbox で affine を決める方が確実 (実測 1e-4)。 stroke path の transform を落とすと 2–3% ずれる。
+4. **引用文献の verdict は refs の notes へ**: 引用先が扱う regime ($q=20$–$100$ の tachyonic、 heavy-species の和、 $M=0.08\,M_\text{P}$ の lattice) や data product の定義 (chain の likelihood 構成・pivot・prior) は review で確認した時点で文献 SoT の notes に書く。 次の review が同じ確認を繰り返さない。
+5. **隔離は review 中だけ、 hoist は受領後**: reviewer session は review 中は sandbox と web しか読まないが、 受領後に owner が指示すれば同じ session が層1・refs・private repo へ昇格できる (= [`verification-cycle-ops.md#hoist-station`](verification-cycle-ops.md#hoist-station))。 その際も別 session の受領記録 (DESIGN / 規約追補) を先に読み、 重複しない項目だけ上げる。
 
 ## <a id="sibling-routing"></a>16. 隣接 doc への routing
 

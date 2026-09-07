@@ -22,7 +22,10 @@ ai-collaboration/
     ├── ledger-commit-cadence-gate.py   # pre-commit gate: 1 commit の ledger entry 上限 + worker scope (CAMPAIGN_WORKER_DIR 外を refuse)
     ├── make-review-sandbox.py          # 封じた review sandbox を 1 コマンドで切る / 受領時に collect
     ├── gpt_measurements.py             # GPT / POVM の間主観性・sharpness・極値性を定義から検査する数学 library (有限 + 無限次元 anchor)
-    └── state_discrimination.py         # NumPy のみで 2 状態識別の下界・slack・最適 POVM・qubit / cube を検査
+    ├── state_discrimination.py         # NumPy のみで 2 状態識別の下界・slack・最適 POVM・qubit / cube を検査
+    ├── hpd-credible-level.py           # 公開 MCMC chain の 2D 周辺分布に対する点 / 軌跡の HPD 信用水準 (境界反射 KDE、 帯域 sweep、 Gaussian 照合、 2 dof Δχ²)
+    ├── svg-contour-extract.py          # 論文 PDF 図 (pdftocairo -svg) の等高線 path を transform 合成 + 公開等高線の bbox で自己較正して data 座標へ
+    └── floquet-monodromy.py            # Mathieu / kinetic-function / conformal 質量項の Floquet 指数を厳密周期背景の monodromy で (k=0 marginal を selftest に固定)
 ```
 
 全 script は `--selftest` を持つ。各 file の 1 行説明は file 冒頭 (docstring 1 行目 / doc-meta) が正本。
