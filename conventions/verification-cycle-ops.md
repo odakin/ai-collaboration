@@ -102,6 +102,7 @@ owner の従来方針は「物理は人間 in-the-loop、 無人 run は事務�
 - 全部 2 round・4 campaign からの設計 (n=2)。 「回り続けた」 の evidence は 3 round 目以降にしか無い
 - efficacy proxy は主観の事後判定。 対照実験 (手法なしで同じ論文を読む) は cost が高く未実施
 - 無人層の安全は「対外 action ゼロ・SoT 書込みゼロ」 の設計に依存。 別ベンダー worker は spec より自分の既定に従った実績があるので、 無人層の worker は同ベンダー (spec を読む) に限る
+- 無人 tick は queue (人間が書いた spec) を読む。**board 宛ての依頼を無人で拾う**なら、同じ契約の runner を board 側に置く = 層1 [`multi-session-coordination.md#resident-board-runner`](../../claude-config/conventions/multi-session-coordination.md#resident-board-runner) (poll は決定的、dispatch は kill switch、worker は submit まで、受領は人間側 session)。queue と board の二重起動を作らない = 1 依頼は片方にだけ載せる。
 - state 導出は file の**存在**に依存する。 worker が results.md を書かずに死ねば `running` のまま — その検出は marker 経済 (`--status partial`) と heartbeat の側
 
 ## <a id="board-receipt-boundary"></a>Session 宛て board との接続
