@@ -18,6 +18,9 @@ Usage
 
 The spec you pass must follow cold-eyes-isolation.md#spec-leakage: statement, allow/deny,
 rubric, output format, stop rules, return command — no expected verdict, no "watch step 2".
+A two-stage skeleton for blind review of one's own manuscript (Stage 1 = derivation tasks solved
+before the manuscript is opened, Stage 2 = review + framing recommendation, HANDOFF section) is at
+template/REVIEW-SPEC-blind-manuscript.md: copy, fill the <...> slots, pass it as --spec.
 """
 from __future__ import annotations
 
@@ -41,6 +44,7 @@ Rules for any assistant working here:
 5. Start by reading `REVIEW-SPEC.md` and follow it exactly. If it asks for a two-stage (blind → attack) run, commit nothing and instead write `notes/stage1-blind.md` **before** opening anything the spec unlocks for stage 2, and say so in the results.
 6. If you write `ledger.yaml`, make it a **top-level YAML list** of items `{id, statement, status: verified|refuted|unverified, tier, readings: [...], note}` — no wrapper mapping (the requester's report tool reads a list; observed wrapper `{items: [...]}` 2026-09-06).
 7. After the results are written (and before or after the return command), write `HANDOFF.md`: (a) every script you wrote, one line each on what it does and how general it is; (b) the general lessons you derived (formulas, traps, conventions checked) that are not specific to this manuscript; (c) external data products and literature passages you verified, with exact locations; (d) what the spec lacked or what cost you time. This is the only channel through which your tools and lessons reach the requester's shared libraries; nothing outside this directory is yours to edit.
+8. Cited papers and public data products: the harness web-fetch tool cannot parse PDFs (it stores the binary in a tool-results directory you must not read). Download with `curl -sL -o ./scratch/<id>.pdf https://arxiv.org/pdf/<id>` and extract text with `pdftotext` or a Python PDF library; for equations the arXiv e-print source (`https://arxiv.org/e-print/<id>`) is more reliable. Keep every download under `./scratch/`.
 """
 
 
