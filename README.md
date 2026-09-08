@@ -19,9 +19,10 @@ Verification-first collaboration: every claim an AI produces is either machine-a
 - `conventions/physics-verification-cycle.md` — what to check (kernels, campaign tooling A–K)
 - `conventions/verification-cycle-ops.md` — how it keeps running (principles, state machine, ledgers, autonomous layer)
 - `conventions/cold-eyes-isolation.md` — how to keep a second eye actually blind
+- `conventions/edit-intent-record.md` — how an AI pass that implements author decisions records *which hunk implements which decision* (one sidecar per pass, discretion listed apart, deletions verbatim, quantity instructions respected, a check before commit)
 - [Session coordination and board receipt](https://github.com/odakin/claude-config/blob/main/conventions/multi-session-coordination.md#git-immutable-event-board) — session identities, submission versus acceptance, explicit handover and one receipt carrier. The authoritative convention remains in `claude-config` pending the Phase 2 trigger in `DESIGN.md`.
 - [Binary state discrimination](docs/state-discrimination.md) — derivations, equality and cone certificates, coordinate scope and biased qubits; code in `scripts/state_discrimination.py`.
-- `scripts/` — `verification-campaign-report.py`, `ledger-commit-cadence-gate.py`, `make-review-sandbox.py`, `gpt_measurements.py`, `state_discrimination.py`, `hpd-credible-level.py`, `svg-contour-extract.py`, `floquet-monodromy.py`, `nstar-fixed-point.py`, `expanding-mode-growth.py`, `dilaton-spectator-growth.py` (each has `--selftest`)
+- `scripts/` — `verification-campaign-report.py`, `ledger-commit-cadence-gate.py`, `check-edit-intent.py`, `make-review-sandbox.py`, `gpt_measurements.py`, `state_discrimination.py`, `hpd-credible-level.py`, `svg-contour-extract.py`, `floquet-monodromy.py`, `nstar-fixed-point.py`, `expanding-mode-growth.py`, `dilaton-spectator-growth.py` (each has `--selftest`)
 
 ## Quick start
 

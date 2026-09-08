@@ -35,3 +35,10 @@ repo 新設 (Phase 1 = claude-config からの分離)。conventions 3 本 + scri
 
 - scripts 3 本 (`hpd-credible-level.py` / `svg-contour-extract.py` / `floquet-monodromy.py`、 NumPy/SciPy のみ、 selftest 9/9 PASS)、 pvc §17 `#referee-side-kernels` (道具 3 + kernel 5)、 cold-eyes §1(b) 実測追補 + §4 受領後の reviewer session、 CLAUDE / README の一覧。 instance (原稿・reviewer scratch 11 本・promotion note・refs 登録) は owner の private repo 側。
 - 次: 変更なし (Phase 2 trigger 監視)。 scripts は 8 本 (index 手書きの再訪 trigger 15 本には未達)。
+
+## 2026-09-08: AI 原稿改稿の意図記録 (edit-intent-record.md + check-edit-intent.py、 spawn worker が起票 spec から実装)
+
+- 起源: 別ベンダー AI の 89 hunk / 474 行改稿を 1 週間後に人手で棚卸しし、 決定超過 2 件 + 棚卸し自身の誤分類 1 件が出た (owner「編集の意図を記録してなかったのは問題」)。 owner の私的 paper repo に instance (README 更新規律 / SOT 行 / shim)、 依頼側は agent-board CLAUDE + owner 層の board 規律に 1 段落ずつ。
+- 規約 = `conventions/edit-intent-record.md` (規則 8 = 1 pass 1 sidecar / 3 列 / 裁量は明示 / 削除 verbatim + 共著者本文の単独削除禁止 / 量の指示 / commit 前 gate / 意図は 1 行 / 遡及しない、 sidecar 形式、 検査項目と人間の床、 依頼 spec の 3 行、 routing、 実例 ledger)。 pvc §16 に routing 1 文。
+- 道具 = `scripts/check-edit-intent.py` (--scaffold = diff から hunk 行 + 位置 + 削除 verbatim を生成、 検査 = 12 項目 PASS/FAIL + INFO 量の指示、 --selftest 20 checks = parser 4 + 合成 repo の PASS 1 + foil 11 + 未記入 scaffold は通らない)。 実 diff (88 hunk) で scaffold → 位置・被覆・verbatim PASS、 未記入行で FAIL を確認。
+- 次: scripts は 9 本 (再訪 trigger 15 本には未達)。 効果判定は次の AI 実装 pass で sidecar が「裁量」 を何件表に出すかを見る (rubric 事前登録: 決定超過が受領前に裁量枠で出れば効いた、 事後棚卸しで見つかれば効いていない)。

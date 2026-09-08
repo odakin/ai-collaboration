@@ -13,13 +13,15 @@ ai-collaboration/
 │   ├── physics-verification-cycle.md   # 何を検査するか: 4 station / 機械 anchor / foil / tier / 3 状態 / verify-to-learn /
 │   │                                   #   第二の目 / rubric 事前登録 / 止まる規律 / cross-vendor / campaign 運用 A-K
 │   ├── verification-cycle-ops.md       # どう回し続けるか: 6 原則 / 導出 state 機械 / 台帳 3 種 + retro / 無人層 / fresh session の手順
-│   └── cold-eyes-isolation.md          # 第二の目の隔離: 汚染経路 6 口 / 封じた sandbox / spec に書いてよいこと / 受領後の汚染 grep
+│   ├── cold-eyes-isolation.md          # 第二の目の隔離: 汚染経路 6 口 / 封じた sandbox / spec に書いてよいこと / 受領後の汚染 grep
+│   └── edit-intent-record.md           # AI による原稿改稿の意図記録: 1 pass 1 sidecar (hunk → finding / decision / 種類 = 実装・裁量・削除) / 裁量枠 / 削除 verbatim + 共著者本文の単独削除禁止 / 量の指示 / commit 前 gate / 依頼 spec の 3 行
 ├── docs/state-discrimination.md       # 状態識別の一般数式・凸錐と座標の仮定・certificate の正本
 ├── template/                           # clone-and-run skeleton of a private verification repo (scripts/init-verification-repo.py が展開)
 ├── examples/verification-repo/         # 完結した見本 campaign 1 本 (spec / ledger / check+foil / results AUTO block / retro + hoist)
 └── scripts/
     ├── verification-campaign-report.py # campaign の集計: --index (導出 state + efficacy dataset) / --surface / --run (foil 契約) / --carryover / --write
     ├── ledger-commit-cadence-gate.py   # pre-commit gate: 1 commit の ledger entry 上限 + worker scope (CAMPAIGN_WORKER_DIR 外を refuse)
+    ├── check-edit-intent.py            # edit-intent sidecar: --scaffold (diff から hunk 行 + 位置 + 削除 verbatim を生成) / 検査 (hunk 被覆・位置・種類・ID 実在・裁量枠・削除 verbatim・意図、 PASS/FAIL + exit code) / --selftest
     ├── make-review-sandbox.py          # 封じた review sandbox を 1 コマンドで切る / 受領時に collect
     ├── gpt_measurements.py             # GPT / POVM の間主観性・sharpness・極値性を定義から検査する数学 library (有限 + 無限次元 anchor)
     ├── state_discrimination.py         # NumPy のみで 2 状態識別の下界・slack・最適 POVM・qubit / cube を検査
@@ -42,6 +44,7 @@ layer 1 (public、全 Claude Code / Codex ユーザー向け)。**依存でき�
 - 規約を読む順: `physics-verification-cycle.md` (§1 サイクルの形 → §15 campaign 運用) → `verification-cycle-ops.md` (§5 fresh session の手順) → 必要なら `cold-eyes-isolation.md`
 - 自分の検証 repo を作る: 必須 4 file + `campaigns/<date>-<slug>/{spec.md, ledger.yaml}`、pre-commit から `ledger-commit-cadence-gate.py --pre-commit --worker-scope-env CAMPAIGN_WORKER_DIR`、完了時 `verification-campaign-report.py <dir> --run --write`、受領後 `--carryover --write` と `--index --write`。schema は `physics-verification-cycle.md#campaign-tooling` A
 - 第二の目を別 session に出す: `make-review-sandbox.py create <slug> --spec REVIEW-SPEC.md --include <paper.pdf>` → cwd を sandbox に pin して spawn → `collect`
+- AI に決定 ledger どおりの原稿改稿を実装させる: 依頼 spec に `edit-intent-record.md#requester-spec-line` の 3 行 → 実装側は `check-edit-intent.py --scaffold … --out review/edit-intent-<date>.md` → 種類 / ID / 意図 を埋める → 同 script の検査 ALL PASS → 原稿と同じ pass で commit。 受領は裁量枠から読む
 
 ## 安全規則 (public repo)
 
