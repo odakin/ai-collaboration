@@ -102,11 +102,18 @@ def clean(text: str, macro: str = "red", qa_prefixes: tuple[str, ...] = (), supp
         counts["unwrap"] += 1
         pos = i
 
-    if suppress_date and "\\date{" not in text:
-        if text.count("\\maketitle") != 1:
-            raise ValueError("--suppress-date needs exactly one \\maketitle (found %d)" % text.count("\\maketitle"))
-        text = text.replace("\\maketitle", "\\date{}\\maketitle", 1)
-        counts["date"] = 1
+    if suppress_date:
+        # コメント行の言及 (% ... \maketitle ...) と \@maketitle の再定義は数えない
+        live = [i for i in range(len(text))
+                if text.startswith("\\maketitle", i) and not _in_comment(text, i)]
+        live_date = [i for i in range(len(text))
+                     if text.startswith("\\date{", i) and not _in_comment(text, i)]
+        if not live_date:
+            if len(live) != 1:
+                raise ValueError("--suppress-date needs exactly one uncommented \\maketitle (found %d)" % len(live))
+            i = live[0]
+            text = text[:i] + "\\date{}" + text[i:]
+            counts["date"] = 1
     return text, counts
 
 
@@ -162,6 +169,11 @@ def _selftest() -> int:
     check("date inserted", (out5, n5["date"]), ("\\title{T}\\date{}\\maketitle\n", 1))
     out6, n6 = clean("\\date{2020}\\maketitle\n", suppress_date=True)
     check("existing date kept", (out6, n6["date"]), ("\\date{2020}\\maketitle\n", 0))
+    out7, n7 = clean("% see \\maketitle below\n\\title{T}\\maketitle\n", suppress_date=True)
+    check("commented mention ignored", (out7, n7["date"]),
+          ("% see \\maketitle below\n\\title{T}\\date{}\\maketitle\n", 1))
+    out8, n8 = clean("%\\date{old}\n\\maketitle\n", suppress_date=True)
+    check("commented date does not count as present", (out8, n8["date"]), ("%\\date{old}\n\\date{}\\maketitle\n", 1))
 
     # foil 5: 閉じ括弧の不足は例外
     try:
@@ -171,7 +183,7 @@ def _selftest() -> int:
     except ValueError:
         pass
 
-    print("selftest OK (7 checks)" if ok else "selftest FAILED")
+    print("selftest OK (9 checks)" if ok else "selftest FAILED")
     return 0 if ok else 1
 
 
