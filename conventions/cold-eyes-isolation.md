@@ -30,6 +30,7 @@ cold-eyes とは「書いた本人と別の目」 で検品させることだが
 4. **REVIEW-SPEC** (§3 の規律で): 役割と隔離、 事前登録 rubric ([`physics-verification-cycle.md#rubric-before-run`](physics-verification-cycle.md#rubric-before-run))、 check 対象の列挙、 止まる規律 ([`#stop-when-no-grounds`](physics-verification-cycle.md#stop-when-no-grounds))、 出力形式 (= 応答上限があるので**§ごとに追記**させる)、 返送 spine 1 コマンド ([`multi-session-coordination.md#spawn-handoff-token-return`](../../claude-config/conventions/multi-session-coordination.md#spawn-handoff-token-return))、 token。
 5. **spawn は cwd を sandbox に pin** する (= chip / spawn の `cwd` 引数)。 prompt は「spec を読め + token」 だけ。
 6. **結果は sandbox 内に書かせ、 受領後に起票側が repo へコピー**する (= reviewer に repo を触らせない)。
+7. **二段 spec 変種 (2026-09、 起票側の推奨・訂正そのものを盲検するとき)**: 「この framing / 訂正でよいか」 と問うと結論が漏れる。 代わりに spec の冒頭に**対象の action と数値を写し**、 原稿を開く前に解く**導出課題** (Stage 1 → `notes/stage1-blind.md`、 Stage 2 で書き換え禁止) を置き、 その後に通常の査読と「どう提示すべきか」 の問い (Stage 2) を続ける。 起票側の案は一切書かない。 実測 (第 3 回): Stage 1 が起票側の 2 主張 (結合の符号の除外・構成が固定する関係) を独立に再現し、 起票側が pivot でしか評価していなかった項 (roll 全体の Weyl 成長 = [`scientific-computing.md#spectator-check-over-the-roll`](../../claude-config/conventions/scientific-computing.md#spectator-check-over-the-roll)) を発掘、 Stage 2 の framing 推奨は起票側の案と骨格一致 + 三層構造を追加した。 receipt では Stage 1 の結論を起票側の判断記録と表で突合し、 decisive finding は著者側 script で再導出してから採用する ([`physics-verification-cycle.md`](physics-verification-cycle.md#external-ai-referee-premise-verification) item 8)。
 
 ## <a id="spec-leakage"></a>3. spec に書いてよいこと・書いてはいけないこと
 
