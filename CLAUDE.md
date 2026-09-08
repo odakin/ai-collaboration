@@ -25,7 +25,10 @@ ai-collaboration/
     ├── state_discrimination.py         # NumPy のみで 2 状態識別の下界・slack・最適 POVM・qubit / cube を検査
     ├── hpd-credible-level.py           # 公開 MCMC chain の 2D 周辺分布に対する点 / 軌跡の HPD 信用水準 (境界反射 KDE、 帯域 sweep、 Gaussian 照合、 2 dof Δχ²)
     ├── svg-contour-extract.py          # 論文 PDF 図 (pdftocairo -svg) の等高線 path を transform 合成 + 公開等高線の bbox で自己較正して data 座標へ
-    └── floquet-monodromy.py            # Mathieu / kinetic-function / conformal 質量項の Floquet 指数を厳密周期背景の monodromy で (k=0 marginal を selftest に固定)
+    ├── floquet-monodromy.py            # Mathieu / kinetic-function / conformal 質量項の Floquet 指数を厳密周期背景の monodromy で (k=0 marginal を selftest に固定)
+    ├── nstar-fixed-point.py            # 単一場 inflation の N_* fixed point (reheating history 込み、 厳密背景の観測量、 history 間の (n_s, r) 分離)
+    ├── expanding-mode-growth.py        # 膨張する振動背景での daughter mode の線形成長 (真空を置く時刻を knob に = 共鳴境界の onset 依存性)
+    └── dilaton-spectator-growth.py     # dilaton 型結合 e^{-γχ/M_P}(∂φ)² の spectator 零モードが inflation の roll 全体で Weyl 因子だけ伸びることの検算 (末期の質量、 λ 符号別の落ち着き先)
 ```
 
 全 script は `--selftest` を持つ。各 file の 1 行説明は file 冒頭 (docstring 1 行目 / doc-meta) が正本。
