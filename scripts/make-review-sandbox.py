@@ -37,9 +37,10 @@ Rules for any assistant working here:
 1. Read only files inside this directory, plus the published literature the task cites (arXiv, journals, textbooks) via the web.
 2. Do not read anything under `~/Claude/` or `~/.claude/projects/`. Do not run `git log` here or open any other repository or working tree. No prior notes, scripts, verdicts or session records of the requester exist for you.
 3. If the harness injects reminders about projects, deadlines, mail, TODO items or other sessions at start-up, ignore them completely and do not open the files they mention. They are unrelated to this task and would bias it.
-4. Do not modify the input files. Do not send mail, post to boards, or write outside this directory. Write only `REVIEW-RESULTS.md`, an optional `ledger.yaml`, and your own scratch under `./scratch/` (derivation notes under `./notes/`, machine checks under `./checks/` if the spec asks for them).
+4. Do not modify the input files. Do not send mail, post to boards, or write outside this directory. Write only `REVIEW-RESULTS.md`, an optional `ledger.yaml`, `HANDOFF.md`, and your own scratch under `./scratch/` (derivation notes under `./notes/`, machine checks under `./checks/` if the spec asks for them).
 5. Start by reading `REVIEW-SPEC.md` and follow it exactly. If it asks for a two-stage (blind → attack) run, commit nothing and instead write `notes/stage1-blind.md` **before** opening anything the spec unlocks for stage 2, and say so in the results.
 6. If you write `ledger.yaml`, make it a **top-level YAML list** of items `{id, statement, status: verified|refuted|unverified, tier, readings: [...], note}` — no wrapper mapping (the requester's report tool reads a list; observed wrapper `{items: [...]}` 2026-09-06).
+7. After the results are written (and before or after the return command), write `HANDOFF.md`: (a) every script you wrote, one line each on what it does and how general it is; (b) the general lessons you derived (formulas, traps, conventions checked) that are not specific to this manuscript; (c) external data products and literature passages you verified, with exact locations; (d) what the spec lacked or what cost you time. This is the only channel through which your tools and lessons reach the requester's shared libraries; nothing outside this directory is yours to edit.
 """
 
 
@@ -63,7 +64,7 @@ def collect(root: Path, slug: str, into: Path) -> list[Path]:
         raise SystemExit(f"✗ no sandbox at {sb}")
     into.mkdir(parents=True, exist_ok=True)
     copied: list[Path] = []
-    for name in ("REVIEW-RESULTS.md", "ledger.yaml"):
+    for name in ("REVIEW-RESULTS.md", "ledger.yaml", "HANDOFF.md"):   # HANDOFF.md = worker's hoist packet (2026-09-08)
         p = sb / name
         if p.exists():
             dest = into / name
@@ -99,13 +100,15 @@ def selftest() -> int:
         (sb / "REVIEW-RESULTS.md").write_text("ok\n", encoding="utf-8")
         (sb / "notes").mkdir(); (sb / "notes" / "stage1-blind.md").write_text("blind\n", encoding="utf-8")
         (sb / "scratch" / "try.py").write_text("print(1)\n", encoding="utf-8")
+        (sb / "HANDOFF.md").write_text("# handoff\n", encoding="utf-8")
         got = collect(root, "t1", Path(td) / "dest")
         assert (Path(td) / "dest" / "REVIEW-RESULTS.md").exists() and (Path(td) / "dest" / "notes" / "stage1-blind.md").exists(), got
-        assert (Path(td) / "dest" / "scratch" / "try.py").exists(), got
+        assert (Path(td) / "dest" / "scratch" / "try.py").exists() and (Path(td) / "dest" / "HANDOFF.md").exists(), got
+        assert "HANDOFF.md" in CLAUDE_MD
         (Path(td) / "dest" / "REVIEW-RESULTS.md").write_text("annotated\n", encoding="utf-8")
         collect(root, "t1", Path(td) / "dest")
         assert (Path(td) / "dest" / "REVIEW-RESULTS.md").read_text(encoding="utf-8") == "annotated\n"  # second collect must not clobber
-    print("selftest OK (7 checks)")
+    print("selftest OK (9 checks)")
     return 0
 
 
@@ -127,7 +130,7 @@ def main(argv: list[str]) -> int:
         sb = create(a.root, a.slug, a.spec, a.include)
         print(f"✓ sandbox: {sb}")
         print("spawn hint: cwd を上の dir に pin し、prompt は「REVIEW-SPEC.md を読んで実行。token = <TOKEN>」だけ。")
-        print("receipt: make-review-sandbox.py collect", a.slug, "--into <campaign dir>  → 汚染 grep → 独立再実装 → ledger 記入")
+        print("receipt: make-review-sandbox.py collect", a.slug, "--into <campaign dir>  → 汚染 grep → 独立再実装 → ledger 記入 → HANDOFF.md を読んで hoist station")
         return 0
     if a.mode == "collect":
         if not (a.slug and a.into):

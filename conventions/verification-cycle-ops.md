@@ -53,7 +53,7 @@ summary: physics-verification-cycle.md (何を検査するか) の隣の「ど�
 
 campaign の worker (別 session / sandbox / 別ベンダー) は、 結果と一緒に **script・導出 note・判断**を産む。 受領で verdict だけ拾って終わると、 それらは campaign dir か sandbox に埋まり、 次の campaign が同じ道具を作り直す。 ∴ retro の後に **昇格 station** を置き、 state 機械の終端を `hoisted` にする (= 記録するまで機械が 📤 で押し続ける)。 5 点を順に:
 
-1. **script は捨てない**: worker の `checks/` `notes/` `scratch/` は campaign dir に commit (sandbox は `make-review-sandbox.py collect` が scratch/ も copy)。 受領側の独立 script は `receipt/`。 削除は improvements に理由を書いた時だけ。
+1. **script は捨てない**: worker の `checks/` `notes/` `scratch/` は campaign dir に commit (sandbox は `make-review-sandbox.py collect` が scratch/ も copy)。 受領側の独立 script は `receipt/`。 削除は improvements に理由を書いた時だけ。 **worker 側の入力 = `HANDOFF.md`** (2026-09-08: sandbox の CLAUDE.md 規則 7 で worker に書かせる。 script 一覧 / 一般則 / 確認済の外部 data・文献箇所 / spec の不足。 受領側はこれを読んで 2–4 を判断する = 受領側が sandbox の scratch を読み解く費用を worker 側に前払いさせる)。
 2. **再利用できる関数は層1 library へ** (例: `gpt_measurements.py`)、 campaign 側は shim か alias。 判断基準 = 2 campaign 目で同じ形が要ったら (層1 `#second-example-refine`)。
 3. **kernel (定義から独立に導いた一般則・壊れ方) は層1 規約へ** (§ を切るか既存 § に追記)、 instance は private に残す。 汚染を避けるため、 進行中の別 campaign の verdict 方向を漏らす記述は受領後まで待つ (physics-verification-cycle C′)。
 4. **文献の verdict は refs の notes へ**、 **判断は DESIGN へ**、 **状態は SESSION へ** (状態は file から導出、 SESSION は resume 用 highlight のみ)。
