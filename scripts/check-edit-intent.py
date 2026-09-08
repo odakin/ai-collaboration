@@ -524,7 +524,7 @@ def scaffold(root: Path, repo: str, file: str, base: str, head: str, ledgers: li
             "<!-- 種類 = 実装 / 裁量 (+削除)、 ID = ledger に在る token (実装は必須)、 意図 = 1 行。 hunk と 位置 は機械生成、 触らない -->",
             "", "## 対応表", "", "| hunk | 位置 | 種類 | ID | 意図 |", "|---|---|---|---|---|"]
     for h in hunks:
-        out.append(f"| {h.index} | {h.header} | {KIND_DELETE if h.net_deletion else ''} |  |  |")
+        out.append(f"| {h.index} | {h.header} | {KINDS_PRIMARY[0] + '+' + KIND_DELETE if h.net_deletion else ''} |  |  |")  # net deletion: prefill 実装+削除 (change to 裁量+削除 if discretionary)
     out += ["", "## 裁量", "", "<!-- 決定 ledger に無い変更を `hunk N: 何を・なぜ` で 1 行ずつ。 無ければ「なし」 -->", "", "## 削除", ""]
     dels = [h for h in hunks if h.net_deletion]
     if not dels:
@@ -592,9 +592,9 @@ def selftest() -> int:
 
         def fill(t: str) -> str:
             t = t.replace(f"| 1 | {hk[0].header} |  |  |  |", f"| 1 | {hk[0].header} | 実装 | F01 | fix typo |")
-            t = t.replace(f"| 2 | {hk[1].header} | 削除 |  |  |", f"| 2 | {hk[1].header} | 実装+削除 | R02, MY-2 | compress the digression |")
+            t = t.replace(f"| 2 | {hk[1].header} | 実装+削除 |  |  |", f"| 2 | {hk[1].header} | 実装+削除 | R02, MY-2 | compress the digression |")
             t = t.replace(f"| 3 | {hk[2].header} |  |  |  |", f"| 3 | {hk[2].header} | 裁量 |  | add a transition |")
-            t = t.replace(f"| 4 | {hk[3].header} | 削除 |  |  |", f"| 4 | {hk[3].header} | 裁量+削除 | R02 | merge two sentences |")
+            t = t.replace(f"| 4 | {hk[3].header} | 実装+削除 |  |  |", f"| 4 | {hk[3].header} | 裁量+削除 | R02 | merge two sentences |")
             return t.replace("<!-- 決定 ledger に無い変更を `hunk N: 何を・なぜ` で 1 行ずつ。 無ければ「なし」 -->",
                              "- hunk 3: transition sentence, not in any decision.\n- hunk 4: merged beyond R02's scope.")
 

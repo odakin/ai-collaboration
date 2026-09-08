@@ -120,6 +120,8 @@ summary: 物理主張の検証サイクル (= 生成 → 機械検査 → 独立
 
 report 側の hygiene (hash-pinned reviewed_source / 行番号の有効範囲宣言 / findings の 3 状態 + 理由 tag / decision ledger の分離) は受け取る価値のある形式なので、 自分が review を書く側に回るときも踏襲する (§10 の記録規律と同じ)。
 
+**第 2 ラウンド (同じ referee session に改訂稿を再査読させる) の finding triage (2026-09-08 追記)**: 受領した finding を 3 類に分ける — (a) **真** (前提検証で立つ、 原稿を直す) / (b) **誤読** (referee が脚注や規約を読み落とした反証。 例: 「文献の規約では K = ½T」 の脚注を自分の規約で反証して ❌) / (c) **方針衝突の再提示** (第 1 ラウンドで著者判断済みの点を「一番弱い」 と再掲)。 (c) は finding でなく著者判断の再確認事項として ledger に「再提示」 と記録し、 本文は動かさない。 式 check は referee の script を起票側で再実行して同じ出力を得てから ✅ とする。 receipt = `review/rereview-<date>/receipt.md` に 3 類の仕分けと根拠 (einstein-cartan 2026-09-08: 真 3 / 誤読 1 / 再提示 6)。
+
 ## <a id="definition-level-judge"></a>14. verify-to-learn の実測 kernel 追補 — 41 item campaign (2026-09) からの一般則
 
 初回の本格 verify-to-learn (外部 2 論文 + 教科書応用の問い、 41 item = verified 31 / refuted 6 / unverified 4、 check 15 + foil 15。 実 instance は個人層の private 検証 repo) で、 §1-§9 に無かった kernel が 6 つ出た:
