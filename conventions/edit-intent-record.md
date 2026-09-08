@@ -1,7 +1,7 @@
 <!-- doc-meta
 when: AI (Claude / Codex / 別ベンダー) に決定 ledger に基づく原稿・ノートの改稿を実装させる依頼 spec を書くとき / 自分 (AI session) がその実装 pass を commit する前 / 実装 pass の後で「どの hunk がどの決定に対応するか」 を確かめるとき / 改稿 diff を著者が採否判定するとき
 category: research-domain
-summary: AI による原稿改稿の意図記録 (edit-intent record) — 実装 pass ごとに hunk → {finding ID / decision ID / 種類 = 実装・裁量・削除} の対応表を sidecar (review/edit-intent-<date>.md) に残してから commit する。 決定 ledger に無い変更は裁量として別枠に列挙、 削除は削除前の全文を verbatim で添付、 「圧縮」「1 文のみ」 のような量の指示は守り、 越えるなら裁量枠へ。 機械 gate = scripts/check-edit-intent.py (--scaffold で骨組み生成 / hunk 被覆・位置・ID 実在・裁量枠・verbatim を PASS/FAIL)。 起源 = 2026-09 に 89 hunk を 1 週間後に人手で棚卸しし決定超過 3 種を見つけた事故
+summary: AI による原稿改稿の意図記録 (edit-intent record) + 実装 pass の作業規律 (当てる→組版 gate→記録、 削除前の blame、 清掃版どうしの diff) と投稿前の清掃 — 実装 pass ごとに hunk → {finding ID / decision ID / 種類 = 実装・裁量・削除} の対応表を sidecar (review/edit-intent-<date>.md) に残してから commit する。 決定 ledger に無い変更は裁量として別枠に列挙、 削除は削除前の全文を verbatim で添付、 「圧縮」「1 文のみ」 のような量の指示は守り、 越えるなら裁量枠へ。 機械 gate = scripts/check-edit-intent.py (--scaffold で骨組み生成 / hunk 被覆・位置・ID 実在・裁量枠・verbatim を PASS/FAIL)。 起源 = 2026-09 に 89 hunk を 1 週間後に人手で棚卸しし決定超過 3 種を見つけた事故
 -->
 # AI による原稿改稿の意図記録 (edit-intent record)
 
@@ -146,8 +146,35 @@ AI に改稿の実装を依頼する spec (spawn spec / board request / 別ベ�
 - worker の書込み scope を repo 側で縛る gate = [`physics-verification-cycle.md#campaign-tooling`](physics-verification-cycle.md#campaign-tooling) J (`ledger-commit-cadence-gate.py --worker-scope-env`)。 sidecar gate はその隣に pre-commit で並べられる。
 - 記録ベースで書いた文が本文とズレる同型 = [`rebuttal-letter.md`](../../claude-config/conventions/rebuttal-letter.md) §1。
 
-## <a id="examples"></a>7. 実例 ledger
+## <a id="implementation-pass-discipline"></a>7. 実装 pass の作業規律 — 当てる、確かめる、記録する
+
+sidecar は「何を書くか」 の規約。 ここは「どの順で手を動かすか」。 2026-09-08 の実運用 (1 日で live 原稿へ 9 pass) で効いたものだけを置く。
+
+1. <a id="apply-then-record"></a>**順序は 当てる → 組版 gate → 記録 → commit。 記録を先に commit しない。** 同日、 適用 script が anchor 不一致で abort したのに、 同じ 1 コマンドに並べた記録更新だけが走り commit された (原稿は未変更のまま「変更した」 と書かれた状態が 1 commit だけ存在)。 **適用と記録を 1 つの shell 行に並べるときは `&&` で連結し、 記録側は適用の成功を前提にする。** 事故ったら取り消さず、 次の commit で「前 commit は適用前に記録した」 と明記して直す (履歴を書き換えない)。
+2. <a id="anchor-assert"></a>**置換は anchor の一意性を assert してから。** `str.replace` の前に `text.count(old) == 1` を必ず確かめ、 複数一致・不一致はその場で止める。 正規表現より literal anchor が安全 (LaTeX の `\` は正規表現の置換文字列で壊れる)。 **著者が同じ file を並行編集している場合は、 読み込み時の SHA を記録して書き込み直前に再確認する。**
+3. <a id="build-gate"></a>**commit の前に、 別ディレクトリで組版する。** live の作業ツリーを汚さずに図表・bst を symlink した temp dir で `pdflatex → bibtex → pdflatex ×3` を回し、 **頁数・未定義参照の数・error 0 を確かめてから** commit する。 「compile は後で」 は後で直す量を増やす。
+4. <a id="blame-before-delete"></a>**削除の前に `git blame`。** 規則 4 (削除は verbatim) の運用手順。 削除しようとしている範囲の筆者分布を数え、 **共著者の本文なら削除しない** (付録へ verbatim MOVE + 本文に pointer が下限)。 「査読が短くしろと言った」 は削除の根拠にならない — 量の指示は §2 規則 5 の通り、 越えるなら止めて著者に返す。
+5. <a id="cleaned-base-diff"></a>**読み合わせは「清掃版どうし」 の diff で。** 共著 review 中の原稿は着色 (`\red{...}`) と著者間問答を含み、 latexdiff にかけると **着色の差が実質の差を埋める**。 `scripts/review-markup-clean.py` を **基準版と現行の両方に当ててから** latexdiff を回すと、 実質の変更だけが見える。 基準版は「信用できない AI pass の直前の commit」 に固定する (§1 の事例では、 そこが著者と共著者の最後の合意点だった)。 再生成は 1 コマンドの script にして、 **live を変えるたびに回す** (人が「あの PDF は古いかも」 と迷う余地を消す)。
+6. <a id="retro-audit"></a>**意図記録の無い過去の pass を後から棚卸しするときは 3 列で。** 「査読が要求したこと」「著者が決めたこと」「実装が実際にしたこと」 を hunk ごとに並べる。 2 列 (決定 vs 実装) だけだと、 実装が **査読の文言をそのまま転記した**箇所を「著者決定の実装」 と誤読する。 ⚠️ **棚卸し自身も誤分類する**: 同日の棚卸しは 89 hunk のうち 2 件を最初に取り違え (共著者本文の削除を「決定通り」、 著者判断そのものの実装を「決定超過」)、 査読レポートの原文と `git blame` を引いて初めて直った。 棚卸しの結論は「読んだ範囲」 を明記して人間に渡す。
+
+## <a id="submission-cleanup"></a>8. 投稿前の清掃 (review markup)
+
+共著 review が終わったら、 着色と問答を落とす。 `scripts/review-markup-clean.py` が 3 つだけする:
+着色の解除 (中身は保持) / 問答ブロックの削除 (`--qa-prefix` で指定した著者イニシャル等で始まるもの) / 自動日付の非表示 (`--suppress-date`)。
+コメント行の中は触らない。
+
+```bash
+python3 scripts/review-markup-clean.py paper.tex clean.tex \
+    --macro red --qa-prefix '\bf [XX]' --qa-prefix '[YY:' --suppress-date
+```
+
+- **削除した問答は sidecar の 削除 節に verbatim で残す** (§2 規則 4)。 返答の中身が本文・脚注に反映済みであることを確認してから消す。
+- 清掃の実行自体が 1 つの実装 pass。 sidecar を作り、 決定 ledger には「いつ、 誰の指示で、 何を落としたか」 を書く。 **共著 review 中に前倒しで実行するなら、 それは著者の明示指示による決定の上書き** (deferral の supersede) として記録する。
+- 清掃版は投稿用であると同時に §7-5 の diff の材料になる。 同じ script を使うことで「読み合わせで見えていたもの」 と「投稿するもの」 がずれない。
+
+## <a id="examples"></a>9. 実例 ledger
 
 | 日付 | 事例 | 結果 |
 |---|---|---|
 | 2026-09-01 → 09-08 | 別ベンダー AI が private paper repo の原稿を 89 hunk / 474 行改稿、 意図記録なし。 1 週間後に著者側 session が 89 hunk を ledger と人手で突合 | 決定超過 2 件 (消すなと決めた文の削除 = 同日復元 / 「圧縮」 に対する共著者 96 行の削除 = MOVE か復元を著者判断) + 棚卸し自身の誤分類 1 件 (report との突合で訂正) を事後発見。 著者規範「共著者の本文を単独判断で削除しない」 (規則 4) も同日に明文化。 本 doc + `check-edit-intent.py` の起源。 遡及 sidecar は作らず、 棚卸し record が代替 |
+| 2026-09-08 | 同じ原稿で、 著者が居る状態で 1 日に 9 pass (採用・語の統一・投稿前清掃・abstract 4 件・題扉の余白)。 各 pass で sidecar + 組版 gate + 清掃版どうしの diff 再生成 | 全 pass が gate PASS。 事故は 1 件 = 記録を適用前に commit (§7-1 の由来)。 棚卸しは 2 件の誤分類を経て確定 (§7-6) |
