@@ -10,7 +10,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with: { python-version: '3.12' }
-      - run: pip install pyyaml numpy scipy mpmath
+      - run: pip install pyyaml numpy scipy mpmath sympy
       - run: |
           set -e
           for s in scripts/*.py; do python3 "$s" --selftest; done
