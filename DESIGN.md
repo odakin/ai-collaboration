@@ -30,6 +30,14 @@
 
 **判断**: README / CLAUDE.md の file 一覧は手書き。**Why**: file 7 本で生成 tool を持ち込む cost に見合わない。**再訪 trigger**: file が 15 本を超えたら claude-config の `generate-tree.py` を `--root` 引数で共用できるよう hoist する。**2026-09-11**: scripts が 19 本になり trigger を超えた。生成 tool の共用化は未着手 (SESSION 残タスク)。それまでの手当てとして、README の漏れ 3 本 (`review-markup-clean.py` / `strip-tex-comments.py` / `init-verification-repo.py`) と CLAUDE.md の漏れ 3 本 (`check-sign-anchors.py` / `strip-tex-comments.py` / `init-verification-repo.py`) を補った。
 
+## <a id="unbounded-moment-hoist"></a>非有界 moment-operator campaign からの層1昇格 (2026-09-11)
+
+**判断**: private paper campaign で得た検証器のうち、論文・検出器・次元に依らない三つの核を独立 script として層1へ上げる。`covariant_moment_algebra.py` は共変 moment の full-line ladder と finite-window endpoint 項、`povm_moment_variance.py` は $M_2$ と $M_1^2$ の差・noise・結合次数、`unbounded_operator_domains.py` は domain membership だけでは強微分を保証しない陽な反例と weak identity の最大実現の罠を所有する。Gaussian tail、三次元の角度積分、特定原稿の係数・判定・レビューは project instance に残す。
+
+**規約の正本**: [`physics-verification-cycle.md#unbounded-moment-domain-audit`](conventions/physics-verification-cycle.md#unbounded-moment-domain-audit)。そこで scalar moment、form、operator action、product domain、finite window、full line、statewise probability、operator positivity、support、inverse domain を分離し、証明の非循環な依存順を定める。script はその符号・有限次元代数・反例の anchor で、無限次元 theorem の代替ではない。
+
+**受領器の修正**: multi-stage review が top-level `STAGE2-RESULTS.md` を書いた campaign で `make-review-sandbox.py collect` が回収せず、手動 copy が必要だった。collect は `STAGE*-RESULTS.md` も列挙して、既存 file の非上書き規則を同じように適用する。これは受領 path の欠落修正で、stage 名や数を固定しない。
+
 ## 盲検 reviewer 側の数値道具を層1 に置く (2026-09-07)
 
 **判断**: 自著の blind review を書いた session が作った scratch のうち、 論文に依らない 3 つ (公開 chain の HPD 信用水準 / 図の等高線の自己較正復元 / 厳密周期背景の Floquet 指数) を一般化して `scripts/` に置く。 campaign 由来の `gpt_measurements.py` と同じ扱い (kernel-up / instance-down、 ops `#hoist-station`)。 **Why**: 次の blind review・verify-to-learn が同じ道具を作り直すのを防ぐ。 chain・PDF・図の実 data は本 repo に入れない (公開物でも scope 外、 selftest は合成 data で閉じる)。 **代替案**: private paper repo に置く → 他 campaign から見えない / claude-config に置く → 数値道具は vendor 中立なので本 repo。 **境界**: 論文固有の再現 script (表 1・軌跡・図) は private repo の scratch copy に残し、 ここへは上げない。

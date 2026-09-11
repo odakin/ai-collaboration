@@ -1,8 +1,8 @@
 # SESSION.md — ai-collaboration
 
-## 現状 (2026-09-06)
+## 現状 (2026-09-11)
 
-repo 新設 (Phase 1 = claude-config からの分離)。conventions 3 本 + scripts 4 本を git 履歴つきで移設、骨格 (CLAUDE / DESIGN / README / LICENSE / .gitignore / CI) を作成、claude-config 側は stub + forwarder、呼び元 (owner の private 検証 repo の shim / odakin-prefs check・SKILL) は本 repo の path へ。
+非有界 moment operator と有限観測窓の campaign から、一般化した検証規律と script 3 本を層1へ昇格し、multi-stage review の結果を受領する collect の欠落も修正している。判断と instance 境界は [DESIGN](DESIGN.md#unbounded-moment-hoist)、規律は [unbounded moment-domain audit](conventions/physics-verification-cycle.md#unbounded-moment-domain-audit)、道具は `scripts/covariant_moment_algebra.py`、`scripts/povm_moment_variance.py`、`scripts/unbounded_operator_domains.py`。次は全 selftest・公開層 leak・索引を検査し、この repo を commit + push する。
 
 ## 残タスク
 

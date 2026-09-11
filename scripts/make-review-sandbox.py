@@ -12,7 +12,7 @@ Usage
         → <root>/<slug>/{CLAUDE.md, REVIEW-SPEC.md, <included files>, scratch/}
           prints the spawn hint (cwd pin + prompt).  Refuses to create under ~/Claude (ancestor CLAUDE.md).
   make-review-sandbox.py collect <slug> --into DEST_DIR [--root ...]
-        → copies REVIEW-RESULTS.md (+ ledger.yaml / notes/ / checks/ if present) into DEST_DIR,
+        → copies REVIEW-RESULTS.md, STAGE*-RESULTS.md (+ ledger.yaml / notes/ / checks/ if present) into DEST_DIR,
           never the other way.  Prints the contamination-grep reminder.
   make-review-sandbox.py --selftest
 
@@ -72,10 +72,11 @@ def collect(root: Path, slug: str, into: Path) -> list[Path]:
         raise SystemExit(f"✗ no sandbox at {sb}")
     into.mkdir(parents=True, exist_ok=True)
     copied: list[Path] = []
-    for name in ("REVIEW-RESULTS.md", "ledger.yaml", "HANDOFF.md"):   # HANDOFF.md = worker's hoist packet (2026-09-08)
-        p = sb / name
+    top_files = [sb / name for name in ("REVIEW-RESULTS.md", "ledger.yaml", "HANDOFF.md")]
+    top_files.extend(sorted(sb.glob("STAGE*-RESULTS.md")))
+    for p in top_files:   # HANDOFF.md = worker's hoist packet (2026-09-08)
         if p.exists():
-            dest = into / name
+            dest = into / p.name
             if dest.exists() and dest.read_bytes() != p.read_bytes():
                 # never clobber a file the requester has already annotated (novel_to_requester etc.);
                 # observed 2026-09-06: a second collect silently reverted the ledger to the sandbox copy
@@ -106,17 +107,19 @@ def selftest() -> int:
         except SystemExit as e:
             assert "refuse" in str(e)
         (sb / "REVIEW-RESULTS.md").write_text("ok\n", encoding="utf-8")
+        (sb / "STAGE2-RESULTS.md").write_text("stage 2\n", encoding="utf-8")
         (sb / "notes").mkdir(); (sb / "notes" / "stage1-blind.md").write_text("blind\n", encoding="utf-8")
         (sb / "scratch" / "try.py").write_text("print(1)\n", encoding="utf-8")
         (sb / "HANDOFF.md").write_text("# handoff\n", encoding="utf-8")
         got = collect(root, "t1", Path(td) / "dest")
         assert (Path(td) / "dest" / "REVIEW-RESULTS.md").exists() and (Path(td) / "dest" / "notes" / "stage1-blind.md").exists(), got
         assert (Path(td) / "dest" / "scratch" / "try.py").exists() and (Path(td) / "dest" / "HANDOFF.md").exists(), got
+        assert (Path(td) / "dest" / "STAGE2-RESULTS.md").read_text(encoding="utf-8") == "stage 2\n", got
         assert "HANDOFF.md" in CLAUDE_MD
         (Path(td) / "dest" / "REVIEW-RESULTS.md").write_text("annotated\n", encoding="utf-8")
         collect(root, "t1", Path(td) / "dest")
         assert (Path(td) / "dest" / "REVIEW-RESULTS.md").read_text(encoding="utf-8") == "annotated\n"  # second collect must not clobber
-    print("selftest OK (9 checks)")
+    print("selftest OK (10 checks)")
     return 0
 
 

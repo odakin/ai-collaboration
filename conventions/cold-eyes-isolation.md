@@ -22,7 +22,7 @@ cold-eyes とは「書いた本人と別の目」 で検品させることだが
 
 ## <a id="sealed-sandbox"></a>2. 封じた sandbox の recipe
 
-> 1 コマンド化 (2026-09-06): [`scripts/make-review-sandbox.py`](../scripts/make-review-sandbox.py) `create <slug> --spec REVIEW-SPEC.md --include <原稿/PDF>` が下の 1-4 を機械で切り (root が `~/Claude` 配下なら refuse)、 受領は `collect <slug> --into <dir>` で results を repo へ copy (逆方向は無い)。 手順の意味は下の recipe が正本。
+> 1 コマンド化 (2026-09-06): [`scripts/make-review-sandbox.py`](../scripts/make-review-sandbox.py) `create <slug> --spec REVIEW-SPEC.md --include <原稿/PDF>` が下の 1-4 を機械で切り (root が `~/Claude` 配下なら refuse)、 受領は `collect <slug> --into <dir>` で `REVIEW-RESULTS.md`、`STAGE*-RESULTS.md`、`HANDOFF.md`、ledger、notes、checks、scratch を repo へ copy する (逆方向は無い)。同名の受領済み file が sandbox と異なる場合は上書きしない。二段階以降の結果を top-level に置いても手動 copy が要らない。
 
 1. **dir を切る**: `~/<review-sandbox>/<paper>/` のように、 祖先に CLAUDE.md が無く、 どの repo の checkout でもない場所。 git repo にしない (= git log を読ませない)。
 2. <a id="referee-copy-strip-comments"></a>**referee copy を置く**: 原稿の tex + 図 + 組版 PDF から、 著者注・header comment を機械的に剥がしたもの。 剥がし残しを `grep` で 0 確認。 referee が journal で見る物だけにする。 **コメントアウトも剥がす** (2026-09-11 著者指示): 着色・Q&A を剥がしても `%` 行には著者の帰属注 (`%\red{(Karl and Shinya)}`)、 却下した旧文、 companion への言及が残る。 全行コメントは削除、 行末コメントは文字だけ落として `%` を残す (= macro 定義の空白制御を変えない) — 1 コマンド = [`scripts/strip-tex-comments.py`](../scripts/strip-tex-comments.py) `IN.tex OUT.tex`。 剥がした tex を組版し直し、 PDF の抽出 text が元と同一であることを確認してから sandbox に入れる (初適用 2026-09-11: 2510 → 2310 行、 45 頁 text 同一、 残る hit は著者 block の氏名と cite key のみ)。 組版し直したときの `.aux` も同梱する (2026-09-11 第 4 回 HANDOFF (d)): tex は `\label`、 PDF は通し番号なので、 対応表が無いと reviewer が pdftotext と grep で手で突合する。 `.aux` は原稿と同じく Stage 2 まで封じる。

@@ -8,7 +8,7 @@
 
 ```
 ai-collaboration/
-├── CLAUDE.md / SESSION.md / DESIGN.md / README.md / LICENSE / .gitignore
+├── AGENTS.md / CLAUDE.md / SESSION.md / DESIGN.md / README.md / LICENSE / .gitignore
 ├── conventions/
 │   ├── physics-verification-cycle.md   # 何を検査するか: 4 station / 機械 anchor / foil / tier / 3 状態 / verify-to-learn /
 │   │                                   #   第二の目 / rubric 事前登録 / 止まる規律 / cross-vendor / campaign 運用 A-K
@@ -38,7 +38,10 @@ ai-collaboration/
     ├── init-verification-repo.py       # template/ を展開 → git init → pre-commit gate → selftest (自分の検証 repo の雛形)
     ├── one_loop_pole.py                # 2 propagator までの 1-loop 積分の 1/ε 極を大運動量展開 + 共変平均で厳密に (sympy、 Float 拒否、 単項式と QED の selftest)
     ├── dirac_algebra.py                # mostly-plus の γ・γ5・ε・σ・trace と軸性 torsion の辞書 (全規約を assert)
-    └── heat_kernel_a4.py               # Seeley–DeWitt a4 を不変量 fit で (Dirac + 軸性ベクトル・QED・scalar、 Table 1 / 真空エネルギーの符号 / Z3 を anchor)
+    ├── heat_kernel_a4.py               # Seeley–DeWitt a4 を不変量 fit で (Dirac + 軸性ベクトル・QED・scalar、 Table 1 / 真空エネルギーの符号 / Z3 を anchor)
+    ├── covariant_moment_algebra.py      # 共変 POVM moment の full-line ladder と finite-window endpoint 項
+    ├── povm_moment_variance.py          # measured M2 と first-operator M1^2、noise、結合次数を分離
+    └── unbounded_operator_domains.py    # domain membership だけの微分の反例 + weighted Green algebra
 ```
 
 全 script は `--selftest` を持つ。各 file の 1 行説明は file 冒頭 (docstring 1 行目 / doc-meta) が正本。
@@ -50,7 +53,7 @@ layer 1 (public、全 Claude Code / Codex ユーザー向け)。**依存でき�
 ## 使い方 (最小)
 
 - 規約を読む順: `physics-verification-cycle.md` (§1 サイクルの形 → §15 campaign 運用) → `verification-cycle-ops.md` (§5 fresh session の手順) → 必要なら `cold-eyes-isolation.md`
-- 自分の検証 repo を作る: 必須 4 file + `campaigns/<date>-<slug>/{spec.md, ledger.yaml}`、pre-commit から `ledger-commit-cadence-gate.py --pre-commit --worker-scope-env CAMPAIGN_WORKER_DIR`、完了時 `verification-campaign-report.py <dir> --run --write`、受領後 `--carryover --write` と `--index --write`。schema は `physics-verification-cycle.md#campaign-tooling` A
+- 自分の検証 repo を作る: 必須 4 file + `campaigns/<date>-<slug>/{spec.md, ledger.yaml}`、pre-commit から `ledger-commit-cadence-gate.py --pre-commit --worker-scope-env CAMPAIGN_WORKER_DIR`、完了時 `verification-campaign-report.py <dir> --run --write`、受領後 `--carryover --write` と `--index --write`。schema は `physics-verification-cycle.md#campaign-tooling` A。非有界な moment operator と有限窓を扱う場合は同 doc の [`#unbounded-moment-domain-audit`](conventions/physics-verification-cycle.md#unbounded-moment-domain-audit) を追加で使う
 - 第二の目を別 session に出す: `make-review-sandbox.py create <slug> --spec REVIEW-SPEC.md --include <paper.pdf>` → cwd を sandbox に pin して spawn → `collect`
 - AI に決定 ledger どおりの原稿改稿を実装させる: 依頼 spec に `edit-intent-record.md#requester-spec-line` の 3 行 → 実装側は `check-edit-intent.py --scaffold … --out review/edit-intent-<date>.md` → 種類 / ID / 意図 を埋める → 同 script の検査 ALL PASS → 原稿と同じ pass で commit。 受領は裁量枠から読む
 - 自分が実装側のとき: 当てる → 別 dir で組版 → 記録 → commit の順 ([`#apply-then-record`](conventions/edit-intent-record.md#apply-then-record))。 削除の前に `git blame`。 共著 review 中の原稿の読み合わせは `review-markup-clean.py` を基準版と現在版の両方に当ててから latexdiff ([`#cleaned-base-diff`](conventions/edit-intent-record.md#cleaned-base-diff))、 投稿前清掃も同じ script ([`#submission-cleanup`](conventions/edit-intent-record.md#submission-cleanup))
