@@ -26,9 +26,9 @@
 
 **移さないもの**: setup.sh / hooks (Claude Code 固有の harness)、LaTeX・Office・mail 等の domain 規約、generate-tree 等の生成 tool。= claude-config の名前で true な範囲。
 
-## index は当面手書き (2026-09-06)
+## <a id="script-index-generation"></a>Script index は docstring から生成 (2026-09-06 → 2026-09-11)
 
-**判断**: README / CLAUDE.md の file 一覧は手書き。**Why**: file 7 本で生成 tool を持ち込む cost に見合わない。**再訪 trigger**: file が 15 本を超えたら claude-config の `generate-tree.py` を `--root` 引数で共用できるよう hoist する。**2026-09-11**: scripts が 19 本になり trigger を超えた。生成 tool の共用化は未着手 (SESSION 残タスク)。それまでの手当てとして、README の漏れ 3 本 (`review-markup-clean.py` / `strip-tex-comments.py` / `init-verification-repo.py`) と CLAUDE.md の漏れ 3 本 (`check-sign-anchors.py` / `strip-tex-comments.py` / `init-verification-repo.py`) を補った。
+**初期判断**: file 7 本では README / CLAUDE.md の一覧を手書きし、15 本を超えたら生成へ移る。**trigger 到達**: 2026-09-11 に scripts が19本を超え、同日の3本昇格で手書き一覧が再び二重化した。**現判断**: 各 module の docstring 1行目を説明の正本とし、`generate-script-index.py` が全 `scripts/*.py` を [`scripts/README.md`](scripts/README.md) に生成する。main README と CLAUDE.md はその索引への pointer だけを持つ。CI は `--check` と全 script の `--selftest` を別 gate として実行する。これにより script の存在・説明・実行検査を混同せず、追加漏れだけを機械で止める。
 
 ## <a id="unbounded-moment-hoist"></a>非有界 moment-operator campaign からの層1昇格 (2026-09-11)
 

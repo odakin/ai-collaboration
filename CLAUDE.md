@@ -20,31 +20,12 @@ ai-collaboration/
 ├── template/                           # clone-and-run skeleton of a private verification repo (scripts/init-verification-repo.py が展開)
 ├── examples/verification-repo/         # 完結した見本 campaign 1 本 (spec / ledger / check+foil / results AUTO block / retro + hoist)
 └── scripts/
-    ├── verification-campaign-report.py # campaign の集計: --index (導出 state + efficacy dataset) / --surface / --run (foil 契約) / --carryover / --write
-    ├── ledger-commit-cadence-gate.py   # pre-commit gate: 1 commit の ledger entry 上限 + worker scope (CAMPAIGN_WORKER_DIR 外を refuse)
-    ├── review-markup-clean.py          # 共著 review の着色解除 + 著者間問答の削除 + 自動日付の非表示 (投稿前清掃と「清掃版どうしの diff」 の両方に使う 1 本)
-    ├── check-edit-intent.py            # edit-intent sidecar: --scaffold (diff から hunk 行 + 位置 + 削除 verbatim を生成) / 検査 (hunk 被覆・位置・種類・ID 実在・裁量枠・削除 verbatim・意図、 PASS/FAIL + exit code) / --selftest
-    ├── make-review-sandbox.py          # 封じた review sandbox を 1 コマンドで切る / 受領時に collect
-    ├── gpt_measurements.py             # GPT / POVM の間主観性・sharpness・極値性を定義から検査する数学 library (有限 + 無限次元 anchor)
-    ├── state_discrimination.py         # NumPy のみで 2 状態識別の下界・slack・最適 POVM・qubit / cube を検査
-    ├── hpd-credible-level.py           # 公開 MCMC chain の 2D 周辺分布に対する点 / 軌跡の HPD 信用水準 (境界反射 KDE、 帯域 sweep、 Gaussian 照合、 2 dof Δχ²)
-    ├── svg-contour-extract.py          # 論文 PDF 図 (pdftocairo -svg) の等高線 path を transform 合成 + 公開等高線の bbox で自己較正して data 座標へ
-    ├── floquet-monodromy.py            # Mathieu / kinetic-function / conformal 質量項の Floquet 指数を厳密周期背景の monodromy で (k=0 marginal を selftest に固定)
-    ├── nstar-fixed-point.py            # 単一場 inflation の N_* fixed point (reheating history 込み、 厳密背景の観測量、 history 間の (n_s, r) 分離)
-    ├── expanding-mode-growth.py        # 膨張する振動背景での daughter mode の線形成長 (真空を置く時刻を knob に = 共鳴境界の onset 依存性)
-    ├── dilaton-spectator-growth.py     # dilaton 型結合 e^{-γχ/M_P}(∂φ)² の spectator 零モードが inflation の roll 全体で Weyl 因子だけ伸びることの検算 (末期の質量、 λ 符号別の落ち着き先)
-    ├── check-sign-anchors.py           # 符号を持つ印字係数: 外部 anchor の registry・end-to-end の全体反転 foil・fleet invariance scan・運搬体の無い規約差の検出
-    ├── strip-tex-comments.py           # referee copy を作る前に LaTeX のコメント行 (著者メモ・没稿) を除く
-    ├── init-verification-repo.py       # template/ を展開 → git init → pre-commit gate → selftest (自分の検証 repo の雛形)
-    ├── one_loop_pole.py                # 2 propagator までの 1-loop 積分の 1/ε 極を大運動量展開 + 共変平均で厳密に (sympy、 Float 拒否、 単項式と QED の selftest)
-    ├── dirac_algebra.py                # mostly-plus の γ・γ5・ε・σ・trace と軸性 torsion の辞書 (全規約を assert)
-    ├── heat_kernel_a4.py               # Seeley–DeWitt a4 を不変量 fit で (Dirac + 軸性ベクトル・QED・scalar、 Table 1 / 真空エネルギーの符号 / Z3 を anchor)
-    ├── covariant_moment_algebra.py      # 共変 POVM moment の full-line ladder と finite-window endpoint 項
-    ├── povm_moment_variance.py          # measured M2 と first-operator M1^2、noise、結合次数を分離
-    └── unbounded_operator_domains.py    # domain membership だけの微分の反例 + weighted Green algebra
+    ├── README.md                       # docstring から生成する全数索引
+    ├── generate-script-index.py        # README を --write / --check、CI が drift を拒否
+    └── *.py                            # 検証器・library・sandbox/receipt tooling、全て --selftest
 ```
 
-全 script は `--selftest` を持つ。各 file の 1 行説明は file 冒頭 (docstring 1 行目 / doc-meta) が正本。
+全 script は `--selftest` を持つ。各 file の 1 行説明は file 冒頭の docstring が正本で、[`scripts/README.md`](scripts/README.md) は生成 view。
 
 ## 4 層モデルでの位置
 
