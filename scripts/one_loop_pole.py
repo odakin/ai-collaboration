@@ -2,7 +2,7 @@
 """Exact 1/ε pole of one-loop Minkowski integrals with ≤ 2 propagators by large-loop-momentum expansion and covariant angular averaging (sympy, exact rationals only) — re-computes printed pole terms of self-energies, tadpoles and mixed two-point functions from printed Feynman rules; --selftest
 
 Layer-1 hoist (2026-09-11) of the pole extractor that a blind referee wrote to re-compute a printed
-one-loop two-point function (bubble + seagull + tadpole, and an undisplayed mixed amplitude) from the
+one-loop two-point function (bubble + seagull + tadpole, and a mixed amplitude) from the
 printed Feynman rules, independently of the authors' tooling (the instance stays in a private paper repo).
 
 Method.  Mostly-plus metric, denominators (p² + m² − i0) and ((p + q)² + m² − i0), D = 4 − 2ε:
@@ -15,7 +15,7 @@ no tensor reduction are needed, so the pole of any polynomial numerator comes ou
 Calibration: ∫ 1/(p²+m²)² → 1,  ∫ 1/(p²+m²) → −m²,  QED vacuum polarisation of one Dirac fermion
 tr[γ^μ(−p̸ − im)γ^ν(−(p̸+q̸) − im)] → (4/3)(q² η^{μν} − q^μ q^ν)   (all asserted by --selftest).
 
-Traps this module guards against (conventions/scientific-computing.md#exact-rational-pipelines):
+Traps this module guards against (claude-config/conventions/scientific-computing.md#exact-rational-pipelines):
   * never pass results through sympy.nsimplify: with a large denominator it treats an exact Rational as a
     float and "identifies" an algebraic number (observed: 5·2^{307/522}·3^{5/29}… in place of a rational);
     inputs with Float atoms are rejected by require_exact();

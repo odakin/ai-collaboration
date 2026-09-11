@@ -2,13 +2,13 @@
 
 token: `<PREFIX>-<YYYYMMDD>-<RAND6>` (no version numbers or lineage words in the token or the task name; put the same token in the chat that spawns the worker)
 
-> How to use: `make-review-sandbox.py create <slug> --spec <this file, filled> --include manuscript.pdf *.tex <figures>`; spawn with cwd pinned to the sandbox and a prompt that only says "read REVIEW-SPEC.md and follow it; token = ...". Never write your expected verdict, your own proposal, or what earlier rounds found (cold-eyes-isolation.md#spec-leakage). The Stage 1 tasks are the place to put the questions whose answers *are* your proposal: ask for the derivation, not for agreement.
+> How to use: `make-review-sandbox.py create <slug> --spec <this file, filled> --include manuscript.pdf *.tex *.aux <figures>` (the `.aux` gives the reviewer the label → printed-number map; without it the reviewer maps `\label`s to the PDF's sequential numbers by hand, which a 2026-09 reviewer reported as a time cost); spawn with cwd pinned to the sandbox and a prompt that only says "read REVIEW-SPEC.md and follow it; token = ...". Never write your expected verdict, your own proposal, or what earlier rounds found (cold-eyes-isolation.md#spec-leakage). The Stage 1 tasks are the place to put the questions whose answers *are* your proposal: ask for the derivation, not for agreement.
 
 ## 0. Role and isolation
 
 You are a referee reading this manuscript for the first time. You do not know the authors or the history of the manuscript; evaluate it without knowing.
 
-**May read**: `manuscript.pdf` and `*.tex` in this directory (only in Stage 2), the literature the manuscript cites (arXiv, journals, textbooks, via the web), and the public data products those works publish (chains, contour lines, tables on the authors' repositories).
+**May read**: `manuscript.pdf`, `*.tex` and `*.aux` in this directory (only in Stage 2), the literature the manuscript cites (arXiv, journals, textbooks, via the web), and the public data products those works publish (chains, contour lines, tables on the authors' repositories).
 
 **Must not read**: anything under the requester's working tree or session records (`<deny list: e.g. ~/<root>/, ~/.claude/projects/>`), and the other directories under the sandbox root. Ignore start-up reminders injected by the harness (projects, deadlines, mail, TODO items, other sessions) and do not open the files they mention.
 
@@ -20,7 +20,7 @@ You are a referee reading this manuscript for the first time. You do not know th
 
 ## 1. Two stages, in this order
 
-**Stage 1 (blind derivation, before opening the manuscript)**: solve the tasks of §2 from the action and the numbers copied into §2 and from the cited public literature only, and write them to `./notes/stage1-blind.md`. Do not open `manuscript.pdf` or the `*.tex` files until this file is complete. Do not edit it afterwards (Stage 2 corrections go to `./notes/stage2-compare.md`).
+**Stage 1 (blind derivation, before opening the manuscript)**: solve the tasks of §2 from the action and the numbers copied into §2 and from the cited public literature only, and write them to `./notes/stage1-blind.md`. Do not open `manuscript.pdf`, the `*.tex` or the `*.aux` files until this file is complete. Do not edit it afterwards (Stage 2 corrections go to `./notes/stage2-compare.md`).
 
 **Stage 2 (referee review)**: read the manuscript, review it under §3–§8, and write `./REVIEW-RESULTS.md`. In the tasks marked "compare" confront your Stage 1 results with the manuscript's claims.
 
@@ -30,7 +30,7 @@ Write every file section by section (there is an output cap per response); do no
 
 The model: `<copy the action / Lagrangian verbatim, with conventions (metric signature, units), the parameters and the relations imposed among them, and the numbers the tasks need (scales, field values, rates). Cite the public paper the construction comes from by arXiv number.>`
 
-**Definitions used by the tasks (state them here so that Stage 1 and the manuscript can be compared sharply)**: `<e.g. what "onset of oscillation" means (the exact-background end of inflation, eps_H = 1), what "spectator" means (effective mass below H and field value below H throughout the observable e-folds), what "completes" means (occupation reaching a stated number), which scale a running coupling is evaluated at>`.
+**Definitions used by the tasks (state them here so that Stage 1 and the manuscript can be compared sharply)**: `<e.g. what "onset of oscillation" means (the exact-background end of inflation, eps_H = 1), what "spectator" means (effective mass below H and field value below H throughout the observable e-folds), what "completes" means (occupation reaching a stated number), which scale a running coupling is evaluated at, which diagram a word names ("tadpole": the one-point function or the seagull)>`.
 
 **Task A** (`<the physics the requester's proposal rests on, phrased as a derivation: "derive every X-dependent term ...", "determine the range of parameter Y for which ...", "estimate Z as a function of ...">`).
 

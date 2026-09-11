@@ -25,7 +25,7 @@ R S² and (S²)² cancel for every η and there is no (∇·S)² term: the induc
 form.  In Shapiro's normalisation (Phys. Rept. 357 (2002) 113, Eq. (3.15): ⅔η²S²_{μν} − 8m²η²S_μS^μ with ε = (4π)²(n−4),
 S^ν = ε^{αβμν}T_{αβμ}, minimal η = −1/8, signature (+,−,−,−)) these are the same numbers once prefactor, signature and the
 normalisation of S are translated; the absence of the longitudinal term is stated there right below (3.15).  An
-evaluation restricted to ∂·S = 0 cannot see that information (physics-verification-cycle.md#referee-side-kernels).
+evaluation restricted to ∂·S = 0 cannot see that information (conventions/physics-verification-cycle.md#referee-side-kernels, kernel 12).
 The E/Ω decomposition was checked symbolically in flat space with x-dependent S in the originating instance; here it is
 checked end to end by the curvature part (Table 1) and the torsion part (Shapiro) together.
 

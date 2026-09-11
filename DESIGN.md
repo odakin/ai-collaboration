@@ -33,3 +33,5 @@
 ## 盲検 reviewer 側の数値道具を層1 に置く (2026-09-07)
 
 **判断**: 自著の blind review を書いた session が作った scratch のうち、 論文に依らない 3 つ (公開 chain の HPD 信用水準 / 図の等高線の自己較正復元 / 厳密周期背景の Floquet 指数) を一般化して `scripts/` に置く。 campaign 由来の `gpt_measurements.py` と同じ扱い (kernel-up / instance-down、 ops `#hoist-station`)。 **Why**: 次の blind review・verify-to-learn が同じ道具を作り直すのを防ぐ。 chain・PDF・図の実 data は本 repo に入れない (公開物でも scope 外、 selftest は合成 data で閉じる)。 **代替案**: private paper repo に置く → 他 campaign から見えない / claude-config に置く → 数値道具は vendor 中立なので本 repo。 **境界**: 論文固有の再現 script (表 1・軌跡・図) は private repo の scratch copy に残し、 ここへは上げない。
+
+**追記 (2026-09-11)**: 第 4 回の reviewer hoist で `one_loop_pole.py` / `dirac_algebra.py` / `heat_kernel_a4.py` を足した。 `one_loop_pole.py` は極を厳密有理数で出すために sympy を使うので、 CI の install に sympy を加えた (09-07 の 3 本が NumPy/SciPy だけで書けたのは道具の性質で、 repo の制約ではない)。 境界は同じで、 模型固有の双線形形式・Ward 恒等式の構造数え・原稿の Feynman 則と印字式は private repo に残す。 全体符号の外部 anchor は、 規則が claude-config `paper-audit.md#absolute-sign-external-anchor`、 検査 engine が同日の `check-sign-anchors.py`、 registry が各 project にある。 ここの 3 本は selftest の較正に同じ量 (真空エネルギー・QED) を使うだけで、 project の anchor registry には載せない。
