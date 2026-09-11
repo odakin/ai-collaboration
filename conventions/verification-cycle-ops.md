@@ -96,6 +96,7 @@ owner の従来方針は「物理は人間 in-the-loop、 無人 run は事務�
 | 台帳が壊れる (YAML) | 層3 yaml gate (pre-commit) + `--index` の fail-open (壊れた file は読めないと表示) |
 | 自己申告の数字が混じる | AUTO block しか INDEX に載らない |
 | 隔離漏れ | retro front matter の contamination hit が INDEX に累積 (0 が続くかが R2-01 の evidence) |
+| 検査 fleet が共通の不変性を持つ (有効作用の全体符号・全体規格化) — 全部 PASS でもその量は未検証 | 符号を持つ印字量の登録簿 + `check-sign-anchors.py --run` (反転した入力で落ちない anchor は finding) + `--fleet-scan` (どの検査が見分けるかの表)。 規則 = [`paper-audit.md#absolute-sign-external-anchor`](../../claude-config/conventions/paper-audit.md#absolute-sign-external-anchor) |
 
 ## <a id="limits"></a>7. 正直な限界
 
