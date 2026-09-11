@@ -2,6 +2,8 @@
 
 ## 現状 (2026-09-11)
 
+論文の推敲 session (2026-09-11) から、 [`conventions/edit-intent-record.md`](conventions/edit-intent-record.md) §7 に 2 点を追加した。 gate をパイプの後ろに置かないことと、 Claude Code の Bash tool の最上位では `set -e` が効かないこと ([`#apply-then-record`](conventions/edit-intent-record.md#apply-then-record)、 実測つき)。 著者の手編集を carrier commit する前に、 確認した差分の hash を照合すること ([`#carrier-commit-hash`](conventions/edit-intent-record.md#carrier-commit-hash)、 項目 7)。
+
 非有界 moment operator と有限観測窓の campaign から、一般化した検証規律と script 3 本を層1へ昇格し、multi-stage review の結果を受領する collect の欠落も修正した。判断と instance 境界は [DESIGN](DESIGN.md#unbounded-moment-hoist)、規律は [unbounded moment-domain audit](conventions/physics-verification-cycle.md#unbounded-moment-domain-audit)、道具の全数は [generated script index](scripts/README.md) から辿る。全 script の selftest、公開層 leak、entrypoint、生成索引の検査を通した。次の campaign は同規律の hoist station と生成索引を入口にする。
 
 ## 残タスク
