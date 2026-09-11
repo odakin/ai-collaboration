@@ -55,7 +55,7 @@ campaign の worker (別 session / sandbox / 別ベンダー) は、 結果と�
 
 1. **script は捨てない**: worker の `checks/` `notes/` `scratch/` は campaign dir に commit (sandbox は `make-review-sandbox.py collect` が scratch/ も copy)。 受領側の独立 script は `receipt/`。 削除は improvements に理由を書いた時だけ。 **worker 側の入力 = `HANDOFF.md`** (2026-09-08: sandbox の CLAUDE.md 規則 7 で worker に書かせる。 script 一覧 / 一般則 / 確認済の外部 data・文献箇所 / spec の不足。 受領側はこれを読んで 2–4 を判断する = 受領側が sandbox の scratch を読み解く費用を worker 側に前払いさせる)。
 2. **再利用できる関数は層1 library へ** (例: `gpt_measurements.py`)、 campaign 側は shim か alias。 判断基準 = 2 campaign 目で同じ形が要ったら (層1 `#second-example-refine`)。
-3. **kernel (定義から独立に導いた一般則・壊れ方) は層1 規約へ** (§ を切るか既存 § に追記)、 instance は private に残す。 汚染を避けるため、 進行中の別 campaign の verdict 方向を漏らす記述は受領後まで待つ (physics-verification-cycle C′)。
+3. **kernel (定義から独立に導いた一般則・壊れ方) は層1 規約へ** (§ を切るか既存 § に追記)、 instance は private に残す。 汚染を避けるため、 進行中の別 campaign の verdict 方向を漏らす記述は受領後まで待つ (physics-verification-cycle C′)。 **公開層に書く例示にも instance を持ち込まない** (2026-09-11): 名前の leak gate は識別子しか見ないので、 模型固有の数値・構造の数え・原稿の文言は素通りする。 commit 前に instance の term list (固有の数値、 特有の語、 原稿の句) で追加行を走査し、 例示は公刊済みの結果か一般形に置き換える (実例: 盲検 review から上げた kernel の例示に原稿固有の計数と原稿の文言が入り、 公開後に一般化した。 履歴には残る)。 原則は claude-config [`scientific-computing.md#research-script-homes`](../../claude-config/conventions/scientific-computing.md#research-script-homes)、 名前・PII 側の同型は claude-config `CLAUDE.md` の 2026-06-16 拡張 (規約本文の例と docstring も public surface)。
 4. **文献の verdict は refs の notes へ**、 **判断は DESIGN へ**、 **状態は SESSION へ** (状態は file から導出、 SESSION は resume 用 highlight のみ)。
 5. **retro front matter に `hoist: {<campaign>: "<date> <where>"}`** を書く = 機械が読む終端 marker。 どこへ何を上げたかを 1 行で (無ければ「保存のみ、 kernel 無し」 と正直に)。
 

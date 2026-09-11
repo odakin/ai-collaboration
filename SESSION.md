@@ -47,5 +47,5 @@
 
 - scripts 3 本 (`one_loop_pole.py` / `dirac_algebra.py` / `heat_kernel_a4.py`、 selftest 3/3 PASS、 `985fc67`)、 CI の install に sympy。 pvc §17 に道具 3 行 + kernel 10–13 (Ward 恒等式は不変汎関数で符号ごと検証 / 構造数えで「残差なし」 が自明か / 制限した背景での cross-check の死角 / Stückelberg mode の運動項の符号)。 記号計算の罠 3 型は claude-config `scientific-computing.md#exact-rational-pipelines`。 instance (sandbox の collect・shim・live audit・refs の notes) は owner の private repo 側。
 - 同日並走の符号 anchor 再発防止 (`check-sign-anchors.py`) と同じ file 群を触るため、 相手の commit を待ってから追記した (staging-window race の回避)。 README / CLAUDE.md の script 一覧の漏れも補った (DESIGN「index は当面手書き」)。
-- 追補 (同日): HANDOFF (d) の spec の穴 2 件 (用語定義の例 = tadpole、 label → 印字番号の `.aux` 同梱) を REVIEW-SPEC 雛形と cold-eyes §2 へ。 pvc kernel 11・12 の例示から原稿固有の計数と原稿の文言を外した (公開履歴には前の文面が残る)。 DESIGN の 09-07 節に sympy 依存と境界を追記。 kernel 14 (多添字の場の横・縦は分解の添字を書く、 HANDOFF (b) 9) を追加。
-- 次: index 生成 tool の共用化 (trigger 到達)。 Phase 2 の監視は不変。
+- 追補 (同日): HANDOFF (d) の spec の穴 2 件 (用語定義の例 = tadpole、 label → 印字番号の `.aux` 同梱) を REVIEW-SPEC 雛形と cold-eyes §2 へ。 pvc kernel 11・12 の例示から原稿固有の計数と原稿の文言を外した (公開履歴には前の文面が残る)。 DESIGN の 09-07 節に sympy 依存と境界を追記。 kernel 14 (多添字の場の横・縦は分解の添字を書く、 HANDOFF (b) 9) を追加。 ops `#hoist-station` 3 に公開層の例示の内容走査を、 claude-config `shell-env.md#claude-issued-shell-commands` に zsh の単語分割で走査対象を取り違えた件を追記。
+- 次: index は同日の別 session が生成へ移した (DESIGN `#script-index-generation`、 3 本も収録済)。 Phase 2 の監視は不変。
