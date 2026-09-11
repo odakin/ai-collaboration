@@ -535,6 +535,46 @@ def scaffold(root: Path, repo: str, file: str, base: str, head: str, ledgers: li
     return "\n".join(out).rstrip() + "\n"
 
 
+
+# ---------------------------------------------------------------- fill
+
+def fill_sidecar(text: str, intents: dict[str, dict[str, str]], discretion: str | None = None) -> str:
+    """Fill the empty 種類 / ID / 意図 cells of a scaffolded sidecar (2026-09-11).
+
+    Keys of `intents` are a hunk number ("3") or an old start line ("L1064"); values are
+    {"kind": ..., "id": ..., "intent": ...}. A prefilled kind (実装+削除 on a net deletion) is kept
+    unless the entry gives one; a missing kind defaults to 実装. Rows already carrying an ID or an
+    intent are left alone. Raises ValueError when an empty row has no entry, when an entry matches
+    no row, or when a cell would contain "|". The ## 裁量 placeholder gets `discretion` (default なし).
+    """
+    used: set[str] = set()
+    out: list[str] = []
+    for line in text.split("\n"):
+        parts = line.split("|")
+        if len(parts) == 7 and parts[1].strip().isdigit() and re.match(r"\s*-\d+", parts[2]):
+            n, pos = parts[1].strip(), parts[2].strip()
+            kind, id_, intent = parts[3].strip(), parts[4].strip(), parts[5].strip()
+            if not id_ and not intent:
+                key = n if n in intents else ("L" + re.match(r"-(\d+)", pos).group(1))
+                if key not in intents:
+                    raise ValueError(f"no entry for hunk {n} ({pos}); give \"{n}\" or \"{key}\"")
+                e = intents[key]
+                used.add(key)
+                kind = e.get("kind") or kind or KINDS_PRIMARY[0]
+                id_, intent = e.get("id", ""), e.get("intent", "")
+                if any("|" in v for v in (kind, id_, intent)):
+                    raise ValueError(f"hunk {n}: a cell contains '|'")
+                line = f"| {n} | {pos} | {kind} | {id_} | {intent} |"
+        out.append(line)
+    unused = sorted(set(intents) - used)
+    if unused:
+        raise ValueError("entries match no empty row: " + ", ".join(unused))
+    res = "\n".join(out)
+    m = re.search(r"(## 裁量\n\n<!--[^\n]*-->\n)(\n## )", res)
+    if m:
+        res = res[:m.end(1)] + "\n" + (discretion or "なし") + "\n" + res[m.end(1):]
+    return res
+
 # ---------------------------------------------------------------- selftest
 
 def _run(cmd: list[str], cwd: Path) -> None:
@@ -625,6 +665,21 @@ def selftest() -> int:
         for what, content, expected_fail in foils:
             ok, names = run_check(content)
             expect(not ok and names.get(expected_fail) is False, f"foil {what!r} must FAIL at {expected_fail} (got {names})")
+        m3 = "L" + re.match(r"-(\d+)", hk[2].header).group(1)
+        mapping = {"1": {"kind": "実装", "id": "F01", "intent": "fix typo"},
+                   "2": {"id": "R02, MY-2", "intent": "compress the digression"},
+                   m3: {"kind": "裁量", "id": "", "intent": "add a transition"},
+                   "4": {"kind": "裁量+削除", "id": "R02", "intent": "merge two sentences"}}
+        filled = fill_sidecar(text, mapping, "- hunk 3: transition sentence, not in any decision.\n- hunk 4: merged beyond R02's scope.")
+        ok, names = run_check(filled)
+        expect(ok, f"--fill output (keys by hunk and by old start line) passes ({names})")
+        for bad, why in (({"1": mapping["1"]}, "row without an entry"), (dict(mapping, **{"9": mapping["1"]}), "entry matching no row"),
+                         (dict(mapping, **{"1": {"id": "F01", "intent": "a | b"}}), "cell with a pipe")):
+            try:
+                fill_sidecar(text, bad)
+                expect(False, f"--fill must refuse a {why}")
+            except ValueError:
+                expect(True, f"--fill refuses a {why}")
         ok, _ = run_check(text)
         expect(not ok, "raw scaffold (unfilled) must not pass")
     print(f"selftest OK ({checks} checks)")
@@ -651,11 +706,26 @@ def main() -> int:
     ap.add_argument("--implementer", default="ai", help="claude / codex / human / <vendor> (scaffold)")
     ap.add_argument("--date", default=_dt.date.today().isoformat(), help="date for the sidecar (scaffold)")
     ap.add_argument("--out", help="write the scaffold here (refuses to overwrite); default stdout")
+    ap.add_argument("--fill", metavar="SIDECAR", help="fill the empty 種類/ID/意図 cells of a scaffolded sidecar in place, then check it")
+    ap.add_argument("--intents", help='JSON for --fill: {"<hunk>" or "L<old start>": {"kind": ..., "id": ..., "intent": ...}}')
+    ap.add_argument("--discretion", help="text for the ## 裁量 section when filling (default なし)")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
 
     if a.selftest:
         return selftest()
+    if a.fill:
+        if not a.intents:
+            ap.error("--fill needs --intents FILE.json")
+        target = Path(a.fill).expanduser().resolve()
+        intents = json.loads(Path(a.intents).expanduser().read_text(encoding="utf-8"))
+        try:
+            new = fill_sidecar(target.read_text(encoding="utf-8"), intents, a.discretion)
+        except ValueError as e:
+            raise SystemExit(f"✗ --fill: {e}")
+        target.write_text(new, encoding="utf-8")
+        print(f"filled: {target}")
+        a.sidecar = str(target)
     if a.scaffold:
         if not (a.file and a.base and a.head):
             ap.error("--scaffold needs --file, --base, --head")
