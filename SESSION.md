@@ -11,7 +11,7 @@ repo 新設 (Phase 1 = claude-config からの分離)。conventions 3 本 + scri
 - Session 宛て board との受領経路の接続は [verification-cycle-ops](conventions/verification-cycle-ops.md#board-receipt-boundary)。一般則の正本は README から既存 home へ参照し、Phase 2 の移設は未実施。
 
 - [ ] Phase 2 の trigger 監視 (= DESIGN の表): Codex runner Pilot A 開始で `multi-session-coordination.md` と `codex/` を移設
-- [ ] file が 15 本を超えたら index 生成 tool を共用化 (DESIGN)
+- [ ] index 生成 tool の共用化 — **trigger 到達 (2026-09-11、 scripts 19 本)**。 それまで README / CLAUDE.md の一覧は手で揃える (DESIGN「index は当面手書き」)
 
 ## 2026-09-06 (夜): 昇格 station + 公開 skeleton + 見本 campaign + 受領で見えた道具の穴 3 件
 
@@ -42,3 +42,9 @@ repo 新設 (Phase 1 = claude-config からの分離)。conventions 3 本 + scri
 - 規約 = `conventions/edit-intent-record.md` (規則 8 = 1 pass 1 sidecar / 3 列 / 裁量は明示 / 削除 verbatim + 共著者本文の単独削除禁止 / 量の指示 / commit 前 gate / 意図は 1 行 / 遡及しない、 sidecar 形式、 検査項目と人間の床、 依頼 spec の 3 行、 routing、 実例 ledger)。 pvc §16 に routing 1 文。
 - 道具 = `scripts/check-edit-intent.py` (--scaffold = diff から hunk 行 + 位置 + 削除 verbatim を生成、 検査 = 12 項目 PASS/FAIL + INFO 量の指示、 --selftest 20 checks = parser 4 + 合成 repo の PASS 1 + foil 11 + 未記入 scaffold は通らない)。 実 diff (88 hunk) で scaffold → 位置・被覆・verbatim PASS、 未記入行で FAIL を確認。
 - 次: scripts は 9 本 (再訪 trigger 15 本には未達)。 効果判定は次の AI 実装 pass で sidecar が「裁量」 を何件表に出すかを見る (rubric 事前登録: 決定超過が受領前に裁量枠で出れば効いた、 事後棚卸しで見つかれば効いていない)。
+
+## 2026-09-11: 盲検 reviewer 側の hoist 第 4 回 (private paper repo の 1-loop 誘導作用の referee、 reviewer session が受領後に owner 指示で昇格)
+
+- scripts 3 本 (`one_loop_pole.py` / `dirac_algebra.py` / `heat_kernel_a4.py`、 selftest 3/3 PASS、 `985fc67`)、 CI の install に sympy。 pvc §17 に道具 3 行 + kernel 10–13 (Ward 恒等式は不変汎関数で符号ごと検証 / 構造数えで「残差なし」 が自明か / 制限した背景での cross-check の死角 / Stückelberg mode の運動項の符号)。 記号計算の罠 3 型は claude-config `scientific-computing.md#exact-rational-pipelines`。 instance (sandbox の collect・shim・live audit・refs の notes) は owner の private repo 側。
+- 同日並走の符号 anchor 再発防止 (`check-sign-anchors.py`) と同じ file 群を触るため、 相手の commit を待ってから追記した (staging-window race の回避)。 README / CLAUDE.md の script 一覧の漏れも補った (DESIGN「index は当面手書き」)。
+- 次: index 生成 tool の共用化 (trigger 到達)。 Phase 2 の監視は不変。

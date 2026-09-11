@@ -28,7 +28,7 @@
 
 ## index は当面手書き (2026-09-06)
 
-**判断**: README / CLAUDE.md の file 一覧は手書き。**Why**: file 7 本で生成 tool を持ち込む cost に見合わない。**再訪 trigger**: file が 15 本を超えたら claude-config の `generate-tree.py` を `--root` 引数で共用できるよう hoist する。
+**判断**: README / CLAUDE.md の file 一覧は手書き。**Why**: file 7 本で生成 tool を持ち込む cost に見合わない。**再訪 trigger**: file が 15 本を超えたら claude-config の `generate-tree.py` を `--root` 引数で共用できるよう hoist する。**2026-09-11**: scripts が 19 本になり trigger を超えた。生成 tool の共用化は未着手 (SESSION 残タスク)。それまでの手当てとして、README の漏れ 3 本 (`review-markup-clean.py` / `strip-tex-comments.py` / `init-verification-repo.py`) と CLAUDE.md の漏れ 3 本 (`check-sign-anchors.py` / `strip-tex-comments.py` / `init-verification-repo.py`) を補った。
 
 ## 盲検 reviewer 側の数値道具を層1 に置く (2026-09-07)
 

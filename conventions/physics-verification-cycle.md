@@ -1,7 +1,7 @@
 <!-- doc-meta
 when: 論文・研究ノートの主張を機械検査で守る体制を組むとき / 外部論文を検証読みするとき / 検証系 AI workflow (verify-to-learn・adversarial pass) を設計するとき / 検証 campaign の repo・ledger・spec・第二の目・繰り越しを整備するとき / 連続 outcome の rank-one POVM の極値性・joint 一意性を検証するとき
 category: research-domain
-summary: 物理主張の検証サイクル (= 生成 → 機械検査 → 独立した第二の目 → 人間の判断) — 主張ごとの機械 anchor / foil (negative control) / 検証 tier 宣言 / claim 3 状態 / verify-to-learn / 第二の目の独立性 / rubric 事前登録 / 止まる規律 / cross-vendor 盲検 (= 同系統 AI の N 実装一致は独立でない) / campaign 運用 (ledger schema・2 段階第二の目・👁 繰り越し・cadence gate・git 由来 stats・efficacy proxy) / 近似階層の妥当性は判断でなく計算 / 外部 AI 査読レポートの前提検証 pass / verify-to-learn campaign の実測 kernel (certificate ベース定性判定・正規化検査・無限次元 supp→range・問いと主張の refuted 分離・foil の前提・WLOG 分岐・連続 rank-one POVM の極値性→joint 一意性) / 盲検 reviewer 側の道具と kernel (公開 chain の HPD 信用水準・図の等高線復元・厳密背景の Floquet・完了予算)。 数ヶ月の paper-anchored audit fleet 運用 + 2026-08 の散文主張 RCA + 2026-09 campaign からの hoist
+summary: 物理主張の検証サイクル (= 生成 → 機械検査 → 独立した第二の目 → 人間の判断) — 主張ごとの機械 anchor / foil (negative control) / 検証 tier 宣言 / claim 3 状態 / verify-to-learn / 第二の目の独立性 / rubric 事前登録 / 止まる規律 / cross-vendor 盲検 (= 同系統 AI の N 実装一致は独立でない) / campaign 運用 (ledger schema・2 段階第二の目・👁 繰り越し・cadence gate・git 由来 stats・efficacy proxy) / 近似階層の妥当性は判断でなく計算 / 外部 AI 査読レポートの前提検証 pass / verify-to-learn campaign の実測 kernel (certificate ベース定性判定・正規化検査・無限次元 supp→range・問いと主張の refuted 分離・foil の前提・WLOG 分岐・連続 rank-one POVM の極値性→joint 一意性) / 盲検 reviewer 側の道具と kernel (公開 chain の HPD 信用水準・図の等高線復元・厳密背景の Floquet・完了予算・一ループ極の厳密抽出・mostly-plus Dirac 代数・heat kernel a4 の fit・Ward 恒等式の符号を不変汎関数で検証・「残差なし」 の構造数え・制限背景の cross-check の死角・Stückelberg mode の符号)。 数ヶ月の paper-anchored audit fleet 運用 + 2026-08 の散文主張 RCA + 2026-09 campaign からの hoist
 -->
 # 物理主張の検証サイクル (verification cycle)
 
@@ -229,7 +229,7 @@ spec 側の教訓 (= 起票者向け): 環境の道具の欠落 (SDP solver 不�
 
 §12 は report を**受け取る側**の規律。 本節は sandbox で report を**書いた側** (= 別 session の reviewer) が、 受領後に owner の指示「知見を上層へ、 script も残す」 で hoist したもの (起源 = 2026-09、 private paper repo の 2 回目 blind review。 実 instance = 原稿・reviewer scratch 11 本・promotion note は private repo、 ここには一般化した道具と kernel だけ)。
 
-**道具** (`scripts/`、 NumPy/SciPy のみ、 各 `--selftest`):
+**道具** (`scripts/`、 NumPy/SciPy のみ — `one_loop_pole.py` だけ sympy、 各 `--selftest`):
 
 | 道具 | 何を機械化するか | 規律の正本 |
 |---|---|---|
@@ -238,6 +238,9 @@ spec 側の教訓 (= 起票者向け): 環境の道具の欠落 (SDP solver 不�
 | [`floquet-monodromy.py`](../scripts/floquet-monodromy.py) | Mathieu / gauge kinetic-function / conformal 再スケーリングの質量項の Floquet 指数を、 event で周期を取った**厳密**周期背景上の monodromy で。 selftest = 第 1 帯 $\mu=q/2$、 $a=0$ の縁 $q\simeq0.91$、 $k=0$ の marginality と線形化背景の偽成長 | [`scientific-computing.md#floquet-exact-background`](../../claude-config/conventions/scientific-computing.md#floquet-exact-background) |
 | [`nstar-fixed-point.py`](../scripts/nstar-fixed-point.py) (2026-09-08、 第 3 回で 2 例目) | 「$T_\text{rh}$ → $N_*$ → $(n_s,r)$」 の chain を定義から: entropy 保存の定数 (61.49 for $H_0=67.4$)、 $A_s$ から $V_0$、 質量を rate に feedback する fixed point、 厳密背景の 2 次 Hubble-flow (Stewart–Lyth) の $(n_s,r)$、 parameter scan と 2 history の「固定 $r$ の $\Delta n_s$ / 固定 $n_s$ の $r$ 比」。 selftest = 定数・$\epsilon_V=1$ vs $\epsilon_H=1$ の終点・瞬時 vs 摂動の順序・LO と 2 次の一致 | [`paper-audit.md#threshold-is-not-regime-onset`](../../claude-config/conventions/paper-audit.md#threshold-is-not-regime-onset) (d)(e) |
 | [`expanding-mode-growth.py`](../scripts/expanding-mode-growth.py) (同上) | 膨張背景 (slow roll → 振動) 上の線形 mode 成長を、 **真空を置く時刻** (`--start end|eps_V=1|x=<v>`) と sub-horizon 条件 (`--kmin`) を引数にして数振動ごとに $\max_k\ln n_k$ で出す。 selftest = 厳密 $\epsilon_H=1$ の終点、 結合 0 で成長なし、 結合単調 | [`scientific-computing.md#onset-is-eps-H-one`](../../claude-config/conventions/scientific-computing.md#onset-is-eps-H-one) |
+| [`one_loop_pole.py`](../scripts/one_loop_pole.py) (2026-09-11、 第 4 回) | 印字された Feynman 則から 1-loop の 2 点関数・tadpole・混合振幅の $1/\epsilon$ 極を再計算する (2 propagator まで、 大運動量展開 + 共変平均、 厳密有理数、 Float 拒否)。 selftest = 単項式 rank 0–3 と Feynman parameter の閉形式、 QED 真空偏極 $\tfrac43(q^2\eta^{\mu\nu}-q^\mu q^\nu)$ | [`scientific-computing.md#exact-rational-pipelines`](../../claude-config/conventions/scientific-computing.md#exact-rational-pipelines) |
+| [`dirac_algebra.py`](../scripts/dirac_algebra.py) (同上) | mostly-plus の $\gamma$・$\gamma_5$・$\varepsilon$・$\sigma$・trace 恒等式と軸性 torsion の辞書 ($S_dS^d=-6K_{abc}K^{abc}$ は Lorentzian、 Euclidean では符号が変わる) を全部 assert する | 辞書は 1 つの signature で訳す (下の kernel 10・12 の前提) |
+| [`heat_kernel_a4.py`](../scripts/heat_kernel_a4.py) (同上) | 任意の $E,\Omega$ から Gilkey の $a_4$ を不変量 fit で出し、 種ごとに $1/\epsilon$ 極へ写す。 Dirac + 軸性ベクトル (一般 $\eta$)・QED・scalar を内蔵。 selftest = Vassilevich Table 1 の spin ½、 Dirac 真空エネルギーの符号、 log $m^2R$、 QED $Z_3$ (いずれも全体反転で落ちる) | 全体符号の外部 anchor = [`paper-audit.md#absolute-sign-external-anchor`](../../claude-config/conventions/paper-audit.md#absolute-sign-external-anchor)、 下の kernel 12 |
 
 **kernel** (reviewer 側で観測した一般則、 受領側の §12 と対):
 
@@ -253,6 +256,13 @@ spec 側の教訓 (= 起票者向け): 環境の道具の欠落 (SDP solver 不�
 7. **原稿を開く前の独立導出 (Stage 1) は、 原稿の自己矛盾を最も安く見つける**: 同じ Lagrangian から自分で出した「末期の質量」 と「spectator の範囲」 を原稿の段落に当てると、 原稿が自分の式から導かれない主張 (benchmark 行が spectator でない) をしていることが、 原稿の数値を再現する作業とは独立に出る。 二段 spec の Task を「原稿が主張しそうな量を、 原稿の変数で計算せよ」 の形に切る (rubric 事前登録の変種)。
 8. **構成 (Weyl 変換) が課す関係は原稿の parameter 表に当てる**: $\sqrt{-g_J}=F_g^{-2}\sqrt{-g}$ から potential の指数因子は $F_g^{-2}$ 由来か Jordan potential 側かの二択で、 前者なら潜在 parameter が 1 つ消える (universal なら全部消える)。 原稿がどちらか書いていなければ finding、 書いていれば表に「構成が決める点」 の行があるか確認する。
 9. **worker の hoist packet は sandbox 内に書かせる** (`HANDOFF.md`、 [`cold-eyes-isolation.md#sealed-sandbox`](cold-eyes-isolation.md#sealed-sandbox) 4): 2 round 続けて reviewer 側 hoist が owner の事後指示で発生した = 密閉 sandbox には上層への経路が構造的に無い。 上げる材料を worker に列挙させ、 受領側の hoist station の入力にする。
+
+第 4 回 (2026-09-11、 別の private paper repo、 二段 spec = Ward 恒等式・heat kernel・2 点関数の構造を原稿を開く前に導出 → 査読) で追加:
+
+10. **Ward 恒等式は、 厳密に不変な汎関数の上で符号ごと検証してから loop の出力に当てる** — 背景場展開の恒等式では、 非斉次項の符号 ($\delta\hat\omega=-\partial\theta$ か $+\partial\theta$ か) と tadpole 項の置き場を書き違えやすく、 変換則の印字の符号が共変性の要求と逆になっている公刊例も実在する。 導いた恒等式を、 まず厳密に不変な局所汎関数 (例: 軸性 torsion の二乗の積分) の 2 次変分と混合項に当て、 符号を反転すると落ちることを foil で確かめる ([#global-flip-foil](#global-flip-foil) と同じ型)。 これで loop 側との不一致を「恒等式の誤り」 と「loop の誤り」 に分けられる。
+11. **「全 tensor 構造で残差なし」 は、 構造数えで自明になっていないか確かめる** — 平坦背景の 2 点関数を局所作用に合わせるとき、 Lorentz 共変な ansatz の構造数、 Bose 対称性、 恒等式ごとに残る数を数える (例: $q^0$ は 3 → 0 で tadpole に完全に固定、 $q^2$ は 9 → 7 → 3 → 2)。 残る数が作用の operator 数と一致するなら「残差なし」 は構造上自動で、 情報は係数の値だけにある ([`paper-audit.md#claim-strength-three-tests`](../../claude-config/conventions/paper-audit.md#claim-strength-three-tests) の tautology 検査)。 ansatz に載るのに係数が 0 になる operator (vector torsion 型など) は、 恒等式から従う非自明な帰結として別 item にする。
+12. **制限した背景での cross-check は、 その背景で消える operator を検査できない** — heat kernel を発散のない配置 ($\partial\cdot S=0$) だけで評価すると、 そこで消える operator ($(\nabla\cdot S)^2$) の係数は決まらない。 原稿が「別の 2 点関数で決める」 と書いた係数を、 一般背景の共変計算が実は既に決めている (Maxwell 形、 縦波項なし) ことが起こる。 cross-check を載せるときは評価した背景の class を明示し、 一般背景で消えない項を落としていないか確かめる ([`paper-audit.md#cross-check-appendix-shape`](../../claude-config/conventions/paper-audit.md#cross-check-appendix-shape) の「射程」 1 文)。 道具 = [`heat_kernel_a4.py`](../scripts/heat_kernel_a4.py) (一般 $\eta$ の係数を selftest に固定)。
+13. **Stückelberg (would-be NG) mode の「運動項」 の符号は物理でない** — ゲージ変換で消せる場の 2 次形式に負符号の運動項が出ても、 ghost と読まない。 unitary gauge ではそれは gauge 場の質量項で、 伝播 mode の議論は gauge 固定した結合 Hessian で行う。 査読では「独自の運動項を得た」 型の文を、 この読みで検査する。
 
 ## <a id="sibling-routing"></a>16. 隣接 doc への routing
 
