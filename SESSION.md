@@ -49,3 +49,9 @@
 - 同日並走の符号 anchor 再発防止 (`check-sign-anchors.py`) と同じ file 群を触るため、 相手の commit を待ってから追記した (staging-window race の回避)。 README / CLAUDE.md の script 一覧の漏れも補った (DESIGN「index は当面手書き」)。
 - 追補 (同日): HANDOFF (d) の spec の穴 2 件 (用語定義の例 = tadpole、 label → 印字番号の `.aux` 同梱) を REVIEW-SPEC 雛形と cold-eyes §2 へ。 pvc kernel 11・12 の例示から原稿固有の計数と原稿の文言を外した (公開履歴には前の文面が残る)。 DESIGN の 09-07 節に sympy 依存と境界を追記。 kernel 14 (多添字の場の横・縦は分解の添字を書く、 HANDOFF (b) 9) を追加。 ops `#hoist-station` 3 に公開層の例示の内容走査を、 claude-config `shell-env.md#claude-issued-shell-commands` に zsh の単語分割で走査対象を取り違えた件を追記。
 - 次: index は同日の別 session が生成へ移した (DESIGN `#script-index-generation`、 3 本も収録済)。 Phase 2 の監視は不変。
+
+## 2026-09-11: 符号 anchor の engine (`check-sign-anchors.py`) + `--readers`
+
+- 起源: private paper repo で、 有効作用の全体符号が逆のまま検査 fleet が全 PASS した (fleet は全体反転に不変で、 見分けたのは外部の絶対量に結ぶ anchor だけ)。 engine = 登録簿 (印字量 → 外部 anchor → 全体反転 foil) の coverage / `--run` (foil の歯を end-to-end で、 traceback は歯に数えない) / `--fleet-scan` / `--deferrals` (carrier の無い「規約差」 の ratchet)、 `164d762`。 規則 = claude-config `paper-audit.md#absolute-sign-external-anchor` / `#convention-difference-closure`、 pvc §3 `#global-flip-foil`。
+- 追補 (同日、 owner「スクリプトと知見をなるべく上層に」): `--readers` = fleet の各検査が原稿 file を実行時に何回開くか (audit hook、 resolved path で比較、 子 process は数えない = 下限)。 source の grep は docstring の言及で過大に数える (同じ repo で grep 16 本 / 実行時 1 本)。 実 repo では 15 本中 3 本 (うち 2 本は今回足した anchor)。 selftest 27。 使い方 = CLAUDE.md の 1 行。
+- 次: 変化なし (Phase 2 の監視)。

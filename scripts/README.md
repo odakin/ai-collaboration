@@ -6,7 +6,7 @@ Each module's first docstring line is the description source of truth. Every scr
 | script | purpose |
 |---|---|
 | [`check-edit-intent.py`](check-edit-intent.py) | AI 原稿改稿の意図記録 (edit-intent sidecar) の骨組み生成 + 機械検査: hunk 被覆 / 位置 / 種類 / ID 実在 / 裁量枠 / 削除 verbatim を PASS/FAIL + exit code で。 --selftest 内蔵。 正本 = conventions/edit-intent-record.md |
-| [`check-sign-anchors.py`](check-sign-anchors.py) | Sign-carrying printed claims: external-anchor coverage, end-to-end foil teeth, fleet-invariance scan, un-carried convention deferrals. |
+| [`check-sign-anchors.py`](check-sign-anchors.py) | Sign-carrying printed claims: external-anchor coverage, end-to-end foil teeth, fleet-invariance scan, which checks open the manuscript at all, un-carried convention deferrals. |
 | [`covariant_moment_algebra.py`](covariant_moment_algebra.py) | Covariant moment algebra on the full line and finite windows; --selftest. |
 | [`dilaton-spectator-growth.py`](dilaton-spectator-growth.py) | Zero-mode growth of a spectator field with a dilaton-type coupling e^{-gamma chi/M_P} (d phi)^2 during inflation (NumPy + SciPy only). |
 | [`dirac_algebra.py`](dirac_algebra.py) | Mostly-plus Dirac algebra with asserted conventions (NumPy; exact sympy matrices on request) — γ^a, γ5, ε, σ^{ab}, antisymmetrised products, trace identities and the axial-torsion dictionary; --selftest |

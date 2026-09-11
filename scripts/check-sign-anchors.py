@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sign-carrying printed claims: external-anchor coverage, end-to-end foil teeth, fleet-invariance scan, un-carried convention deferrals.
+"""Sign-carrying printed claims: external-anchor coverage, end-to-end foil teeth, fleet-invariance scan, which checks open the manuscript at all, un-carried convention deferrals.
 
 Why (2026-09).  A paper's check fleet -- Ward-Takahashi-type identities, ratios, channel
 decompositions, calibrations that use the same diagram-to-effective-action dictionary on both
@@ -53,6 +53,14 @@ Modes (combine freely; default = static only):
                 manuscript and tabulate which scripts can tell them apart (the answer to "which
                 of our checks are blind to this transformation?").  Scripts that fail on the
                 current manuscript are findings.
+  --readers     run every `fleet` script once in the real tree under a Python audit hook and count
+                how often it opens the manuscript (compared by resolved path, so symlinks count).
+                A check that never opens the manuscript cannot see any change of the printed text,
+                whatever it asserts -- it guards a transcription.  Grepping the sources for the
+                file name over-counts (docstrings and comments name it): measure at run time.
+                Opens made by child processes are not seen, so the count is a lower bound; a
+                script that depends on being the real __main__ module (multiprocessing spawn) may
+                behave differently under the probe.  Scripts that fail are findings.
   --deferrals   every line in `paths` matching a `pattern` (sign / convention deferral wording)
                 must carry a carrier on the same line (`carrier` regex) or be baselined; open
                 baseline items are listed on every run; a baseline entry that no longer matches
@@ -87,6 +95,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -355,8 +364,7 @@ def run_anchors(reg, root, timeout, log):
 
 # --------------------------------------------------------------------------- --fleet-scan
 def fleet_scan(reg, root, timeout, jobs, log):
-    scripts = sorted({os.path.relpath(p, root) for g in (reg.get("fleet") or [])
-                      for p in glob.glob(str(root / g)) if p.endswith(".py")})
+    scripts = fleet_scripts(reg, root)
     if not scripts:
         return ["--fleet-scan: no script matches the 'fleet' globs"], []
     man = reg.get("manuscript") or ""
@@ -402,6 +410,90 @@ def fleet_scan(reg, root, timeout, jobs, log):
     for fid in foil_ids:
         sees = [r["script"] for r in rows if r[fid] == "sees"]
         log(f"  -> {fid}: {len(sees)} of {len(rows)} scripts see it" + (f": {', '.join(sees)}" if sees else ""))
+    return findings, rows
+
+
+# --------------------------------------------------------------------------- --readers
+PROBE = r'''import os, runpy, sys
+_target, _out = os.environ["SIGN_ANCHOR_PROBE_TARGET"], os.environ["SIGN_ANCHOR_PROBE_OUT"]
+
+
+def _hook(event, args):
+    if event != "open" or not args or isinstance(args[0], int):
+        return
+    try:
+        p = os.fsdecode(os.fspath(args[0]))
+    except TypeError:
+        return
+    if p == _out:
+        return
+    try:
+        hit = os.path.realpath(p) == _target
+    except (OSError, ValueError):
+        return
+    if hit:
+        with open(_out, "a") as f:
+            f.write("1\n")
+
+
+sys.addaudithook(_hook)
+_script = sys.argv[1]
+sys.argv = sys.argv[1:]
+sys.path[0] = os.path.dirname(os.path.abspath(_script))
+runpy.run_path(_script, run_name="__main__")
+'''
+
+
+def fleet_scripts(reg, root):
+    return sorted({os.path.relpath(p, root) for g in (reg.get("fleet") or [])
+                   for p in glob.glob(str(root / g)) if p.endswith(".py")})
+
+
+def probe_one(script, root, target, out_file, timeout):
+    """Run `script` in `root` under the open-probe; return (rc, output, manuscript opens, seconds)."""
+    env = dict(os.environ, SIGN_ANCHOR_PROBE_TARGET=target, SIGN_ANCHOR_PROBE_OUT=out_file)
+    t0 = time.monotonic()
+    try:
+        p = subprocess.run([sys.executable, "-c", PROBE, script], cwd=str(root), env=env,
+                           capture_output=True, text=True, timeout=timeout)
+        rc, out = p.returncode, (p.stdout or "") + (p.stderr or "")
+    except subprocess.TimeoutExpired:
+        rc, out = None, f"TIMEOUT after {timeout:g} s"
+    try:
+        with open(out_file, encoding="utf-8") as f:
+            n = sum(1 for _ in f)
+    except FileNotFoundError:
+        n = 0
+    return rc, out, n, time.monotonic() - t0
+
+
+def readers_scan(reg, root, timeout, jobs, log):
+    scripts = fleet_scripts(reg, root)
+    if not scripts:
+        return ["--readers: no script matches the 'fleet' globs"], []
+    man = reg.get("manuscript") or ""
+    if not man or not (root / man).is_file():
+        return [f"--readers: manuscript not found: {man!r}"], []
+    target = os.path.realpath(root / man)
+    with tempfile.TemporaryDirectory(prefix="sign-anchor-readers-") as td:
+        with ThreadPoolExecutor(max_workers=max(1, jobs)) as ex:
+            futures = [ex.submit(probe_one, s, root, target, os.path.join(td, f"opens-{i}"), timeout)
+                       for i, s in enumerate(scripts)]
+            results = [fu.result() for fu in futures]
+    findings, rows = [], []
+    for s, (rc, out, n, dt) in zip(scripts, results):
+        status = "PASS" if rc == 0 else classify(rc, out).replace("detected", "FAIL")
+        rows.append({"script": s, "opens": n, "status": status, "seconds": round(dt, 1)})
+        if rc != 0:
+            findings.append(f"--readers: {s} does not PASS on the current manuscript ({status})")
+            log(tail(out))
+    width = max(len(s) for s in scripts)
+    log("  " + "script".ljust(width) + "  opens  status   time")
+    for r in rows:
+        log("  " + r["script"].ljust(width) + f"  {r['opens']:5d}  {r['status']:7s} {r['seconds']:6.1f}s")
+    readers = [r["script"] for r in rows if r["opens"]]
+    log(f"  -> {len(readers)} of {len(rows)} fleet scripts open the manuscript"
+        + (f": {', '.join(readers)}" if readers else ""))
     return findings, rows
 
 
@@ -458,23 +550,26 @@ def deferral_scan(reg, root):
 
 # --------------------------------------------------------------------------- driver
 def evaluate(registry, run=False, fleet=False, deferrals=False, timeout=DEFAULT_TIMEOUT, jobs=4,
-             log=print):
+             log=print, readers=False):
     reg, root = load_registry(registry)
     res = {"static": static_findings(reg, root), "run": [], "fleet": [], "fleet_rows": [],
-           "deferrals": [], "open": [], "carried": 0}
+           "readers": [], "reader_rows": [], "deferrals": [], "open": [], "carried": 0}
     if run:
         log("--run: each anchor on the current manuscript, then on every foil")
         res["run"] = run_anchors(reg, root, timeout, log)
     if fleet:
         log("--fleet-scan: which fleet scripts can tell each foil from the current manuscript")
         res["fleet"], res["fleet_rows"] = fleet_scan(reg, root, timeout, jobs, log)
+    if readers:
+        log("--readers: how often each fleet script opens the manuscript (run-time audit hook, real tree)")
+        res["readers"], res["reader_rows"] = readers_scan(reg, root, timeout, jobs, log)
     if deferrals:
         res["deferrals"], res["open"], res["carried"] = deferral_scan(reg, root)
         log(f"--deferrals: {res['carried']} carried line(s), {len(res['open'])} open baseline item(s), "
             f"{len(res['deferrals'])} finding(s)")
         for item in res["open"]:
             log(f"  [OPEN ] {item}")
-    res["findings"] = res["static"] + res["run"] + res["fleet"] + res["deferrals"]
+    res["findings"] = res["static"] + res["run"] + res["fleet"] + res["readers"] + res["deferrals"]
     return res
 
 
@@ -484,15 +579,16 @@ def main(argv=None):
     ap.add_argument("--registry", default="sign-anchors.json", help="JSON registry (default ./sign-anchors.json)")
     ap.add_argument("--run", action="store_true", help="run anchors on the current and on every foiled manuscript")
     ap.add_argument("--fleet-scan", action="store_true", help="tabulate which fleet scripts see each foil")
+    ap.add_argument("--readers", action="store_true", help="count how often each fleet script opens the manuscript")
     ap.add_argument("--deferrals", action="store_true", help="un-carried sign/convention deferral ratchet")
     ap.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT, help="per-script timeout in seconds")
-    ap.add_argument("-j", "--jobs", type=int, default=4, help="parallel scripts in --fleet-scan")
+    ap.add_argument("-j", "--jobs", type=int, default=4, help="parallel scripts in --fleet-scan / --readers")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args(argv)
     if a.selftest:
         return selftest()
     try:
-        res = evaluate(a.registry, a.run, a.fleet_scan, a.deferrals, a.timeout, a.jobs)
+        res = evaluate(a.registry, a.run, a.fleet_scan, a.deferrals, a.timeout, a.jobs, readers=a.readers)
     except RegistryError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
@@ -501,7 +597,7 @@ def main(argv=None):
         for f in res["findings"]:
             print(f"  x {f}")
         return 1
-    done = ["static"] + [m for m, on in (("run", a.run), ("fleet-scan", a.fleet_scan),
+    done = ["static"] + [m for m, on in (("run", a.run), ("fleet-scan", a.fleet_scan), ("readers", a.readers),
                                          ("deferrals", a.deferrals)) if on]
     print(f"no finding ({', '.join(done)})")
     return 0
@@ -527,6 +623,21 @@ sys.exit(0 if ok else 1)
 '''
 AUD_CRASH = _HEAD + '''re.search(r"Gamma = [+]J", t).group(0)   # AttributeError on the flipped text
 print("[PASS]")
+'''
+AUD_TRANSCRIBED = '''"""Checks the prefactor printed in paper/paper.tex against a hand transcription; never opens the file."""
+import sys
+print("[PASS] transcribed value matches")
+sys.exit(0)
+'''
+AUD_VIA_LINK = '''import os, sys
+here = os.path.dirname(os.path.abspath(__file__))
+t = open(os.path.join(here, "link.tex"), encoding="utf-8").read()   # a symlink to the manuscript
+print("[PASS] read through a symlink")
+sys.exit(0)
+'''
+FAIL_NOW = '''import sys
+print("[FAIL] always")
+sys.exit(1)
 '''
 RIGHT = "Gamma = +J\nprefactor = -1\n"
 WRONG = "Gamma = -J\nprefactor = +1\n"
@@ -570,6 +681,15 @@ def selftest():
         (root / "audit_anchor.py").write_text(AUD_ANCHOR, encoding="utf-8")
         (root / "audit_blind.py").write_text(AUD_BLIND, encoding="utf-8")
         (root / "audit_crash.py").write_text(AUD_CRASH, encoding="utf-8")
+        (root / "audit_transcribed.py").write_text(AUD_TRANSCRIBED, encoding="utf-8")
+        (root / "fail_now.py").write_text(FAIL_NOW, encoding="utf-8")
+        try:
+            os.symlink(os.path.join("paper", "paper.tex"), root / "link.tex")
+            (root / "audit_via_link.py").write_text(AUD_VIA_LINK, encoding="utf-8")
+            linked = True
+        except OSError:
+            linked = False
+            print("  [SKIP] symlinked reader: symlinks unavailable")
         (root / "DESIGN.md").write_text(
             "- the absolute sign needs convention tracking (carrier: TODO-7)\n"
             "- sign vs textbook: convention tracking later\n", encoding="utf-8")
@@ -671,6 +791,22 @@ def selftest():
         expect("fleet scan: no finding when every script passes on the current manuscript", res["fleet"] == [],
                res["fleet"])
 
+        res = evaluate(write("readers"), readers=True, log=quiet)
+        rrows = {r["script"]: r for r in res["reader_rows"]}
+        expect("readers: the anchor, the blind and the crashing audit each open the manuscript",
+               all(rrows.get(s, {}).get("opens", 0) >= 1
+                   for s in ("audit_anchor.py", "audit_blind.py", "audit_crash.py")), rrows)
+        expect("readers: a script that names the manuscript only in its docstring opens it 0 times",
+               "paper.tex" in AUD_TRANSCRIBED and rrows.get("audit_transcribed.py", {}).get("opens") == 0,
+               rrows.get("audit_transcribed.py"))
+        if linked:
+            expect("readers: an open through a symlink counts (resolved path)",
+                   rrows.get("audit_via_link.py", {}).get("opens", 0) >= 1, rrows.get("audit_via_link.py"))
+        expect("readers: no finding when every fleet script passes", res["readers"] == [], res["readers"])
+        res = evaluate(write("readfail", lambda r: r.update(fleet=["fail_*.py"])), readers=True, log=quiet)
+        expect("readers: a fleet script that fails is a finding",
+               len(res["readers"]) == 1 and "does not PASS" in res["readers"][0], res["readers"])
+
         bad = root / "bad.json"
         bad.write_text(json.dumps({"schema": "nope"}), encoding="utf-8")
 
@@ -682,6 +818,8 @@ def selftest():
                quiet_main(["--registry", str(root / "good.json"), "--run"]) == 0)
         expect("main: un-carried deferral exits 1",
                quiet_main(["--registry", str(root / "good.json"), "--deferrals"]) == 1)
+        expect("main: --readers on the good registry exits 0",
+               quiet_main(["--registry", str(root / "good.json"), "--readers"]) == 0)
         expect("the real manuscript was never overwritten by a foil",
                (root / "paper" / "paper.tex").read_text(encoding="utf-8") == RIGHT)
     print(f"selftest: {'ALL PASS' if not failed else 'FAILED: ' + ', '.join(failed)}")

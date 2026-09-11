@@ -38,6 +38,7 @@ layer 1 (public、全 Claude Code / Codex ユーザー向け)。**依存でき�
 - 第二の目を別 session に出す: `make-review-sandbox.py create <slug> --spec REVIEW-SPEC.md --include <paper.pdf>` → cwd を sandbox に pin して spawn → `collect`
 - AI に決定 ledger どおりの原稿改稿を実装させる: 依頼 spec に `edit-intent-record.md#requester-spec-line` の 3 行 → 実装側は `check-edit-intent.py --scaffold … --out review/edit-intent-<date>.md` → 種類 / ID / 意図 を埋める → 同 script の検査 ALL PASS → 原稿と同じ pass で commit。 受領は裁量枠から読む / --fill (JSON から 種類・ID・意図 を一括で埋めて検査)
 - 自分が実装側のとき: 当てる → 別 dir で組版 → 記録 → commit の順 ([`#apply-then-record`](conventions/edit-intent-record.md#apply-then-record))。 削除の前に `git blame`。 共著 review 中の原稿の読み合わせは `review-markup-clean.py` を基準版と現在版の両方に当ててから latexdiff ([`#cleaned-base-diff`](conventions/edit-intent-record.md#cleaned-base-diff))、 投稿前清掃も同じ script ([`#submission-cleanup`](conventions/edit-intent-record.md#submission-cleanup))
+- 印字した係数の符号を外部の絶対量で守る: project に登録簿 `sign-anchors.json` (印字量 → 外部 anchor → 全体反転 foil) → `check-sign-anchors.py --run --deferrals` (gate = anchor が現稿で PASS し、 全体反転の foil で assertion により FAIL、 carrier の無い「規約差」 0) / `--fleet-scan` (fleet のどの検査が変換を見分けるか) / `--readers` (どの検査が原稿を実行時に開くか)。 規則 = claude-config `paper-audit.md#absolute-sign-external-anchor` / `#convention-difference-closure`
 
 ## 安全規則 (public repo)
 
