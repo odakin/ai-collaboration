@@ -16,6 +16,10 @@ Usage
           never the other way.  Prints the contamination-grep reminder.
   make-review-sandbox.py --selftest
 
+Before --include, make the referee copy: review-markup-clean.py (colour / Q&A) and then
+strip-tex-comments.py (commented-out lines carry authorship notes and rejected drafts), rebuild,
+and check the PDF text is unchanged (cold-eyes-isolation.md#referee-copy-strip-comments).
+
 The spec you pass must follow cold-eyes-isolation.md#spec-leakage: statement, allow/deny,
 rubric, output format, stop rules, return command — no expected verdict, no "watch step 2".
 A two-stage skeleton for blind review of one's own manuscript (Stage 1 = derivation tasks solved
