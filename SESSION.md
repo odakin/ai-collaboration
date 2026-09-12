@@ -55,3 +55,10 @@
 - 起源: private paper repo で、 有効作用の全体符号が逆のまま検査 fleet が全 PASS した (fleet は全体反転に不変で、 見分けたのは外部の絶対量に結ぶ anchor だけ)。 engine = 登録簿 (印字量 → 外部 anchor → 全体反転 foil) の coverage / `--run` (foil の歯を end-to-end で、 traceback は歯に数えない) / `--fleet-scan` / `--deferrals` (carrier の無い「規約差」 の ratchet)、 `164d762`。 規則 = claude-config `paper-audit.md#absolute-sign-external-anchor` / `#convention-difference-closure`、 pvc §3 `#global-flip-foil`。
 - 追補 (同日、 owner「スクリプトと知見をなるべく上層に」): `--readers` = fleet の各検査が原稿 file を実行時に何回開くか (audit hook、 resolved path で比較、 子 process は数えない = 下限)。 source の grep は docstring の言及で過大に数える (同じ repo で grep 16 本 / 実行時 1 本)。 実 repo では 15 本中 3 本 (うち 2 本は今回足した anchor)。 selftest 27。 使い方 = CLAUDE.md の 1 行。
 - 次: 変化なし (Phase 2 の監視)。
+
+## 2026-09-12: 相手側の AI への作業委譲 (`delegated-work-packages.md`)
+
+- 起源: 卒論を共著の国際誌論文に育てる解析 (50 年の観測データ、主実行者 = 学生本人 + その AI) を 15 本の作業書に分割した owner session。判断 (定義・手法・閾値・地点選定・解釈) を依頼側の SPEC に固め、実行だけを 1 セッション 1 本の WP に出す形。
+- 規約 = `conventions/delegated-work-packages.md` (§1 何を分離するか / §2 常設 3 層 + WP / §3 WP の 7 要素 / §4 **受入基準は依頼側の独立実装で埋める** = 交差検証を仕組みに組み込む、書けないなら合成データの回収 test / §5 全部書いて ready だけ着手 + 確定待ち項目 / §6 書き込み zone / §7 結果ノートと「仕様への提案」 が仕様改訂の唯一の入口 / §8 解釈・基準値の書き換え・仕様外解析は渡さない / §9 使わない場面 / §10 起源と evidence base 1 例)。README / CLAUDE.md の一覧、DESIGN に判断。
+- 同 session の姉妹 hoist (claude-config 側): `jma-obsdl-download.md` に一次資料の品質列表と長期系列 QC 4 点 (行数の暦検算・品質符号の分布・痕跡時間 15%・記録分解能の年代)、`paper-audit.md` に分布形の主張と venue 較正の 2 anchor。
+- 次: 変化なし (Phase 2 の監視)。効果判定 = 最初の 2〜3 本の結果ノートで「受入基準の判定表」 と「仕様への提案」 が実質を持つか (儀式化していたら基準の本数を減らす)。

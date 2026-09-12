@@ -43,3 +43,15 @@
 **判断**: 自著の blind review を書いた session が作った scratch のうち、 論文に依らない 3 つ (公開 chain の HPD 信用水準 / 図の等高線の自己較正復元 / 厳密周期背景の Floquet 指数) を一般化して `scripts/` に置く。 campaign 由来の `gpt_measurements.py` と同じ扱い (kernel-up / instance-down、 ops `#hoist-station`)。 **Why**: 次の blind review・verify-to-learn が同じ道具を作り直すのを防ぐ。 chain・PDF・図の実 data は本 repo に入れない (公開物でも scope 外、 selftest は合成 data で閉じる)。 **代替案**: private paper repo に置く → 他 campaign から見えない / claude-config に置く → 数値道具は vendor 中立なので本 repo。 **境界**: 論文固有の再現 script (表 1・軌跡・図) は private repo の scratch copy に残し、 ここへは上げない。
 
 **追記 (2026-09-11)**: 第 4 回の reviewer hoist で `one_loop_pole.py` / `dirac_algebra.py` / `heat_kernel_a4.py` を足した。 `one_loop_pole.py` は極を厳密有理数で出すために sympy を使うので、 CI の install に sympy を加えた (09-07 の 3 本が NumPy/SciPy だけで書けたのは道具の性質で、 repo の制約ではない)。 境界は同じで、 模型固有の双線形形式・Ward 恒等式の構造数え・原稿の Feynman 則と印字式は private repo に残す。 全体符号の外部 anchor は、 規則が claude-config `paper-audit.md#absolute-sign-external-anchor`、 検査 engine が同日の `check-sign-anchors.py`、 registry が各 project にある。 ここの 3 本は selftest の較正に同じ量 (真空エネルギー・QED) を使うだけで、 project の anchor registry には載せない。
+
+## 相手側の AI への作業委譲を層1 に置く (2026-09-12)
+
+**判断**: 共同研究者 (人間 + その AI) に数か月の解析を実行してもらうときの文書形式を `conventions/delegated-work-packages.md` として本 repo に置く。中身 = 判断と実行の分離、常設 3 層 (入口 / 手順 / 定義) + 1 セッション 1 WP、WP の 7 要素、**受入基準を依頼側の独立実装の出力で埋める**、全部書いて ready だけ着手、書き込み zone、結果ノートの様式、作業者に書かせないもの。
+
+**Why**: 本 repo の趣旨 (what to hand to the machine, what a human must still check) の一例そのもので、vendor 中立 — 相手の AI が Claude でも Codex でも、あるいは人間だけでも形式は同じ。既存 3 本が「自分の書いたものを検証する」側なのに対し、これは「他人に実行してもらう」側で、station として隣り合う。
+
+**代替案**: (a) `claude-config` に置く → あちらは Claude Code harness の規約で、相手のツールを規定しない本形式とは層が違う。(b) `dropbox-refs.md#counterpart-ai-parallel-work` を拡張する → あれは Pattern B (Dropbox 共有) 固有の運用で、委譲形式は同期手段に依らない。(c) project 内に留める → 次の project が同じ形式を作り直す (kernel-up / instance-down の原則に反する)。
+
+**境界**: 分野固有の中身 (観測データの QC、統計モデル、判定閾値) は project の SPEC に残す。本 doc が持つのは形式だけ。受入基準の数値そのもの・参照実装も project 側。
+
+**evidence base は 1 プロジェクト** (2026-09-12、卒論 → 国際誌フルペーパーの解析、WP 15 本)。doc 末尾に「2〜3 本が accepted になったら基準の本数を減らす方向で見直す」と書いた。形式が重いと結果ノートが儀式化するのが最も起こりやすい失敗なので、そこを再訪 trigger にする。

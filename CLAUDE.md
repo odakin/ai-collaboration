@@ -14,8 +14,10 @@ ai-collaboration/
 │   │                                   #   第二の目 / rubric 事前登録 / 止まる規律 / cross-vendor / campaign 運用 A-K
 │   ├── verification-cycle-ops.md       # どう回し続けるか: 6 原則 / 導出 state 機械 / 台帳 3 種 + retro / 無人層 / fresh session の手順
 │   ├── cold-eyes-isolation.md          # 第二の目の隔離: 汚染経路 6 口 / 封じた sandbox / spec に書いてよいこと / 受領後の汚染 grep
-│   └── edit-intent-record.md           # AI による原稿改稿の意図記録: 1 pass 1 sidecar (hunk → finding / decision / 種類 = 実装・裁量・削除) / 裁量枠 / 削除 verbatim + 共著者本文の単独削除禁止 / 量の指示 / commit 前 gate / 依頼 spec の 3 行 /
-│                                       #   §7 実装 pass の作業規律 (当てる→組版 gate→記録、 anchor assert、 削除前の blame、 清掃版どうしの diff) / §8 投稿前の清掃
+│   ├── edit-intent-record.md           # AI による原稿改稿の意図記録: 1 pass 1 sidecar (hunk → finding / decision / 種類 = 実装・裁量・削除) / 裁量枠 / 削除 verbatim + 共著者本文の単独削除禁止 / 量の指示 / commit 前 gate / 依頼 spec の 3 行 /
+│   │                                   #   §7 実装 pass の作業規律 (当てる→組版 gate→記録、 anchor assert、 削除前の blame、 清掃版どうしの diff) / §8 投稿前の清掃
+│   └── delegated-work-packages.md      # 相手側の AI への作業委譲: 判断と実行の分離 / 常設 3 層 (入口・手順・定義) + WP 1 本 = 1 セッション / WP の 7 要素 /
+│                                       #   受入基準は依頼側の独立実装の出力 / 全部書いて ready だけ着手 / 書き込み zone / 結果ノート / 解釈は書かせない
 ├── docs/state-discrimination.md       # 状態識別の一般数式・凸錐と座標の仮定・certificate の正本
 ├── template/                           # clone-and-run skeleton of a private verification repo (scripts/init-verification-repo.py が展開)
 ├── examples/verification-repo/         # 完結した見本 campaign 1 本 (spec / ledger / check+foil / results AUTO block / retro + hoist)
@@ -38,6 +40,7 @@ layer 1 (public、全 Claude Code / Codex ユーザー向け)。**依存でき�
 - 第二の目を別 session に出す: `make-review-sandbox.py create <slug> --spec REVIEW-SPEC.md --include <paper.pdf>` → cwd を sandbox に pin して spawn → `collect`
 - AI に決定 ledger どおりの原稿改稿を実装させる: 依頼 spec に `edit-intent-record.md#requester-spec-line` の 3 行 → 実装側は `check-edit-intent.py --scaffold … --out review/edit-intent-<date>.md` → 種類 / ID / 意図 を埋める → 同 script の検査 ALL PASS → 原稿と同じ pass で commit。 受領は裁量枠から読む / --fill (JSON から 種類・ID・意図 を一括で埋めて検査)
 - 自分が実装側のとき: 当てる → 別 dir で組版 → 記録 → commit の順 ([`#apply-then-record`](conventions/edit-intent-record.md#apply-then-record))。 削除の前に `git blame`。 共著 review 中の原稿の読み合わせは `review-markup-clean.py` を基準版と現在版の両方に当ててから latexdiff ([`#cleaned-base-diff`](conventions/edit-intent-record.md#cleaned-base-diff))、 投稿前清掃も同じ script ([`#submission-cleanup`](conventions/edit-intent-record.md#submission-cleanup))
+- 数か月の解析を共同研究者 (人間 + その AI) に実行してもらう: 定義を 1 つの SPEC に固め、1 セッション分の作業書 (WP) に割り、**受入基準は自分の独立実装で出した数値**で埋める ([`delegated-work-packages.md`](conventions/delegated-work-packages.md))。解釈・結論・基準値の書き換えは作業者に渡さない ([`#what-the-worker-must-not-write`](conventions/delegated-work-packages.md#what-the-worker-must-not-write))
 - 印字した係数の符号を外部の絶対量で守る: project に登録簿 `sign-anchors.json` (印字量 → 外部 anchor → 全体反転 foil) → `check-sign-anchors.py --run --deferrals` (gate = anchor が現稿で PASS し、 全体反転の foil で assertion により FAIL、 carrier の無い「規約差」 0) / `--fleet-scan` (fleet のどの検査が変換を見分けるか) / `--readers` (どの検査が原稿を実行時に開くか)。 規則 = claude-config `paper-audit.md#absolute-sign-external-anchor` / `#convention-difference-closure`
 
 ## 安全規則 (public repo)
