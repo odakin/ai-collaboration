@@ -17,6 +17,7 @@ cold-eyes とは「書いた本人と別の目」 で検品させることだが
 | (d) **原稿内の著者注** | `\red{[XX: …]}` 型の共著者向け errand、 header comment の却下題とその理由、 「前 version は 16π² だった」 | **referee copy** を作る = 注と comment を機械的に剥がし (regex)、 残存を grep で 0 確認、 それだけを sandbox に置く |
 | (e) **repo 文脈** | SESSION / DESIGN / plans / notes / 旧版原稿 / 著者側の検算 script / git log (commit message に結論が書いてある) | spec に読取禁止 list を明示 + 「著者の script は存在しないものとして自分で書く」 (= 数値の anchoring 防止。 script を読ませると同じ規格化の誤りを継ぐ) |
 | (f) **同 vendor の共通バイアス** | 同じ学習分布・同じ公式の癖 | [`physics-verification-cycle.md#cross-vendor-blind-verification`](physics-verification-cycle.md#cross-vendor-blind-verification) |
+| (g) **依頼者の同定** (2026-09-12) | 「これは依頼者本人の文書だ」 という推定。 **来歴を 1 文字も渡さなくても成立する**: 対象に著者名が残り (paper なら著者 block、 調書なら研究代表者欄 — どちらも referee が実際に見る面なので剥がせない)、 harness が session に user の身元 (mail address・machine 名) を注入するので、 両者が一致すれば自著だと分かる。 効き方は他の口と逆で、 **結論が流れ込むのではなく評価が甘くなる** (= 依頼者の不利になる finding を書きにくくなる) | 構造的に塞げない (氏名は審査対象の一部、 身元注入は harness 側)。 ∴ **spec で名指しして打ち消す**: 「応募者との関係も来歴も知らない」 だけでなく、 **評点は分布目安つきの相対評価で付けろ / 「2」 以下には理由の選択を要求する** のように、 **甘くすると形式が埋まらない出力形式**を課す。 受領側は post-check (§4) で「短所が具体的な場所を指しているか」 を見る (一般論の短所しか無い report は甘さの兆候)。 残余 risk として記録し、 決定的な finding は別 vendor か著者側の独立再計算で裏を取る |
 
 (a)(b) は harness 由来で**起票者が気付きにくい** (= 自分の session では便利な機構が、 reviewer には汚染源)。 (c)(d) は起票者の手癖由来で**気付いても止めにくい** (= 「これは伝えておいた方が効率的」 が全部漏洩)。
 
@@ -52,13 +53,50 @@ cold-eyes とは「書いた本人と別の目」 で検品させることだが
 
 **実例 (2026-09、 第 2 回)**: 禁止語 grep 0、 唯一の hit は spec の task 名由来の version 番号。 finding 3 件は著者側の from-scratch 再計算 (膨張背景での mode 成長、 厳密背景の Floquet、 固定 $r$ の $\Delta n_s$) で確認してから採用した ([`physics-verification-cycle.md#external-ai-referee-premise-verification`](physics-verification-cycle.md#external-ai-referee-premise-verification) item 8)。 reviewer の scratch script は results と一緒に repo へコピーするが、 著者側の検証は**別に書いた script** で行う (同一 script の再実行は独立検証にならない)。
 
-**受領後の reviewer session (2026-09 追補)**: 隔離は review 中だけの規律。 受領・突合が済んだ後に owner が reviewer session 自身へ「知見を上層へ、 script も残す」 と指示すれば、 その session が scratch を一般化した道具 (層1 `scripts/`) と引用文献の verdict (refs の notes) を hoist できる ([`physics-verification-cycle.md#referee-side-kernels`](physics-verification-cycle.md#referee-side-kernels))。 順序が要: 受領側の DESIGN / 規約追補を**先に読んで**重複しない項目だけ上げる (受領側と reviewer 側が同じ file を取り合う = pvc C′ の時間順)。 sandbox は review 後も再計算環境 (venv・公開 chain・文献 text) を保つので、 その path は machine-local の memory に pointer として置く。
+**受領後の reviewer session (2026-09 追補)**: 隔離は review 中だけの規律。 受領・突合が済んだ後に owner が reviewer session 自身へ「知見を上層へ、 script も残す」 と指示すれば、 その session が scratch を一般化した道具 (層1 `scripts/`) と引用文献の verdict (refs の notes) を hoist できる ([`physics-verification-cycle.md#referee-side-kernels`](physics-verification-cycle.md#referee-side-kernels))。 順序が要: 受領側の DESIGN / 規約追補を**先に読んで**重複しない項目だけ上げる (受領側と reviewer 側が同じ file を取り合う = pvc C′ の時間順)。 sandbox は review 後も再計算環境 (venv・公開 chain・文献 text) を保つので、 その path は machine-local の memory に pointer として置く。 ⚠️ **その memory は sandbox の project に紐づく** ので、 書いてよいのは**その sandbox を二度と reviewer に使わせない**と決めたときだけ (= §8 (b) と同じ理由で、 次に同じ dir で起動した reviewer に §1 (a) の口から auto-load される)。 二段 spec の sandbox は stage 間で再起動するので**特に書かない** — stage 1 の結論が stage 2 に流れ込む。 pointer の行き先は受領側 repo (git 同期される側) にする。
 
 **hoist commit の push (2026-09-08 追補)**: reviewer session の hoist は **local commit 止まりにして push しない** (= 公開 repo への最終 gate を隔離 worker に持たせない)。 push は起票 session が受領 sweep の一部として行う: 各 repo で `git log --oneline @{u}..` を読み、 leak grep (固有名・private repo 名) と新 script の `--selftest` を通してから push (owner が起票 session に委任した運用、 第 3 回で実施)。 取りこぼしの backstop = SessionStart の同期 sweep hook が fleet 横断で「未 push の local commit」 (ahead-only) を沈黙させずに surface する (起票側の layer で実装、 push 自体は自動化しない)。 reviewer は hoist 完了を起票 session へ cross-session message で知らせ、 編集した file と「触らない file」 を列挙する (race 回避、 第 3 回の型)。 順序は 受領側 hoist → reviewer 残余 hoist → 起票側 push (逆順だと重複 anchor を作る = 第 3 回で起票側 anchor を先に push して reviewer が fold した)。
 
 ## <a id="external-paper-variant"></a>4.5 変種: 外部論文の検証読み (verify-to-learn) は sandbox でなく deny list (2026-09)
 
 自著の盲検と違い、 外部論文の検証読みで隔離すべきは「**起票者の仮説・解釈**」 だけ (著者注・来歴・却下案は無い)。 sandbox を切らず repo 内の campaign dir で走らせ、 (a) spec に期待 verdict を書かない (§3 と同じ) + (b) 起票者の note / 教科書 dir を deny list に列挙 + (c) 受領後に汚染 grep、 で足りた (初回: 0 hit、 worker は起票者の知らない結果を出した)。 repo の道具 (ledger / check / refs) を worker に触らせる利点が上回る。 再訪 trigger = 汚染 grep で hit → sandbox 方式へ (**同日 n=1 で発火**: 検証 pass が産んだ新結果の第二の目では、 auto-load の projects 一覧に書かれた verdict の方向が worker に見えていた = 汚染経路 1 は deny list で塞げない。 ∴ 新結果の第二の目は §2 の sandbox、 deny list 方式は「verdict が事前に存在しない一次検証読み」 限定)。 検証 pass が産んだ**新結果**の第二の目は 2 段階 (盲検 → 攻撃) = [`physics-verification-cycle.md#campaign-tooling`](physics-verification-cycle.md#campaign-tooling) C。
+
+## <a id="proposal-variant"></a>4.6 変種: 審査を受ける文書 (研究費の計画調書・応募書類) の盲検 (2026-09-12)
+
+論文でなく**審査を受ける文書**を盲検にするときの差分。同じ調書を 4 sandbox (2 種目 × 2 referee) で
+並行に回した実測。
+
+- **同梱する物 = 審査委員が実際に受け取る面**: 添付 PDF は**モノクロ**版 (図の判読は評価対象)、
+  Web 入力項目と経費明細は**別 file** (審査 UI で別画面に出るため)、そして**公開されている審査基準の全文**。
+  逆に、規程が「評点に考慮しない」 と定めた欄は渡さない (渡すと reviewer がそれを根拠に書く)。
+- <a id="staged-blind"></a>**段数は「審査 process の段数」 に合わせる** — §2 7 の二段 spec は
+  「起票側の推奨・訂正そのもの」 を盲検する装置で、調書には起票側の対案が無いから**その意味では単段で足りる**。
+  代わりに **rubric を審査基準の literal な写し**にし、評定要素の各小項目に対応段落を同定させる
+  (対応が無い項目が機械的に出る)。⚠️ ただし**審査そのものが多段の種目** (= 応募多数だと概要版で
+  事前の選考が入る) は別で、**概要版だけを読ませる pass を先に完了・凍結してから本体を渡す**。
+  同時に渡すと reviewer は本体の情報で概要版を補ってしまい、実務でいちばん効く出力
+  (「概要版だけで落ちる要因」) が出ない。段を分ける基準は「何を盲検するか」 ではなく
+  **「審査委員が実際に何を、どの順で見るか」**。
+  凍結の実装 = Stage 1 の評点と所見を**専用 file に書き切らせ、Stage 2 では書き換えを禁じ、
+  訂正・比較は別 file に置かせる** (§2 7 と同じ規律)。「凍結した」 と書かせるだけでは、
+  後知恵で Stage 1 の判断理由が書き換わっても検出できない。
+  実測 (2026-09-12、挑戦的研究(萌芽)): 二段で回すと**段階で評点が割れた** (事前の選考 4 /
+  1 段階目 2)。割れ幅そのものが出力で、「概要版は書き方の良さで通るが、本体は文献照合で落ちる」
+  という構造は単段では両者が混ざって見えない。∴ **段が割れなかったときも情報**
+  (= 概要版と本体の質が揃っている) なので、両段の評点を並べて出させる。
+- **評点は相対評価であることを spec に書く**。分布目安つきの総合評点は、母集団を宣言させないと
+  数字が意味を持たない。絶対評価 (評定要素) と相対評価 (総合評点) を分けて出させる。
+- **論文より強く検証できる面がある**: 経歴・業績・受賞・採択は**公開 DB で照合できる**
+  (文献 DB・研究者 DB・課題 DB・助成事業の採択課題一覧)。∴ spec の「読んでよいもの」 に
+  これらを明示的に含める。⚠️ 逆に、調書には**未公開物を根拠にした主張**が構造的に混じる
+  (投稿前の論文・準備中の共著・進行中の事業の成果) — これは反証でも確認でもなく
+  `unverified` で、理由を「公開物に存在しない」 と書き分ける。
+- **汚染源が repo でなく案件 dir に集中する**: 前年の赤入れ・事務とのやりとり・採否・
+  差し戻しの経緯は論文 repo の SESSION 相当で、しかも**同じ dir に referee copy を置きがち**。
+  sandbox は案件 dir の外に切る (§2 1 と同じだが、案件 dir は `~/Claude` 配下とは限らない)。
+- **(g) の口が最も強く出る**: 応募者名は様式の一部なので剥がせない。上表 (g) の打ち消しを spec に入れる。
+- 受領側の一般則 (何を直すか) は
+  [`kakenhi-proposal.md#referee-simulation-kernels`](../../claude-config/conventions/kakenhi-proposal.md#referee-simulation-kernels)。
 
 ## 5. 起源
 
