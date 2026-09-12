@@ -17,6 +17,13 @@ Workflow:
   (calibration: x_svg = a x + b, y_svg = c y + d from the bbox of the reference path; y is flipped in SVG)
 
 Selftest: python3 svg-contour-extract.py --selftest
+
+Sibling (raster route): `claude-config/scripts/read-plot-axes.py` reads a figure that is
+an image rather than vector paths -- it calibrates from the axis tick marks instead of a
+known reference bbox, and returns lines/markers/bands in data units.  Use this file when
+the PDF keeps the curve as a path and some contour's data bbox is already known; use that
+one when all you have is pixels and the axes.  (Two blind reviewers wrote the raster tool
+from scratch before the two knew about each other -- hence this pointer.)
 """
 from __future__ import annotations
 
