@@ -198,12 +198,22 @@ def selftest() -> int:
         want = sp.Rational(4, 3) * (q2 * ETA[mu, nu] - qu[mu] * qu[nu])
         if sp.expand(got - want) != 0:
             fails.append(f"QED vacuum polarisation at {mu}{nu}: {got} vs {want}")
+    # Axial vertices γ^μγ5: same transverse 4/3 plus a mass term, ratio fixed at 6 m².
+    # Independent (flat-space, Feynman-rule) route to heat_kernel_a4.py's Seeley–DeWitt result
+    # (2/3)η²S_{μν}S^{μν} + 8η²m²S², i.e. Shapiro Phys. Rept. 357 (2002) Eq. (3.15).
+    G5 = gam["G5"]
+    for mu, nu in itertools.product(range(4), repeat=2):
+        got = pe.two_prop((Gs[mu] * G5 * A * Gs[nu] * G5 * B).trace())
+        want = sp.Rational(4, 3) * (q2 * ETA[mu, nu] - qu[mu] * qu[nu]) + 8 * m ** 2 * ETA[mu, nu]
+        if sp.expand(got - want) != 0:
+            fails.append(f"axial vacuum polarisation at {mu}{nu}: {got} vs {want}")
     if fails:
         for f in fails:
             print("FAIL", f)
         return 1
     print("one_loop_pole selftest: calibrations, one-propagator rank 2, two-propagator ranks 1-3 vs Feynman parameters "
-          "(84 components), Float rejection, QED vacuum polarisation (4/3)(q^2 eta - q q) — all PASS")
+          "(84 components), Float rejection, QED vacuum polarisation (4/3)(q^2 eta - q q), "
+          "axial vacuum polarisation (4/3)[(q^2 eta - q q) + 6 m^2 eta] = heat_kernel_a4 / Shapiro (3.15) — all PASS")
     return 0
 
 

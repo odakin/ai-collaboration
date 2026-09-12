@@ -265,6 +265,28 @@ spec 側の教訓 (= 起票者向け): 環境の道具の欠落 (SDP solver 不�
 13. **Stückelberg (would-be NG) mode の「運動項」 の符号は物理でない** — ゲージ変換で消せる場の 2 次形式に負符号の運動項が出ても、 ghost と読まない。 unitary gauge ではそれは gauge 場の質量項で、 伝播 mode の議論は gauge 固定した結合 Hessian で行う。 査読では「独自の運動項を得た」 型の文を、 この読みで検査する。
 14. **多添字の場の「横」「縦」 は、 どの添字に運動量を当てた分解かを書く** — 完全反対称な 3 添字場 $\omega_{ab\mu}=\epsilon_{ab\mu\nu}A^\nu$ では $q^\mu\omega_{ab\mu}=\epsilon_{ab\mu\nu}q^\mu A^\nu$ なので、 軸性ベクトルの縦成分 ($A\parallel q$) は form 添字 $\mu$ について横になる。 2 次形式でも、 Maxwell 項 $q^2A_\perp^2$ は form 添字について縦の構造に全部入り、 $(q\cdot A)^2$ は両方に跨る (実測)。 「縦波項がない」 型の文は分解の添字を書かないと逆の意味に読めるので、 査読ではどちらの分解かを本文から特定できるか確かめる。
 
+第 5 回 (2026-09-12、 対象が論文でなく**研究費の計画調書**、 評定基準を同梱した単段 spec) で追加:
+
+15. **同じ量を 2 つの engine で出したら、 一致を層1 の selftest に固定する** — 層1 に独立な計算経路が
+    2 本あっても、 各々が別々の外部 anchor しか持たないと**互いを検査していない**。 実例: 軸性 torsion の
+    1 loop は heat kernel 側 ([`heat_kernel_a4.py`](../scripts/heat_kernel_a4.py)) が Shapiro Eq. (3.15) を
+    anchor に持ち、 Feynman rule 側 ([`one_loop_pole.py`](../scripts/one_loop_pole.py)) は QED の真空偏極
+    (vector) しか持っていなかった。 別の reviewer が平坦背景の Feynman parameter で独立に出した
+    軸性の極が両者と一致したので、 その値を Feynman rule 側の selftest に足した
+    ($\tfrac43[(q^2\eta^{\mu\nu}-q^\mu q^\nu) + 6m^2\eta^{\mu\nu}]$、 質量項の係数を 1 つずらす foil で
+    assertion 落ちを確認)。 **一致の記録を散文に書くだけでは次の改修で壊れても分からない** — 一致は
+    assertion にして初めて regression guard になる。 kernel 12 の「射程を明示する」 の裏面で、
+    射程の違う 2 経路が重なる領域は最も安く固定できる。
+16. **調書 (研究計画) の盲検は、 論文の盲検と「何が検証可能か」 が違う** — 式と数値は論文と同じく
+    独立再計算できるが、 調書には**未公開物を根拠にした主張** (投稿前の論文・準備中の共著・進行中の
+    事業の成果) が構造的に混じる。 これは「反証された」 でも「確認された」 でもなく**検証手段が無い**
+    ので、 3 状態の `unverified` に落として理由を「公開物に存在しない」 と書き分ける
+    ([#claim-states](#claim-states))。 ⚠️ 逆に、 調書には論文に無い**公開の照合先**がある
+    (助成事業の採択課題一覧・研究者 DB・課題 DB) ので、 経歴・業績・採択の主張は
+    論文の査読より**強く**検証できる。 spec には評定基準の全文を同梱し、 絶対評価 (評定要素) と
+    相対評価 (総合評点) を分けて出させる。 調書側の一般則は
+    [`kakenhi-proposal.md#referee-simulation-kernels`](../../claude-config/conventions/kakenhi-proposal.md#referee-simulation-kernels)。
+
 ## <a id="unbounded-moment-domain-audit"></a>18. 非有界な moment operator と有限観測窓の audit kernel
 
 時間・位置・位相などの非有界な outcome を持つ POVM では、同じ「moment」や「variance」という語が別の数学的対象を指す。次の区別を ledger の別 item にしないと、一つの有限性から別の定義域を誤って推論する。
