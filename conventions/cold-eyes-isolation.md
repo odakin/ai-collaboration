@@ -42,7 +42,7 @@ cold-eyes とは「書いた本人と別の目」 で検品させることだが
 | 事前登録 rubric、 **check 対象の式 label の列挙** | 疑っている式、 「hard error」 「係数が怪しい」 等の方向づけ |
 | 出力形式 (severity 分類・表の列)、 止まる規律 | 係数の候補値、 「前 version では X だった」 |
 | 返送 spine と token | 著者が既に直した点、 共著者の状態、 論文の来歴 |
-| 組版の検査を頼むなら「overfull / underfull は数と行番号の報告のみ、 severity なし」 と明記 (= 層1 [`edit-intent-record.md#overfull-not-a-gate`](edit-intent-record.md#overfull-not-a-gate)、 2026-09-12 に should-fix で返って受領側が語順変更を提案した再発) | overfull を直す提案 (改稿 pass でも triage でも採らない) |
+| 組版の検査を頼むなら「overfull / underfull と、 長い式の番号が下の行に回る配置 (= amsmath の標準、 claude-config [`latex.md#align-split-tag-orphan`](../../claude-config/conventions/latex.md#align-split-tag-orphan)) は、 数と位置の報告のみ、 severity なし」 と明記 (= 層1 [`edit-intent-record.md#overfull-not-a-gate`](edit-intent-record.md#overfull-not-a-gate)、 2026-09-12 に should-fix で返って受領側が語順変更を提案した再発) | overfull を直す提案 (改稿 pass でも triage でも採らない) |
 
 境界の判定: **式 label を列挙するのは「どこを見るか」 の指定であって「何が出るか」 ではない**ので可。 逆に「Eq. 10 の 16π を確認せよ」 は答えを含むので不可 (= 「Eq. 10 の係数を独立に導出せよ」 まで)。
 
