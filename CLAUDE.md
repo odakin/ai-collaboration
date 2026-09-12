@@ -45,7 +45,7 @@ layer 1 (public、全 Claude Code / Codex ユーザー向け)。**依存でき�
 
 ## 安全規則 (public repo)
 
-`claude-config/CLAUDE.md §安全規則` と同じ: 実名・email・非公開 repo 名 (例外 list 以外)・所属・金融・他ユーザー名を file 本文 / commit message / PR に書かない。campaign の finding (他者論文の誤り疑い) は本 repo に書かない (default 非公開 = `physics-verification-cycle.md#verify-to-learn`)。
+`claude-config/CLAUDE.md §安全規則` と同じ: 実名・email・非公開 repo 名 (例外 list 以外)・所属・金融・他ユーザー名を file 本文 / commit message / PR に書かない。**識別子を含まない文章でも leak は成立する** — 審査・査読中の文書や未公開原稿から文言を verbatim で引く / 図から読んだ実測値を写す / それを selftest fixture に使う、 は既存 gate を素通りする ([`claude-config/CLAUDE.md#non-identifier-content-leak`](../claude-config/CLAUDE.md#non-identifier-content-leak))。 campaign の finding (他者論文の誤り疑い) は本 repo に書かない (default 非公開 = `physics-verification-cycle.md#verify-to-learn`)。
 
 ## 規約参照
 
