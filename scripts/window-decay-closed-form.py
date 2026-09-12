@@ -51,8 +51,8 @@ Any claim of a sharp onset is a claim about a different quantity.
 USAGE
 -----
   window-decay-closed-form.py --gamma 1e-10 --tau 1e-5          # SI-ish, any units
-  window-decay-closed-form.py --n 1.5 --scan -3 6 10            # tabulate J(dT), tau = 1
-  window-decay-closed-form.py --n 0 1.5 3 --threshold-table
+  window-decay-closed-form.py --n 0.8 --scan -3 6 10            # tabulate J(dT), tau = 1
+  window-decay-closed-form.py --n 0.5 1 2 --threshold-table
   window-decay-closed-form.py --selftest
 
 Units are yours: G and tau need only be reciprocal to each other (set hbar = 1, or pass
