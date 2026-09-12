@@ -42,10 +42,17 @@ cold-eyes とは「書いた本人と別の目」 で検品させることだが
 | 事前登録 rubric、 **check 対象の式 label の列挙** | 疑っている式、 「hard error」 「係数が怪しい」 等の方向づけ |
 | 出力形式 (severity 分類・表の列)、 止まる規律 | 係数の候補値、 「前 version では X だった」 |
 | 返送 spine と token | 著者が既に直した点、 共著者の状態、 論文の来歴 |
+| 組版の検査を頼むなら「overfull / underfull は数と行番号の報告のみ、 severity なし」 と明記 (= 層1 [`edit-intent-record.md#overfull-not-a-gate`](edit-intent-record.md#overfull-not-a-gate)、 2026-09-12 に should-fix で返って受領側が語順変更を提案した再発) | overfull を直す提案 (改稿 pass でも triage でも採らない) |
 
 境界の判定: **式 label を列挙するのは「どこを見るか」 の指定であって「何が出るか」 ではない**ので可。 逆に「Eq. 10 の 16π を確認せよ」 は答えを含むので不可 (= 「Eq. 10 の係数を独立に導出せよ」 まで)。
 
 **追補 (2026-09、 第 2 回実装)**: 返送 command の `--task` 名や results の見出しに version 番号 (「v3.3」) を入れると、 reviewer の report に来歴語が残る (第 2 回の汚染 grep の唯一の hit)。 無害だが避けられる: task 名は「blind referee review of manuscript.pdf」 のように来歴を含めない。 §2 の「読んでよいもの」 には**引用文献の公開 data product** (著者 repo の chain・等高線) を明示的に含める (= reviewer が観測側の数値を独立再計算できる)。
+
+**追補 (2026-09-12、 第 6 回 = 一括改稿の純粋性を検査させた回)**。 reviewer 側の `HANDOFF.md` (§4 の worker 入力) が spec の不足として挙げた 3 点。 いずれも「どこを見るか」 側なので**渡してよい**:
+
+- **規約の定義は「答え」 ではない** — 記号の規約・添字の型・運動量の向き (どの脚が $+q$ を運ぶか)・signature は、 verdict でも疑っている箇所でもないので spec に書いてよく、 **書かないと reviewer は原稿から逆算する 1 pass を燃やす** (第 6 回の実測: 恒等式を再導出するのに向きが必要で、 印字済みの兄弟結果を control にして固定した = [`physics-verification-cycle.md#pin-convention-by-sibling`](physics-verification-cycle.md#pin-convention-by-sibling))。 境界は §3 本表のまま: 「Eq. 10 の係数を独立に導出せよ」 は可、 「Eq. 10 の 16π を確認せよ」 は不可。 規約は前者の側。
+- **label 一覧は手書きせず生成物 (`.aux`) をそのまま渡す** — 手で作った「label → 式番号」 表は節・付録の label が落ちやすく (第 6 回の実測)、 何より**版間の label→頁 比較ができない** ([`#page-count-is-not-pagination`](physics-verification-cycle.md#page-count-is-not-pagination) の検査が spec 側の不足で塞がる)。 組版済みの成果物を渡す変種 (§4.7) でも、 `.aux` は「受け手が見る面」 ではないが **reviewer の機械検査の入力**なので allow list に入れる。 併せて、 配布 PDF を渡すなら reviewer が自分の build で再現できる材料 (assets・bst・bib) を揃える ([`#reproduce-before-attributing`](physics-verification-cycle.md#reproduce-before-attributing))。
+- **射程を 1 行で宣言する** — 「変更の外側にある既存の不整合を finding にしてよいか」 を spec が言わないと、 reviewer は推測で padding するか黙るかのどちらかになる。 第 6 回の reviewer は `should-fix (pre-existing)` という severity を自作して逃がした。 spec 側で「変更が触っていない箇所の不整合も報告してよい / 報告不要」 を明示する (rubric 事前登録 = [`#rubric-before-run`](physics-verification-cycle.md#rubric-before-run) の一部)。
 
 ## <a id="typeset-artifact-variant"></a>4.7 変種: 組版された配布物の盲検は「受け手が見る面」 だけ渡す (2026-09-12)
 
