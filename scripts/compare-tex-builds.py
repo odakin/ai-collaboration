@@ -127,6 +127,61 @@ def text_diff_count(a: list[str], b: list[str]) -> int:
                and not d.startswith("---") and not d.startswith("+++"))
 
 
+# ---------------------------------------------------------------- build
+
+
+def parse_spec(spec: str) -> tuple[str | None, str]:
+    """'paper.tex' -> (None, 'paper.tex');  'REV:paper.tex' -> ('REV', 'paper.tex')."""
+    if ":" in spec and not Path(spec).exists():
+        rev, _, f = spec.partition(":")
+        return rev, f
+    return None, spec
+
+
+def build_one(spec: str, repo: Path, assets: Path | None, engine: str, out: Path) -> dict:
+    """Typeset one version in its own directory and return the parsed log + paths.
+
+    A revision spec (`REV:file.tex`) is extracted with `git archive`, so the build uses THAT
+    revision's figures, .bst and .bib — not the live ones. Symlinking live assets into a temp
+    dir would typeset "that revision's prose with today's figures", which is not the revision
+    (conventions/edit-intent-record.md#frozen-revision-build).
+    """
+    rev, texfile = parse_spec(spec)
+    out.mkdir(parents=True, exist_ok=True)
+    if rev:
+        tar = subprocess.run(["git", "-C", str(repo), "archive", rev],
+                             capture_output=True, check=True)
+        subprocess.run(["tar", "-x", "-C", str(out)], input=tar.stdout, check=True)
+    else:
+        src = Path(texfile)
+        shutil.copy2(src, out / src.name)
+        texfile = src.name
+        if assets:
+            for f in assets.iterdir():
+                if f.is_file() and f.suffix.lower() in (
+                        ".png", ".jpg", ".jpeg", ".pdf", ".eps", ".bst", ".bib", ".cls", ".sty"):
+                    shutil.copy2(f, out / f.name)
+    stem = Path(texfile).stem
+    steps = [[engine, "-interaction=nonstopmode", "-halt-on-error", texfile],
+             ["bibtex", stem],
+             [engine, "-interaction=nonstopmode", "-halt-on-error", texfile],
+             [engine, "-interaction=nonstopmode", "-halt-on-error", texfile]]
+    codes = []
+    for cmd in steps:
+        r = subprocess.run(cmd, cwd=out, capture_output=True, text=True)
+        codes.append(r.returncode)
+    log = out / f"{stem}.log"
+    aux = out / f"{stem}.aux"
+    return {"dir": out, "log": log, "aux": aux, "exit_codes": codes,
+            "parsed": parse_log(log.read_text(encoding="latin-1")) if log.exists() else None,
+            "sha256": _sha256(out / texfile)}
+
+
+def _sha256(p: Path) -> str:
+    import hashlib
+    return hashlib.sha256(p.read_bytes()).hexdigest()[:16] if p.exists() else "-"
+
+
 # ---------------------------------------------------------------- report
 
 
@@ -257,6 +312,42 @@ def selftest() -> int:
           report(clean, only_of, None, True, False) == 0)
     check("--strict-overfull does fail on it", report(clean, only_of, None, True, True) == 1)
 
+    # spec parsing (no TeX needed)
+    check("plain path spec", parse_spec("paper.tex") == (None, "paper.tex"))
+    check("revision spec splits on the first colon",
+          parse_spec("abc123:paper.tex") == ("abc123", "paper.tex"))
+
+    # end-to-end: a revision build must use THAT revision's assets, not the live ones
+    if shutil.which("pdflatex") and shutil.which("git"):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td) / "repo"
+            repo.mkdir()
+            run_g = lambda *c: subprocess.run(["git", "-C", str(repo), *c],
+                                              capture_output=True, check=True)
+            run_g("init", "-q")
+            run_g("config", "user.email", "t@t")
+            run_g("config", "user.name", "t")
+            (repo / "inc.tex").write_text("OLD-ASSET", encoding="utf-8")
+            (repo / "m.tex").write_text(
+                "\\documentclass{article}\\begin{document}\\input{inc}\\end{document}\n",
+                encoding="utf-8")
+            run_g("add", "-A")
+            run_g("commit", "-q", "-m", "v1")
+            rev = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                                 capture_output=True, text=True, check=True).stdout.strip()
+            (repo / "inc.tex").write_text("NEW-ASSET", encoding="utf-8")  # live tree moves on
+            built = build_one(f"{rev}:m.tex", repo, None, "pdflatex", Path(td) / "out")
+            txt = ""
+            if (built["dir"] / "m.pdf").exists() and shutil.which("pdftotext"):
+                txt = "\n".join(pdf_text(built["dir"] / "m.pdf"))
+            check("revision build typesets that revision's asset, not the live one  [foil]",
+                  "OLD-ASSET" in txt and "NEW-ASSET" not in txt)
+            check("revision build produces a parsable log", built["parsed"] is not None)
+            check("revision build records the source sha256", len(built["sha256"]) == 16)
+    else:
+        print("[SKIP] end-to-end build check (pdflatex or git not on PATH)")
+
     print("\nALL PASS" if ok else "\nFAILED")
     return 0 if ok else 1
 
@@ -270,6 +361,16 @@ def main() -> int:
     p.add_argument("--after-aux", type=Path)
     p.add_argument("--reproduce", type=Path, help="PDF you were given")
     p.add_argument("--built", type=Path, help="PDF you built yourself")
+    p.add_argument("--build", metavar="SPEC",
+                   help="typeset SPEC and report its log/aux. SPEC = path to a .tex, or "
+                        "REV:file.tex to take the whole revision via `git archive` "
+                        "(that revision's figures/bst/bib, not the live ones)")
+    p.add_argument("--build-against", metavar="SPEC",
+                   help="second SPEC; both are built and compared")
+    p.add_argument("--repo", type=Path, default=Path("."), help="git repo for REV: specs")
+    p.add_argument("--assets", type=Path, help="dir with figures/bst/bib for a plain .tex build")
+    p.add_argument("--engine", default="pdflatex")
+    p.add_argument("--out", type=Path, help="where to build (default: a temp dir, kept)")
     p.add_argument("--strict", action="store_true")
     p.add_argument("--strict-overfull", action="store_true")
     p.add_argument("--selftest", action="store_true")
@@ -277,6 +378,23 @@ def main() -> int:
 
     if a.selftest:
         return selftest()
+
+    if a.build:
+        import tempfile
+        root = a.out or Path(tempfile.mkdtemp(prefix="texbuild-"))
+        one = build_one(a.build, a.repo, a.assets, a.engine, root / "a")
+        print(f"[build] {a.build}  -> {one['dir']}  (tex sha256 {one['sha256']}, "
+              f"exit {one['exit_codes']})")
+        if not a.build_against:
+            return report(one["parsed"], one["parsed"], None, False, False)
+        two = build_one(a.build_against, a.repo, a.assets, a.engine, root / "b")
+        print(f"[build] {a.build_against}  -> {two['dir']}  (tex sha256 {two['sha256']}, "
+              f"exit {two['exit_codes']})")
+        drift = None
+        if one["aux"].exists() and two["aux"].exists():
+            drift = aux_drift(parse_aux(one["aux"].read_text(encoding="latin-1")),
+                              parse_aux(two["aux"].read_text(encoding="latin-1")))
+        return report(one["parsed"], two["parsed"], drift, a.strict, a.strict_overfull)
 
     if a.reproduce and a.built:
         n = text_diff_count(pdf_text(a.reproduce), pdf_text(a.built))

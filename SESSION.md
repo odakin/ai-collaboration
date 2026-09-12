@@ -21,7 +21,8 @@
 - **kernel 17-21** ([#referee-side-kernels](conventions/physics-verification-cycle.md#referee-side-kernels)): 逆写像で読む量を残差に落とす / **配布物は自分の build が再現することを証明してから観察を相手の source に帰属する** / **総頁数の一致は組版が動いていない証拠でない** / 未記載の規約は印字済みの兄弟結果を control に pin し誤った向きでも走らせて落ちることを確認する (規約版 foil、 kernel 10 の裏面) / **機械 pass に混じった散文 1 文がその pass で最も risk の高い hunk** (実測ではそれが同定文で、 厳密には成り立たない強さで、 必要な位置より後ろに在った)。
 - **組版 gate の補強**: [`#build-gate`](conventions/edit-intent-record.md#build-gate) の「頁数・未定義参照・error 0」 に、 **頁数は総和なので相殺する**ことと `.aux` 比較を追記。 overfull を pass 中の gate にしない規律 ([`#overfull-not-a-gate`](conventions/edit-intent-record.md#overfull-not-a-gate)) は不変 — 新 kernel は**報告**であって修正ではない。
 - **sandbox recipe への差し戻し** ([#spec-leakage](conventions/cold-eyes-isolation.md#spec-leakage) 追補): 規約の定義 (記号・添字・**運動量の向き**) は verdict でないので **spec に書いてよく、 書かないと reviewer が逆算に 1 pass 燃やす** / §2-2 の `.aux` 同梱は手書きの label 一覧で代用しない、 比較を課すなら**両版**の `.aux` / **射程を 1 行で宣言する** (変更の外側の既存不整合を finding にしてよいか。 第 6 回の reviewer は severity を自作して逃がした)。
-- 個人層の instance (原稿・検査結果・未手当表) は該当 paper repo に残置。 SoT registry に 7 topic 登録済。
+- **掬い残しの回収 (owner「スクリプトはなるべく掬い上げようぜ」)**: (a) `--census '<regex>'` = 記号族の綴りごとに出現数・行範囲・**住んでいる節**を出す (2 綴りが別の節に居るのが一目で分かる = 純粋性検査では出ない残り物、 [`paper-audit.md#notation-rename-sweep`](../claude-config/conventions/paper-audit.md#notation-rename-sweep) 4 の機械化)。 (b) `--build <REV>:<file>.tex` = `git archive` で版ごと取り出して組む build driver。 [`#frozen-revision-build`](conventions/edit-intent-record.md#frozen-revision-build) は規律だけあって道具が無かった (= `#documented-not-wired`)。 selftest に「live の図を差し替えても revision build はその版の図で組む」 foil 入り。
+- 個人層の instance (原稿・検査結果・未手当表) は該当 paper repo に残置。 SoT registry に 10 topic 登録済。
 
 ## 2026-09-12: 盲検書面審査 ×4 の hoist — 同じ道具を 4 回書き直していたことが見えた回
 

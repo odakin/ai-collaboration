@@ -117,6 +117,28 @@ def changed_lines(before: list[str], after: list[str]) -> list[tuple[int, str, i
     return out
 
 
+def census(lines: list[str], pattern: str, section_re: str) -> dict[str, list[tuple[int, str]]]:
+    """Inventory every spelling of a symbol family: {matched text -> [(line, section)]}.
+
+    Two spellings of one object are the residue a purity check cannot see (the diff is clean
+    because neither section was touched). Grouping by the exact matched string makes them
+    adjacent in the report. Comment-only lines are skipped; a trailing comment is trimmed.
+    """
+    rx, sx = re.compile(pattern), re.compile(section_re)
+    out: dict[str, list[tuple[int, str]]] = {}
+    sec = "(before the first section)"
+    for i, raw in enumerate(lines, 1):
+        m = sx.search(raw)
+        if m:
+            sec = (m.group(1) if m.groups() else m.group(0))[:40]
+        if raw.lstrip().startswith("%"):
+            continue
+        body = re.sub(r"(?<!\\)%.*$", "", raw)
+        for mm in rx.finditer(body):
+            out.setdefault(mm.group(0), []).append((i, sec))
+    return out
+
+
 def forbid_scan(lines: list[str], patterns: list[str]) -> list[tuple[int, str, str]]:
     """Surviving old spellings: [(line_number, pattern, text)]. Comments are scanned too."""
     hits: list[tuple[int, str, str]] = []
@@ -147,9 +169,24 @@ def allowed(text: str, allow: list[re.Pattern]) -> bool:
 
 
 def run(before_p: Path, after_p: Path, map_p: Path | None, allow_p: Path | None,
-        forbid: list[str], strict: bool, classify: bool) -> int:
-    before = before_p.read_text(encoding="utf-8").split("\n")
+        forbid: list[str], strict: bool, classify: bool,
+        census_re: str | None = None, section_re: str = r"\\(?:sub)*section\*?\{([^}]*)\}") -> int:
+    before = before_p.read_text(encoding="utf-8").split("\n") if before_p else []
     after = after_p.read_text(encoding="utf-8").split("\n")
+
+    if census_re:
+        groups = census(after, census_re, section_re)
+        total = sum(len(v) for v in groups.values())
+        print(f"[info] {total} occurrence(s) in {len(groups)} distinct spelling(s)\n")
+        for text, hits in sorted(groups.items(), key=lambda kv: -len(kv[1])):
+            secs = sorted({s for _, s in hits})
+            print(f"{len(hits):4d}x  {text}")
+            print(f"        lines {hits[0][0]}..{hits[-1][0]}   sections: {', '.join(secs)}")
+        if len(groups) > 1:
+            print("\n⚠️ more than one spelling matched. That is expected for a family "
+                  "(different orders/fields); it is a finding when two of them denote the "
+                  "SAME object — check the sections that differ.")
+        return 0
 
     if classify:
         rows = changed_lines(before, after)
@@ -261,6 +298,16 @@ def selftest() -> int:
     raw = changed_lines(before, after)
     check("changed-line inventory reports both sides of all 4 touched lines", len(raw) == 8)
 
+    # census: two spellings of one object in two different sections, plus comment handling
+    doc = [r"\section{First}", r"\Op^{(2)}|_{xx} = A", r"% \Op^{(2)}_{old} in a comment",
+           r"\subsection{Second}", r"\Op^{(2)}_{old} = B  % trailing \Op^{(2)}|_{xx}"]
+    g = census(doc, r"\\Op\^\{\(2\)\}(?:\|_\{\w+\}|_\{\w+\})", r"\\(?:sub)*section\*?\{([^}]*)\}")
+    check("census groups by exact spelling (2 distinct)", len(g) == 2)
+    check("census reports the section each spelling lives in",
+          g[r"\Op^{(2)}|_{xx}"][0][1] == "First" and g[r"\Op^{(2)}_{old}"][0][1] == "Second")
+    check("census skips comment-only lines and trailing comments  [foil]",
+          len(g[r"\Op^{(2)}_{old}"]) == 1 and len(g[r"\Op^{(2)}|_{xx}"]) == 1)
+
     # allow list suppresses a known non-rename edit, strict exit codes
     with tempfile.TemporaryDirectory() as td:
         d = Path(td)
@@ -292,11 +339,21 @@ def main() -> int:
     p.add_argument("--strict", action="store_true", help="exit 1 on unexplained residual / orphans")
     p.add_argument("--classify", action="store_true",
                    help="only enumerate changed lines with before/after line numbers")
+    p.add_argument("--census", metavar="REGEX",
+                   help="inventory every spelling of a symbol family in --after, grouped by the "
+                        "exact matched text with line range and enclosing sections "
+                        "(finds two spellings of one object; needs only --after)")
+    p.add_argument("--section-re", default=r"\\(?:sub)*section\*?\{([^}]*)\}",
+                   help="regex whose group 1 names the enclosing section (default: LaTeX)")
     p.add_argument("--selftest", action="store_true")
     a = p.parse_args()
 
     if a.selftest:
         return selftest()
+    if a.census:
+        if not a.after:
+            p.error("--census needs --after")
+        return run(None, a.after, None, None, [], False, False, a.census, a.section_re)
     if not (a.before and a.after):
         p.error("--before and --after are required (or --selftest)")
     if not a.classify and not a.map:
