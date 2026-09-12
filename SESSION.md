@@ -79,3 +79,9 @@
 - 規約 = `conventions/delegated-work-packages.md` (§1 何を分離するか / §2 常設 3 層 + WP / §3 WP の 7 要素 / §4 **受入基準は依頼側の独立実装で埋める** = 交差検証を仕組みに組み込む、書けないなら合成データの回収 test / §5 全部書いて ready だけ着手 + 確定待ち項目 / §6 書き込み zone / §7 結果ノートと「仕様への提案」 が仕様改訂の唯一の入口 / §8 解釈・基準値の書き換え・仕様外解析は渡さない / §9 使わない場面 / §10 起源と evidence base 1 例)。README / CLAUDE.md の一覧、DESIGN に判断。
 - 同 session の姉妹 hoist (claude-config 側): `jma-obsdl-download.md` に一次資料の品質列表と長期系列 QC 4 点 (行数の暦検算・品質符号の分布・痕跡時間 15%・記録分解能の年代)、`paper-audit.md` に分布形の主張と venue 較正の 2 anchor。
 - 次: 変化なし (Phase 2 の監視)。効果判定 = 最初の 2〜3 本の結果ノートで「受入基準の判定表」 と「仕様への提案」 が実質を持つか (儀式化していたら基準の本数を減らす)。
+
+## 2026-09-13: `--intents` の JSON 直渡し + 記録道具の競合への pointer
+
+- `scripts/check-edit-intent.py --fill` の `--intents` が、JSON file の path に加えて `{` で始まる JSON そのものを受ける (file path だと思わず文字列を渡して止まったため。selftest +2、shim 経由の `--fill` で 12/12 を確認)。[`#fill-mode`](conventions/edit-intent-record.md#fill-mode) の説明も合わせた。
+- [`#apply-then-record`](conventions/edit-intent-record.md#apply-then-record) に、live の HEAD を書き込み時に実測する記録道具が並列 session の commit を自分の pass として記録する件への pointer (正本 = claude-config `multi-session-coordination.md#measured-record-race`)。
+- 次: 変化なし (Phase 2 の監視)。

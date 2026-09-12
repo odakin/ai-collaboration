@@ -548,6 +548,12 @@ def scaffold(root: Path, repo: str, file: str, base: str, head: str, ledgers: li
 
 # ---------------------------------------------------------------- fill
 
+def load_intents(value: str) -> dict:
+    """--intents is a JSON file path, or the JSON itself when the value starts with "{"."""
+    text = value if value.lstrip().startswith("{") else Path(value).expanduser().read_text(encoding="utf-8")
+    return json.loads(text)
+
+
 def fill_sidecar(text: str, intents: dict[str, dict[str, str]], discretion: str | None = None) -> str:
     """Fill the empty 種類 / ID / 意図 cells of a scaffolded sidecar (2026-09-11).
 
@@ -605,6 +611,12 @@ def selftest() -> int:
 
     # parser units
     expect(canonical_pos("-12 +12") == "-12,1 +12,1", "canonical_pos default count")
+    inline = '{"1": {"kind": "実装", "id": "F01", "intent": "fix typo"}}'
+    expect(load_intents(inline)["1"]["id"] == "F01", "--intents accepts inline JSON")
+    with tempfile.TemporaryDirectory() as tmp_intents:
+        intents_file = Path(tmp_intents) / "intents.json"
+        intents_file.write_text(inline, encoding="utf-8")
+        expect(load_intents(str(intents_file)) == load_intents(inline), "--intents accepts a JSON file path")
     expect(canonical_pos("@@ -610,85 +613,6 @@") == "-610,85 +613,6", "canonical_pos full")
     expect(expand_hunks("2-4, 7") == [2, 3, 4, 7], "expand_hunks")
     fm = parse_frontmatter("---\nrepo: .\nledgers:\n  - a.md\n  - b.md\nx: [p, q]\n---\nbody")
@@ -723,7 +735,7 @@ def main() -> int:
     ap.add_argument("--date", default=_dt.date.today().isoformat(), help="date for the sidecar (scaffold)")
     ap.add_argument("--out", help="write the scaffold here (refuses to overwrite); default stdout")
     ap.add_argument("--fill", metavar="SIDECAR", help="fill the empty 種類/ID/意図 cells of a scaffolded sidecar in place, then check it")
-    ap.add_argument("--intents", help='JSON for --fill: {"<hunk>" or "L<old start>": {"kind": ..., "id": ..., "intent": ...}}')
+    ap.add_argument("--intents", help='JSON for --fill, as a file path or inline text starting with "{": {"<hunk>" or "L<old start>": {"kind": ..., "id": ..., "intent": ...}}')
     ap.add_argument("--discretion", help="text for the ## 裁量 section when filling (default なし)")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
@@ -732,9 +744,9 @@ def main() -> int:
         return selftest()
     if a.fill:
         if not a.intents:
-            ap.error("--fill needs --intents FILE.json")
+            ap.error("--fill needs --intents FILE.json or inline JSON")
         target = Path(a.fill).expanduser().resolve()
-        intents = json.loads(Path(a.intents).expanduser().read_text(encoding="utf-8"))
+        intents = load_intents(a.intents)
         try:
             new = fill_sidecar(target.read_text(encoding="utf-8"), intents, a.discretion)
         except ValueError as e:
