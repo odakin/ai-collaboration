@@ -15,13 +15,13 @@
   inspire-bibliography.py refs -f ids.txt --expect expect.json   # {id: "JCAP 03 (2020) 063"} と照合
 
   # 著者の業績統計 (「論文 N 編・被引用 M・h 指数 k・直近 3 年で X 編」 の検証)
-  inspire-bibliography.py author K.Y.Oda.1 --since 2023
+  inspire-bibliography.py author J.Doe.1 --since 2023        # BAI は whois で解決する
 
   # 名前 → BAI (上の前提。 ids[schema="INSPIRE BAI"])
-  inspire-bibliography.py whois "Oda, Kin-ya"
+  inspire-bibliography.py whois "Doe, Jane"
 
   # null を報告する前の positive control (検索機構が生きていることの確認)
-  inspire-bibliography.py whois "存在しないかもしれない氏名" --control "Oda, Kin-ya"
+  inspire-bibliography.py whois "存在しないかもしれない氏名" --control "実在が確実な氏名"
 
 ⚠️ 数え方の罠 (2026-09-08 実測、これを外すと自己申告と 2 件ずれる)
 ------------------------------------------------------------------
@@ -41,7 +41,7 @@ API のこつ
 - `fields=` で絞ると 250 件 page でも軽い。 h 指数・総被引用は author page の
   表示値を API では直接取れないので、全 record を引いて自分で集計する。
 - 1 query = 1 arXiv id の照合は `q=arxiv:<id>`。 旧式 id (`gr-qc/9403058`) も可。
-- 著者の同定は BAI (`K.Y.Oda.1`) が最も確実。 姓名 query は同姓の別人を掴む。
+- 著者の同定は BAI (`J.Doe.1` 形式) が最も確実。 姓名 query は同姓の別人を掴む。
 - 経歴 (研究員歴・海外滞在) は `authors.affiliations` を論文の年で並べると
   authors API の positions が空でも復元できる。
 """
