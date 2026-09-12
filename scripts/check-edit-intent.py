@@ -86,6 +86,16 @@ class Hunk:
         return len(self.removed) > len(self.added)
 
 
+def _split_cells_raw(s: str) -> list[str]:
+    """Split a markdown table line on unescaped ``|`` (``\\|`` stays inside a cell)."""
+    return re.split(r"(?<!\\)\|", s)
+
+
+def _escape_cell(v: str) -> str:
+    """Escape a ``|`` so it can live inside a table cell (both readers split on unescaped ``|``)."""
+    return re.sub(r"(?<!\\)\|", r"\\|", v)
+
+
 def canonical_pos(text: str) -> str | None:
     m = POS_RE.search(text or "")
     if not m:
@@ -228,7 +238,7 @@ def _parse_table(lines: list[str]) -> tuple[list[Row], list[str]]:
             if header is not None and line.strip() == "":
                 break
             continue
-        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        cells = [c.strip().replace("\\|", "|") for c in _split_cells_raw(line.strip().strip("|"))]
         if header is None:
             header = [c.lower() for c in cells]
             for name, keys in (("hunk", ("hunk",)), ("pos", ("位置",)), ("kind", ("種類",)), ("id", ("id",)), ("intent", ("意図",))):
@@ -545,12 +555,12 @@ def fill_sidecar(text: str, intents: dict[str, dict[str, str]], discretion: str 
     {"kind": ..., "id": ..., "intent": ...}. A prefilled kind (実装+削除 on a net deletion) is kept
     unless the entry gives one; a missing kind defaults to 実装. Rows already carrying an ID or an
     intent are left alone. Raises ValueError when an empty row has no entry, when an entry matches
-    no row, or when a cell would contain "|". The ## 裁量 placeholder gets `discretion` (default なし).
+    no row. A "|" inside a value is escaped for the table (the readers split on unescaped "|"). The ## 裁量 placeholder gets `discretion` (default なし).
     """
     used: set[str] = set()
     out: list[str] = []
     for line in text.split("\n"):
-        parts = line.split("|")
+        parts = _split_cells_raw(line)
         if len(parts) == 7 and parts[1].strip().isdigit() and re.match(r"\s*-\d+", parts[2]):
             n, pos = parts[1].strip(), parts[2].strip()
             kind, id_, intent = parts[3].strip(), parts[4].strip(), parts[5].strip()
@@ -562,8 +572,7 @@ def fill_sidecar(text: str, intents: dict[str, dict[str, str]], discretion: str 
                 used.add(key)
                 kind = e.get("kind") or kind or KINDS_PRIMARY[0]
                 id_, intent = e.get("id", ""), e.get("intent", "")
-                if any("|" in v for v in (kind, id_, intent)):
-                    raise ValueError(f"hunk {n}: a cell contains '|'")
+                kind, id_, intent = (_escape_cell(v) for v in (kind, id_, intent))
                 line = f"| {n} | {pos} | {kind} | {id_} | {intent} |"
         out.append(line)
     unused = sorted(set(intents) - used)
@@ -674,12 +683,19 @@ def selftest() -> int:
         ok, names = run_check(filled)
         expect(ok, f"--fill output (keys by hunk and by old start line) passes ({names})")
         for bad, why in (({"1": mapping["1"]}, "row without an entry"), (dict(mapping, **{"9": mapping["1"]}), "entry matching no row"),
-                         (dict(mapping, **{"1": {"id": "F01", "intent": "a | b"}}), "cell with a pipe")):
+                         ):
             try:
                 fill_sidecar(text, bad)
                 expect(False, f"--fill must refuse a {why}")
             except ValueError:
                 expect(True, f"--fill refuses a {why}")
+        piped = fill_sidecar(text, dict(mapping, **{"1": {"kind": "実装", "id": "F01", "intent": r"kept |_{spinor} as a restriction"}}),
+                             "- hunk 3: transition sentence, not in any decision.\n- hunk 4: merged beyond R02's scope.")
+        expect(r"kept \|_{spinor}" in piped, "--fill escapes a pipe inside a cell")
+        ok, _ = run_check(piped)
+        expect(ok, "--fill output with an escaped pipe still passes the check")
+        expect(any("kept |_{spinor} as a restriction" == r.intent for r in parse_sidecar(piped).rows),
+               "an escaped pipe round-trips to the raw value when the sidecar is read back")
         ok, _ = run_check(text)
         expect(not ok, "raw scaffold (unfilled) must not pass")
     print(f"selftest OK ({checks} checks)")
