@@ -30,4 +30,4 @@ The layer-1 tools are located via the environment variable `AI_COLLABORATION_ROO
 directory that contains this `template/`, i.e. a clone of this repository next to yours).
 
 A worked example of a completed campaign (spec → ledger → check + foil → results with the AUTO
-stats block → retro with a hoist record) is in [`../examples/campaign-qubit-helstrom/`](../examples/campaign-qubit-helstrom/).
+stats block → retro with a hoist record) is in [`../examples/campaign-qubit-helstrom/`](../examples/verification-repo/campaigns/2026-09-06-qubit-helstrom/).
