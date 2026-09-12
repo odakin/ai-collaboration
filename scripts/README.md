@@ -6,7 +6,9 @@ Each module's first docstring line is the description source of truth. Every scr
 | script | purpose |
 |---|---|
 | [`check-edit-intent.py`](check-edit-intent.py) | AI 原稿改稿の意図記録 (edit-intent sidecar) の骨組み生成 + 機械検査: hunk 被覆 / 位置 / 種類 / ID 実在 / 裁量枠 / 削除 verbatim を PASS/FAIL + exit code で。 --selftest 内蔵。 正本 = conventions/edit-intent-record.md |
+| [`check-rename-purity.py`](check-rename-purity.py) | 機械的と主張される一括改稿 (記法 rename・単位変更・記号統一) の純粋性を、読まずに逆写像して検査する: new→old の逆写像を後版に当てて前版と diff し、残った行だけを非機械変更として出す + 旧綴りの残存 (orphan) 走査 + 変更行の前後行番号列挙。--selftest 内蔵、正本 = conventions/physics-verification-cycle.md#referee-side-kernels |
 | [`check-sign-anchors.py`](check-sign-anchors.py) | Sign-carrying printed claims: external-anchor coverage, end-to-end foil teeth, fleet-invariance scan, which checks open the manuscript at all, un-carried convention deferrals. |
+| [`compare-tex-builds.py`](compare-tex-builds.py) | 2 版の LaTeX build を機械比較する組版 gate: log から error / 未定義参照 / overfull を折返し復元して数え、.aux の label→頁 写像の drift を出し (= 総頁数が同じでも中の頁割りは動く)、配布 PDF を自分の build が再現するかを pdftotext で証明する。--selftest 内蔵、規律 = conventions/edit-intent-record.md#build-gate |
 | [`covariant_moment_algebra.py`](covariant_moment_algebra.py) | Covariant moment algebra on the full line and finite windows; --selftest. |
 | [`dilaton-spectator-growth.py`](dilaton-spectator-growth.py) | Zero-mode growth of a spectator field with a dilaton-type coupling e^{-gamma chi/M_P} (d phi)^2 during inflation (NumPy + SciPy only). |
 | [`dirac_algebra.py`](dirac_algebra.py) | Mostly-plus Dirac algebra with asserted conventions (NumPy; exact sympy matrices on request) — γ^a, γ5, ε, σ^{ab}, antisymmetrised products, trace identities and the axial-torsion dictionary; --selftest |
