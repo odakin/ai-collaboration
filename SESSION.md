@@ -6,6 +6,8 @@
 
 非有界 moment operator と有限観測窓の campaign から、一般化した検証規律と script 3 本を層1へ昇格し、multi-stage review の結果を受領する collect の欠落も修正した。判断と instance 境界は [DESIGN](DESIGN.md#unbounded-moment-hoist)、規律は [unbounded moment-domain audit](conventions/physics-verification-cycle.md#unbounded-moment-domain-audit)、道具の全数は [generated script index](scripts/README.md) から辿る。全 script の selftest、公開層 leak、entrypoint、生成索引の検査を通した。次の campaign は同規律の hoist station と生成索引を入口にする。
 
+論文の推敲 session (2026-09-13、原稿の通読 pass 40 本) から、 著者の並行編集の前検査を道具にした: [`scripts/editor-guard.py`](scripts/editor-guard.py) (`check` = 未 commit 変更で exit 3 + 差分 hash 保存、 `carrier` = 読んだ差分と同じ hash のときだけ commit)。 [`edit-intent-record.md` 規則 9](conventions/edit-intent-record.md#editor-open-precheck) に破られ方 (`git status --short` は exit 0 で鎖を止めない、 2 回) と「見つけても自動 carrier しない」、 規則 1 にパイプ後 gate の再発を追記。
+
 ## 残タスク
 
 - 状態識別の数式と道具を追加。入口 = [証明と利用範囲](docs/state-discrimination.md)、[library](scripts/state_discrimination.py)、[検証時の certificate](conventions/physics-verification-cycle.md#state-discrimination-certificates)。reporter は未知の foil crash と marker 後の非ゼロ終了を失敗にし、`--run` の失敗を呼び元へ返す。実装判断 = DESIGN.md。
