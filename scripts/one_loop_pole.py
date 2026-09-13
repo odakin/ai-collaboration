@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Exact 1/ε pole of one-loop Minkowski integrals with ≤ 2 propagators by large-loop-momentum expansion and covariant angular averaging (sympy, exact rationals only) — re-computes printed pole terms of self-energies, tadpoles and mixed two-point functions from printed Feynman rules; --selftest
 
-Layer-1 hoist (2026-09-11) of the pole extractor that a blind referee wrote to re-compute a printed
-one-loop two-point function (bubble + seagull + tadpole, and a mixed amplitude) from the
-printed Feynman rules, independently of the authors' tooling (the instance stays in a private paper repo).
+Why (2026-09-11): a blind referee wrote this pole extractor to re-compute printed one-loop pole terms from the
+printed Feynman rules, independently of the authors' tooling (the instance stays private).
 
 Method.  Mostly-plus metric, denominators (p² + m² − i0) and ((p + q)² + m² − i0), D = 4 − 2ε:
     pole[ ∫ d^Dp/(2π)^D f(p) ] = (i / 16π²ε) · ⟨ f_{-4} ⟩ ,

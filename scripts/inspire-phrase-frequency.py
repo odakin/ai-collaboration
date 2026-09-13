@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """Which wording does the literature use? Count INSPIRE-HEP records whose title or full text contains each exact phrase, and print the counts side by side with ratios to the first phrase; --selftest runs offline.
 
-Why (2026-09-12/13): two naming questions were settled by the same manual loop of INSPIRE queries, for example
-"Nambu-Goldstone field" : "boson" : "mode" = 233 : 5843 : 1030 in full text. The loop was retyped each time. The counts are evidence for "which term is
+Why (2026-09-12/13): two naming questions on a manuscript were settled by the same manual loop of INSPIRE queries,
+retyped each time. The counts are evidence for "which term is
 standard", not for correctness; quote them with the date and the field (title vs full text).
 
 Usage:
-  inspire-phrase-frequency.py "Nambu-Goldstone field" "Nambu-Goldstone boson" "Nambu-Goldstone mode"
-  inspire-phrase-frequency.py --plurals "trace vector" "vector trace" "traced vector"   # also counts phrase + "s"
-  inspire-phrase-frequency.py --fields ft --json "would-be Goldstone boson" "would-be Goldstone mode"
+  inspire-phrase-frequency.py "dark matter halo" "dark-matter halo"
+  inspire-phrase-frequency.py --plurals "Wilson loop" "Wilson line"   # also counts phrase + "s"
+  inspire-phrase-frequency.py --fields ft --json "effective field theory" "effective theory"
   inspire-phrase-frequency.py --selftest
 
 Fields: t = title, ft = full text (default both). Each count is one request (`size=1`, the total only),
-with --sleep seconds between requests (default 0.3). Hyphens and spaces are sent as typed; INSPIRE's exact-phrase
-matching treats "Nambu-Goldstone" and "Nambu–Goldstone" alike in practice, but do not rely on punctuation variants.
+with --sleep seconds between requests (default 0.3). Hyphens and spaces are sent as typed; do not assume that
+punctuation variants (hyphen and en dash) are matched alike.
 """
 from __future__ import annotations
 
@@ -86,10 +86,10 @@ def selftest() -> int:
         if not cond:
             failed.append(name)
 
-    expect("query quotes the phrase for exact matching", build_query("ft", "trace vector") == 'ft:"trace vector"')
+    expect("query quotes the phrase for exact matching", build_query("ft", "Wilson loop") == 'ft:"Wilson loop"')
     expect("--plurals appends s once, not to words already ending in s",
-           expand(["NG mode", "axial torsion", "fields"], True) == ["NG mode", "NG modes", "axial torsion",
-                                                                     "axial torsions", "fields"])
+           expand(["Wilson loop", "fermion", "fields"], True) == ["Wilson loop", "Wilson loops", "fermion",
+                                                                     "fermions", "fields"])
     fake = {("t", "A"): 10, ("ft", "A"): 200, ("t", "B"): 0, ("ft", "B"): 50}
     calls = []
 

@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Mostly-plus Dirac algebra with asserted conventions (NumPy; exact sympy matrices on request) — γ^a, γ5, ε, σ^{ab}, antisymmetrised products, trace identities and the axial-torsion dictionary; --selftest
 
-Layer-1 hoist (2026-09-11) of the conventions module that a blind referee derivation of a one-loop
-Dirac-induced action on a Riemann–Cartan background wrote from scratch (the instance and its checks
-stay in a private paper repo).  Sign and factor slips in exactly these identities are the commonest
+Why (2026-09-11): a blind referee's one-loop derivation wrote these conventions from scratch (the instance and
+its checks stay private).  Sign and factor slips in exactly these identities are the commonest
 silent error of one-loop checks; a check that imports them inherits asserted conventions and keeps
 only its own freedom.
 

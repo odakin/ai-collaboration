@@ -30,7 +30,7 @@ Write every file section by section (there is an output cap per response); do no
 
 The model: `<copy the action / Lagrangian verbatim, with conventions (metric signature, units), the parameters and the relations imposed among them, and the numbers the tasks need (scales, field values, rates). Cite the public paper the construction comes from by arXiv number.>`
 
-**Definitions used by the tasks (state them here so that Stage 1 and the manuscript can be compared sharply)**: `<e.g. what "onset of oscillation" means (the exact-background end of inflation, eps_H = 1), what "spectator" means (effective mass below H and field value below H throughout the observable e-folds), what "completes" means (occupation reaching a stated number), which scale a running coupling is evaluated at, which diagram a word names ("tadpole": the one-point function or the seagull)>`.
+**Definitions used by the tasks (state them here so that Stage 1 and the manuscript can be compared sharply)**: `<e.g. the event that defines an "onset", the conditions for calling a field a "spectator", the threshold for "completes", the scale at which a running coupling is evaluated, and which diagram a name refers to>`.
 
 **Task A** (`<the physics the requester's proposal rests on, phrased as a derivation: "derive every X-dependent term ...", "determine the range of parameter Y for which ...", "estimate Z as a function of ...">`).
 

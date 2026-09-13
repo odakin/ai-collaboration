@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Seeley–DeWitt a4 of Laplace-type operators by numerical invariant fitting (NumPy) — Gilkey's a4 from user-supplied E and Ω on random algebraic curvature tensors, least-squares fit onto an invariant basis, the 1/ε pole map per species, and built-in Dirac + axial torsion / Dirac + U(1) / scalar operators with textbook anchors; --selftest
 
-Layer-1 hoist (2026-09-11) of the heat-kernel engine that a blind referee used to derive, before opening a
-manuscript, the logarithmically divergent one-loop action of a Dirac field on a Riemann–Cartan background with
-totally antisymmetric contorsion (the instance stays in a private paper repo).  The engine is operator-agnostic:
+Why (2026-09-11): a blind referee used this engine to derive a logarithmically divergent one-loop action before
+opening a manuscript (the instance stays private).  The engine is operator-agnostic:
 give it E and Ω for your Laplace-type operator and an invariant basis, and it returns the a4 coefficients.
 
 Pole map (D = 4 − 2ε, total derivatives dropped).  For D = −(∇̃² + E) on a bundle V,
