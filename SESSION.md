@@ -14,6 +14,8 @@
 
 foil の歯の確かめ方 (2026-09-14): [`physics-verification-cycle.md#foil-teeth-per-fix-part`](conventions/physics-verification-cycle.md#foil-teeth-per-fix-part) = 修正の一部だけを外した mutant ごとに、 落ちるはずの check が落ち、 残るはずの check が PASS のまま (= foil の独立性) を見る。 機械は claude-config の `scripts/check-foil-teeth.py` + `<script>.mutants.json` (最初の spec で、 一致数のラベルなのに別の検査で落ちていた foil と、 状態を共有していた foil を見つけた)。
 
+未公表の結果の扱い (2026-09-14): `physics-verification-cycle.md` §14 を一般則だけに書き直し、 連続 rank-one POVM の 3 節と `gpt_measurements.py` の結果を実装した 9 関数・docstring の 2 節を owner の非公開の検証 repo へ移した (`a5738fe`)。 盲検の規約と SESSION の例から、 審査を受けた文書の件数・日付・sandbox の名前を外した (`e691a5a`)。
+
 ## 残タスク
 
 - 状態識別の数式と道具を追加。入口 = [証明と利用範囲](docs/state-discrimination.md)、[library](scripts/state_discrimination.py)、[検証時の certificate](conventions/physics-verification-cycle.md#state-discrimination-certificates)。reporter は未知の foil crash と marker 後の非ゼロ終了を失敗にし、`--run` の失敗を呼び元へ返す。実装判断 = DESIGN.md。
