@@ -1,4 +1,4 @@
-"""GPT / POVM の間主観性・sharpness・極値性を定義から検査する library (有限 outcome の certificate/LP、連続 Husimi POVM の有限 anchor + foil、--selftest; 無限次元の証明境界は physics-verification-cycle.md#continuous-rank-one-povm-extremality)
+"""GPT / POVM の間主観性・sharpness・極値性を定義から検査する library (有限 outcome の certificate/LP、連続 outcome と無限次元の汎用の有限 anchor、--selftest)
 
 Layer-1 hoist (2026-09-05) of a helper first written for a verify-to-learn campaign.  The campaign's
 check scripts live in a private verification repo (personal layer) and import this module through a
@@ -26,106 +26,10 @@ Definitions (finite outcome set X; "1" = unit effect):
       measurements; quantum: <=> {delta_x = P_x delta_x P_x Hermitian, sum delta_x = 0} = {0}
       (lemma: a ± eps delta >= 0 for some eps > 0  <=>  supp delta ⊆ supp a).
 
-Continuous-outcome addendum (standard countably additive POVMs on the Borel space C):
-  The single-mode Husimi observable is A(U)=∫_U |z><z| d^2z/pi.  Its minimal Naimark
-  dilation is (V psi)(z)=<z|psi> in L^2(C,d^2z/pi), P(U)=M_{1_U}; minimality follows
-  already from the vacuum wavefunction, which is nowhere zero.  The extremality criterion
-  therefore asks whether V* M_h V=0 for bounded measurable h forces h=0 a.e.  Matrix
-  elements in the Fock basis say that every mixed moment of the finite signed measure
-  h(z) exp(-|z|^2)d^2z/pi vanishes.  Gaussian exponential integrability plus uniqueness
-  of the Fourier--Stieltjes transform gives h=0 a.e.; hence the Husimi POVM is extremal.
-  For a self-joint B, the commuting dilation effects for its second marginal have the same
-  compression as P(U); extremality makes them equal to P(U).  Thus B is uniquely the
-  diagonal pushforward B(U1 x U2)=A(U1 ∩ U2), first on rectangles and then on all Borel
-  sets by scalar pi-lambda uniqueness and polarization.  Statewise, weak, strong, and
-  ultraweak countable-additivity formulations give the same result.  A merely finitely
-  additive extension is outside this conclusion.
-
-  `coherent_resolution_matrix` and `coherent_bounded_moment_map` below are deliberately
-  finite machine anchors for normalization and a bounded test family.  No Fock truncation,
-  quadrature rank, or finite moment family proves the infinite-dimensional extremality
-  statement; that load-bearing step is the analytic Gaussian/Fourier argument above.
-
-  Second, independent route (blind second-eye pass, same day) that needs neither Radon–Nikodym
-  nor Fourier uniqueness: a self-joint B is canonical iff B vanishes off the diagonal, and for
-  Borel U1, U2 at positive distance every block X = B(E), E ⊆ U1×U2, obeys the FINITE-DIMENSIONAL
-  inequality  Tr X (1 - |<u|v>|) <= Tr(Q_u X) + Tr(Q_v Y)  for any common lower bound X of
-  (X', Y) = (A(V), A(W)) and unit vectors u, v (Q_u = 1 - |u><u|).  With u, v the coherent states at
-  the centres of square cells of side s, the right-hand side is O(s^4) per cell while Tr A(V) is
-  O(s^2), so partitioning U1, U2 into cells and summing gives Tr B(E) <= O(s^2) -> 0.  The
-  inequality is itself the value of the explicit dual point (Y, Z) = t (Q_u, Q_v), t = 1/(1-|<u|v>|)
-  of the common-lower-bound SDP (Y + Z >= 1 because ||p_u + p_v|| = 1 + |<u|v>|), so it is the
-  rigorous upper bound to quote when the generic dual solver is loose (~ Tr X' + Tr Y).  Helpers:
-  `coherent_cell_matrix` (truncated Husimi square cell, Gauss–Legendre), `nearly_rank_one_clb_bound`
-  (the certificate), `symmetrised_coherent_cell` (foil model with a.e. rank-2 density, whose cells V
-  and -V keep a common lower bound A(V)/2 — the mechanism visibly fails there).  Same caveat: these
-  are finite anchors for the *mechanism* of the continuous proof, not a proof of it.
-
-  Third, independent route (sealed-sandbox blind second eye, next day) that needs neither compactness,
-  uniform non-parallelism, nor trace class, and weakens continuity to measurability:  for a rank-one
-  family A(U) = ∫_U |φ_z><φ_z| μ(dz) (A(X) = 1) with pairwise non-parallel φ_z, (i) a self-joint B is
-  canonical iff B(Δ^c) = 0; (ii) domination lemma — an operator measure 0 <= C <= A has
-  C = ∫ g |φ_z><φ_z| dμ with a Borel g: X -> [0,1] (scalar Radon–Nikodym densities on a countable dense
-  (Q+iQ)-subspace extend a.e. to a bounded positive form Q with Q(ψ,ψ) <= |<φ_z|ψ>|², hence Q ∝ |φ_z><φ_z|
-  by Cauchy–Schwarz); (iii) with a faithful state ρ and τ := tr(ρ B(·)) (B << τ), applying (ii) to
-  U -> B(U×V) and to V -> B(U×V) gives two expressions for dν_{ψχ}/dτ, namely <ψ|φ_z><φ_z|χ>/r(z) and
-  <ψ|φ_w><φ_w|χ>/r(w)  (r = <φ|ρ|φ> > 0; rectangles are a π-system, μ σ-finite), so
-  |φ_z><φ_z|/r(z) = |φ_w><φ_w|/r(w) τ-a.e. and non-parallelism forces z = w: τ(Δ^c) = 0, B(Δ^c) = 0.
-  Hypotheses actually used: measurability of z -> <φ_z|ψ>, second countability of X
-  (Borel(X²) = Borel(X)⊗Borel(X), σ-finite μ), separable H (faithful state, countable dense set), pairwise
-  non-parallelism only (a violating pair set whose first projection is μ-null is harmless; a positive-measure
-  violation — two copies φ_{z+2} = φ_z — admits the swap joint ½(B_c + (id×σ)_*B_c)).  Density of rank >= 2
-  breaks it: A(U) = |U|·1 on C² has the non-canonical joint B(U×V) = |U∩V| |0><0| + |U||V| |1><1|
-  (`rank_two_density_noncanonical_joint`).  The purely atomic case is the finite rank-one POVM, where
-  "JM(A,A) is a singleton" has an exact finite witness (pairwise trivial range intersections,
-  `supports_intersect_trivially`) and a solver-free CONSISTENCY anchor (`dykstra_self_joint`: alternating
-  projections land on the canonical joint from any start iff the feasible set is that one point — a
-  heuristic, declared as such; the foil `split_rank_one_effect` / `parallel_pair_joint` makes it land
-  elsewhere).  Verbatim transfer of the cell-partition route to a general separable metric X has two gaps —
-  "bounded ⇒ μ-finite" and uniform bounds on bounded sets both need a proper (locally compact) space —
-  repaired by choosing the covering rectangles through continuity of the overlap and summing countably many
-  cells (normality of the trace); the theorem itself holds without them.  Closed-form Stokes twin of the
-  ∂̄-witness on a disc split into halves (bump (1-|z|²)³): ψ_n(left) = i^n B((n+1)/2, 4) / (2π √n!) for even
-  n, 0 for odd n (`husimi_disc_dbar_witness_exact`; quadrature twin `husimi_disc_dbar_witness`, whose
-  compressed inequality ||1_U k||² A_N(U) - |ψ><ψ| >= 0 is exact for the discrete measure).
-
-Infinite-dimensional addendum (second-eye campaign on the finite-outcome criterion, 2026-09):
-  * Exact criterion (dimension-free, proof needs only Cauchy–Schwarz and the easy half of Douglas'
-    lemma):  a nonzero c with 0 <= c <= a, c <= b exists  <=>  ran(a^{1/2}) ∩ ran(b^{1/2}) != {0}.
-    In finite dimension ran = supp (closed), so this is the support criterion; in infinite dimension
-    the two differ whenever a range is not closed.  Explicit pair on L^2(S^1) with p_supp(a) ∧ p_supp(b) != 0
-    but no common lower bound:  a = sum_n e^{-2|n|}|e_n><e_n| (ran a^{1/2} = real-analytic class R),
-    b = P_I = multiplication by 1_I for a proper arc I (ran = L^2(I));  R ∩ L^2(I) = {0} by the identity
-    theorem.  For this pair e_{a,eps} ∧ e_{b,eps} does NOT converge strongly to p_a ∧ p_b: e_{a,eps} is the
-    projector onto trig polynomials of degree <= N(eps), and e_N ∧ P_I = 0 for every N (`fourier_arc_gram`
-    positive definite) while 1 ∧ P_I = P_I.  The projection lattice meet does not commute with increasing
-    strong limits.
-  * The distinction is visible at the POVM level with 3 outcomes:  a_1 = a/2, d = 1 - a_1 (invertible),
-    a_2 = d^{1/2} P_I d^{1/2}, a_3 = d^{1/2} (1 - P_I) d^{1/2}.  Pairwise ran(a_x^{1/2}) intersect trivially
-    (so the POVM is IS by the criterion above) although the closed supports of a_1 (= H) and a_2 overlap.
-    With 2 outcomes this cannot happen (a and 1-a commute; a^{1/2}(1-a)^{1/2} != 0 unless a is a
-    projection).  `analytic_class_arc_povm` gives Fourier truncations of this family; truncations cannot
-    show the infinite-dimensional statement (finite dimension always has the support criterion) — they
-    only anchor that the construction behaves as the proof says.
-  * Solver-free bracket for the largest common lower bound:  a:b <= c-max <= 2 (a:b) in the sense
-    ||a:b|| <= max ||c|| <= 2||a:b||  (`common_lower_bound_sandwich`).  Proof: a:b is itself a common lower
-    bound; and for any common lower bound c, <xi,c xi> = <x+y,c(x+y)> <= 2(<x,cx>+<y,cy>) <= 2(<x,ax>+<y,by>),
-    inf over x+y = xi gives c <= 2 a:b.
-  * Certifying "e_N ∧ P_I = 0" numerically: lambda_min of the arc Gram matrix decays super-exponentially
-    (prolate-type, ~1e-19 at N = 8, ~1e-38 at N = 16), far below double precision — use mpmath at
-    ~100 digits, never a 1e-12 tolerance on a float eigenvalue.
-  * Compressing a projection to a truncation gives a NON-projection whose complement shares a large common
-    lower bound with it (P_N(1-P_N) != 0); truncate the *decomposition* instead (spectral cut of the
-    compression at 1/2), otherwise the truncated pair (a_2, a_3) shows a spurious O(1) common lower bound.
-  * Husimi coarse-graining onto cells U_k: ran(A(U)^{1/2}) = V*(L^2(U)) and |psi><psi|/||f||^2 <= A(U) for
-    psi = V*f, f in L^2(U).  For two cells that alone fill a disc D up to null sets (0 < |D ∩ U_k| < |D|),
-    h = e^{|z|^2/2} dbar(phi) with phi in C_c^inf(D) has V*h = 0 (Stokes against entire functions), so
-    psi = V*(1_{U_k} h) = -V*(1_{U_l} h) is a common element of both ranges, nonzero for some phi because an
-    indicator cannot be antiholomorphic on D (dbar hypoellipticity).  Fock components need no Gaussian:
-    psi_n = (1/pi) ∫_{U_k} dbar(phi) z^n/sqrt(n!) d^2z  (`husimi_dbar_witness`, half-plane cells; the half-plane
-    Husimi matrix elements are closed form, `husimi_halfplane_matrix`).  Distance between cells is NOT the
-    criterion: a bounded cell always has a common lower bound with any cell containing an annulus around it
-    (subharmonicity of |F|^2 + Poisson bound gives A(U_k) <= C A(U_j)).
+Continuous outcomes and infinite dimension: this module keeps only generic finite anchors (coherent-state
+truncations and square cells, the solver-free parallel-sum bracket for common lower bounds, alternating
+projections onto JM(A,A) with parallel-copy foils).  A finite truncation never proves an
+infinite-dimensional statement: it anchors normalisation and the behaviour of a construction only.
 
 Two model families:
   * quantum (finite dim d): Hermitian effects 0 <= a <= I.  Small convex programs are solved with
@@ -680,39 +584,13 @@ def coherent_cell_matrix(z0, side, n_fock, quadrature_order=32):
     return (M + M.conj().T) / 2
 
 
-def symmetrised_coherent_cell(z0, side, n_fock, quadrature_order=32):
-    """A'(V) = (A(V) + A(-V)) / 2 — the z -> -z symmetrised Husimi POVM (a POVM, density rank 2 a.e.).
-    Foil model for continuous-outcome intersubjectivity: cells V and -V share the common lower
-    bound A(V)/2 (ratio 1/2 at every scale), and the anti-diagonal joint
-    B(E) = (1/2pi)∫_{(z,-z)∈E}|z><z| + (1/2pi)∫_{(-z,z)∈E}|z><z| is a non-canonical self-joint."""
-    return (coherent_cell_matrix(z0, side, n_fock, quadrature_order)
-            + coherent_cell_matrix(-complex(z0), side, n_fock, quadrature_order)) / 2
-
-
-def nearly_rank_one_clb_bound(X, Y, u, v):
-    """Explicit dual certificate for max{Tr c : 0 <= c <= X, c <= Y} built from unit vectors u, v:
-         Tr c (1 - |<u|v>|) <= Tr(Q_u X) + Tr(Q_v Y),   Q_u = 1 - |u><u|.
-    Proof: Tr(c(p_u + p_v)) <= ||p_u + p_v|| Tr c = (1 + |<u|v>|) Tr c and
-           Tr(c p_u) = Tr c - Tr(Q_u c) >= Tr c - Tr(Q_u X)  (0 <= c <= X, Q_u >= 0).
-    Equivalently (Y', Z') = t (Q_u, Q_v), t = 1/(1 - |<u|v>|), is dual feasible (Y' + Z' >= 1) with
-    objective Tr(X Y' + Y Z') = the bound.  Tight when X, Y are nearly rank one along u, v (e.g.
-    small Husimi cells at their centres: bound O(s^4) vs Tr X O(s^2)).
-    Returns (bound, overlap |<u|v>|, Tr(Q_u X), Tr(Q_v Y))."""
-    u = np.asarray(u) / np.linalg.norm(u)
-    v = np.asarray(v) / np.linalg.norm(v)
-    tqx = float(np.trace(X).real - (u.conj() @ X @ u).real)
-    tqy = float(np.trace(Y).real - (v.conj() @ Y @ v).real)
-    ov = abs(complex(u.conj() @ v))
-    return (tqx + tqy) / (1 - ov), ov, tqx, tqy
-
-
 # ----------------------------------------------------------------------------
 # polytope GPTs: state space conv(V), V = array (k, m); effects = vectors e in R^m
 # with e·v in [0,1] for all vertices v.  (Coordinates include the normalisation
 # coordinate, so linear functionals e·x exhaust the affine functionals.)
 # ----------------------------------------------------------------------------
 # ----------------------------------------------------------------------------
-# Infinite-dimensional anchors (see docstring "Infinite-dimensional addendum")
+# Infinite-dimensional anchors (generic)
 # ----------------------------------------------------------------------------
 def common_lower_bound_sandwich(a, b, delta=1e-14, dps=None):
     """Solver-free bracket [lo, hi] = [||a:b||, 2||a:b||] for max{||c|| : 0 <= c <= a, c <= b}.
@@ -737,103 +615,8 @@ def common_lower_bound_sandwich(a, b, delta=1e-14, dps=None):
     return v, 2 * v
 
 
-def fourier_arc_gram(N, alpha, beta, dps=100):
-    """Gram matrix G_{mn} = (1/2pi) ∫_alpha^beta e^{i(n-m)theta} dtheta, |m|,|n| <= N, in mpmath at `dps` digits.
-    G positive definite  <=>  no nonzero trig polynomial of degree <= N vanishes a.e. on the arc (alpha, beta)
-    <=>  e_N ∧ P_{S^1 \\ arc} = 0.  lambda_min decays super-exponentially with N (~1e-38 at N = 16), so the
-    positivity certificate needs high precision.  Returns (G, lambda_min)."""
-    import mpmath as mp
-    with mp.workdps(dps):
-        idx = list(range(-N, N + 1))
-        G = mp.matrix(len(idx), len(idx))
-        alpha, beta = mp.mpf(alpha), mp.mpf(beta)
-        for i, m in enumerate(idx):
-            for j, n in enumerate(idx):
-                k = n - m
-                G[i, j] = (beta - alpha) / (2 * mp.pi) if k == 0 else (mp.expj(k * beta) - mp.expj(k * alpha)) / (2 * mp.pi * 1j * k)
-        E, _ = mp.eighe(G)
-        lam = min(E)
-    return G, lam
-
-
-def analytic_class_arc_povm(N, alpha=0.0, beta=2.0, decay=2.0):
-    """Fourier truncation (|n| <= N) of the 3-outcome family a_1 = ½ diag(e^{-decay|n|}), d = 1 - a_1,
-    a_2 = d^{1/2} P_N d^{1/2}, a_3 = d^{1/2} (1-P_N) d^{1/2}, where P_N is the spectral projection (eigenvalues
-    > 1/2) of the compression of P_I, I = S^1 \\ (alpha, beta).  In the limit the square-root ranges intersect
-    pairwise trivially while the closed supports of a_1 and a_2 overlap (docstring).  Returns [a_1, a_2, a_3]
-    as numpy arrays (double precision; P_N from the double-precision Gram)."""
-    idx = np.arange(-N, N + 1)
-    lam = 0.5 * np.exp(-decay * np.abs(idx))
-    a1 = np.diag(lam).astype(complex)
-    d12 = np.sqrt(np.diag(1.0 - lam)).astype(complex)
-    G, _ = fourier_arc_gram(N, alpha, beta, dps=30)
-    Gd = np.array([[complex(G[i, j]) for j in range(G.cols)] for i in range(G.rows)])
-    GI = np.eye(len(idx)) - (Gd + Gd.conj().T) / 2          # compression of 1_I
-    w, U = np.linalg.eigh(GI)
-    V = U[:, w > 0.5]
-    PN = V @ V.conj().T
-    a2 = d12 @ PN @ d12
-    a3 = d12 @ (np.eye(len(idx)) - PN) @ d12
-    return [a1, (a2 + a2.conj().T) / 2, (a3 + a3.conj().T) / 2]
-
-
-def husimi_halfplane_matrix(N, right=True):
-    """<m|A(U)|n>, m,n <= N, for U = right (Re z > 0) or left half-plane of the Husimi POVM
-    A(U) = (1/pi) ∫_U |z><z| d^2z, closed form: angular ∫ e^{i(n-m)theta} over the half circle × Γ((m+n+2)/2)/2."""
-    lo, hi = (-math.pi / 2, math.pi / 2) if right else (math.pi / 2, 3 * math.pi / 2)
-
-    def ang(k):
-        return hi - lo if k == 0 else (np.exp(1j * k * hi) - np.exp(1j * k * lo)) / (1j * k)
-    M = np.zeros((N + 1, N + 1), dtype=complex)
-    for m in range(N + 1):
-        for n in range(N + 1):
-            M[m, n] = ang(n - m) * math.gamma((m + n + 2) / 2) / 2 / math.pi / math.sqrt(float(math.factorial(m)) * float(math.factorial(n)))
-    return (M + M.conj().T) / 2
-
-
-def husimi_dbar_witness(N, right=True, z0=0.0):
-    """Common-element witness for the two half-plane cells: psi_n = (1/pi) ∫_U dbar(phi) z^n/sqrt(n!) d^2z with
-    phi(z) = exp(-1/(1-|z-z0|^2)) on |z-z0| < 1 (z0 real).  Returns (psi, ||1_U h||^2), h = e^{|z|^2/2} dbar(phi),
-    so that |psi><psi| / ||1_U h||^2 <= A(U).  For z0 = 0 the disc straddles both cells and psi != 0 (psi_0 =
-    -∫_0^1 r^2 e^{-1/(1-r^2)} (1-r^2)^{-2} dr < 0); for |z0| >= 1 the bump lies in one cell and psi = 0 (Stokes) —
-    the built-in foil."""
-    from scipy.integrate import quad
-    psi = np.zeros(N + 1, dtype=complex)
-    dphi = lambda r: -np.exp(-1.0 / (1 - r * r)) / (1 - r * r) ** 2 if r < 1 else 0.0
-
-    def theta_range(r):
-        c = (-z0 / r) if right else (z0 / r)
-        if c <= -1:
-            return [(-math.pi, math.pi)]
-        if c >= 1:
-            return []
-        t = math.acos(c)
-        return [(-t, t)] if right else [(math.pi - t, math.pi + t)]
-
-    def ang(k, lo, hi):
-        return hi - lo if k == 0 else (np.exp(1j * k * hi) - np.exp(1j * k * lo)) / (1j * k)
-
-    for n in range(N + 1):
-        def integrand(r):
-            tot = 0.0 + 0.0j
-            for (lo, hi) in theta_range(r):
-                for j in range(n + 1):
-                    coef = math.comb(n, j) * z0 ** (n - j) * r ** j
-                    tot += coef * r * ang(j + 1, lo, hi)
-            return dphi(r) * r * tot / math.sqrt(float(math.factorial(n))) / math.pi
-        psi[n] = quad(lambda r: integrand(r).real, 0, 1, limit=200)[0] + 1j * quad(lambda r: integrand(r).imag, 0, 1, limit=200)[0]
-
-    def nrm(r):
-        tot = 0.0
-        for (lo, hi) in theta_range(r):
-            tot += quad(lambda th: np.exp(abs(z0 + r * np.exp(1j * th)) ** 2), lo, hi)[0]
-        return dphi(r) ** 2 * r ** 3 * tot / math.pi
-    f2 = quad(nrm, 0, 1, limit=200)[0]
-    return psi, f2
-
-
 # ----------------------------------------------------------------------------
-# Finite anchors for "JM(A,A) is a singleton" and its foils (rank-one families; docstring "Third route")
+# Finite anchors for "JM(A,A) is a singleton" and its foils (rank-one families)
 # ----------------------------------------------------------------------------
 def canonical_joint(A):
     """Canonical self-joint B_kl = δ_kl a_k as a block array of shape (n, n, d, d)."""
@@ -936,68 +719,6 @@ def parallel_pair_joint(A, k1, k2):
     B[k1, k2] = w1 * w2 / (w1 + w2) * P1
     B[k2, k1] = w1 * w2 / (w1 + w2) * P1
     return B
-
-
-def rank_two_density_noncanonical_joint(n=8):
-    """Discretised counterexample to the rank-one generalisation once the density has rank 2:
-    X = [0,1] in n cells, μ = Lebesgue, density 1 on C² (a_k = 1/n), and
-    B_kl = δ_kl |0><0|/n + |1><1|/n²  (perfectly correlated on |0>, independent on |1>) is a joint
-    measurement of A with itself that is not canonical.  Returns (A, B) as (list, block array)."""
-    P0, P1 = np.diag([1.0, 0.0]).astype(complex), np.diag([0.0, 1.0]).astype(complex)
-    A = [np.eye(2, dtype=complex) / n for _ in range(n)]
-    B = np.zeros((n, n, 2, 2), dtype=complex)
-    for k in range(n):
-        for l in range(n):
-            B[k, l] = (P0 / n if k == l else 0) + P1 / n ** 2
-    return A, B
-
-
-def husimi_disc_dbar_witness(N, n_r=300, n_t=600, bump_center=0.0, bump_radius=1.0):
-    """∂̄-witness for the unit disc D split into halves U_L = {Re z < 0} ∩ D and U_R = D \\ U_L (third cell =
-    exterior).  Bump m(z) = (ρ² - |z-c|²)³ on |z-c| < ρ (C² at the rim, enough for Stokes),
-    k = e^{|z|²/2} ∂̄m, so k <n|z> = ∂̄m · z^n/√n! carries no Gaussian.  Polar midpoint quadrature on D
-    (n_t divisible by 4 puts the interface Re z = 0 on cell edges).  Returns dict(psi_left, psi_right,
-    psi_full, k2_left, k2_right, A_left, A_right):  psi_side = J*E(U_side)k in the Fock basis (n <= N),
-    psi_full = J*k (≈ 0 by Stokes), k2_side = ||1_{U_side} k||², A_side = P_N A(U_side) P_N by the SAME
-    quadrature — so k2_side · A_side - |psi_side><psi_side| >= 0 holds exactly for the discrete measure
-    (Cauchy–Schwarz), i.e. |ψ><ψ|/||1_U k||² is a common lower bound of A(U_L), A(U_R).
-    Default bump (c = 0, ρ = 1) straddles the interface and ψ != 0 (closed form `husimi_disc_dbar_witness_exact`);
-    foil: a bump inside one half (c = -0.5, ρ = 0.2) gives psi_left = psi_full = 0."""
-    r = (np.arange(n_r) + 0.5) / n_r
-    t = (np.arange(n_t) + 0.5) * 2 * math.pi / n_t
-    R, T = np.meshgrid(r, t, indexing="ij")
-    Z = R * np.exp(1j * T)
-    w = R * (1.0 / n_r) * (2 * math.pi / n_t)
-    s = bump_radius ** 2 - np.abs(Z - bump_center) ** 2
-    dm = np.where(s > 0, -3 * s ** 2 * (Z - bump_center), 0.0)      # ∂̄ (ρ² - |z-c|²)³ = -3 (ρ² - |z-c|²)² (z - c)
-    left = Z.real < 0
-    fock = np.array([math.sqrt(math.factorial(n)) for n in range(N + 1)])
-    zn = np.stack([Z ** n for n in range(N + 1)])
-    base = dm * w / math.pi
-    out = {}
-    for name, mask in (("left", left), ("right", ~left), ("full", np.ones_like(left))):
-        out["psi_" + name] = np.array([(base * zn[n])[mask].sum() for n in range(N + 1)]) / fock
-    k = np.exp(np.abs(Z) ** 2 / 2) * dm
-    g = np.exp(-np.abs(Z) ** 2) * w / math.pi
-    for name, mask in (("left", left), ("right", ~left)):
-        out["k2_" + name] = float((np.abs(k) ** 2 * w / math.pi)[mask].sum())
-        M = np.array([[(g * zn[a] * np.conj(zn[b]))[mask].sum() for b in range(N + 1)] for a in range(N + 1)])
-        M = M / np.outer(fock, fock)
-        out["A_" + name] = (M + M.conj().T) / 2
-    return out
-
-
-def husimi_disc_dbar_witness_exact(N):
-    """Closed form of `husimi_disc_dbar_witness(N)['psi_left']` for the default bump (c = 0, ρ = 1) by Stokes:
-    ∫_{U_L} ∂̄m · z^n d²z = (1/2i) ∮_{∂U_L} m z^n dz and only the interface Γ = i[-1, 1] (traversed upward for
-    the counter-clockwise boundary of the left half) contributes, so
-    ψ_n = (1/(2πi √n!)) ∫_{-1}^{1} (1-y²)³ (iy)^n i dy = i^n B((n+1)/2, 4) / (2π √n!)  for even n, 0 for odd n
-    (B = Euler beta; ψ_0 = 96/(210π) ≈ 0.1455).  The right half gives -ψ (opposite orientation)."""
-    psi = np.zeros(N + 1, dtype=complex)
-    for n in range(0, N + 1, 2):
-        beta = math.gamma((n + 1) / 2) * math.gamma(4) / math.gamma((n + 1) / 2 + 4)
-        psi[n] = (1j) ** n * beta / (2 * math.pi * math.sqrt(math.factorial(n)))
-    return psi
 
 
 class Polytope:
@@ -1214,39 +935,12 @@ def _selftest():
     lo, hi = common_lower_bound_sandwich(P0, P0); okk &= abs(lo - 0.5) < 1e-6 and abs(hi - 1) < 1e-6
     lo, hi = common_lower_bound_sandwich(P0, P1); okk &= hi < 1e-9
     lo_mp, _ = common_lower_bound_sandwich(P0, P0, dps=30); okk &= abs(lo_mp - 0.5) < 1e-9
-    # (ii) arc Gram positive definite and lambda_min decreasing (meet e_N ∧ P_I = 0 for every N).
-    l4 = fourier_arc_gram(4, 0.0, 2.0)[1]; l8 = fourier_arc_gram(8, 0.0, 2.0)[1]
-    okk &= l4 > 0 and l8 > 0 and l8 < l4 / 1e6
-    okk &= fourier_arc_gram(3, 0.0, 0.0)[1] == 0          # foil: empty arc -> G = 0
-    # (iii) 3-outcome family: POVM on V_N, pair (2,3) has no common lower bound, a_1 injective, a_2 singular.
-    A3 = analytic_class_arc_povm(6)
-    okk &= is_measurement(A3, tol=1e-9)
-    okk &= common_lower_bound_sandwich(A3[1], A3[2], dps=40)[1] < 1e-9
-    okk &= np.min(np.diag(A3[0]).real) > 0 and np.linalg.matrix_rank(A3[1], tol=1e-10) < A3[1].shape[0]
-    # (iv) Husimi half-planes: A(right) + A(left) = 1; dbar witness nonzero and a common lower bound; foil z0 = 3.
-    AR, AL = husimi_halfplane_matrix(6, True), husimi_halfplane_matrix(6, False)
-    okk &= np.allclose(AR + AL, np.eye(7), atol=1e-12)
-    psi, f2 = husimi_dbar_witness(6, True); psiL, f2L = husimi_dbar_witness(6, False)
-    okk &= np.linalg.norm(psi) > 1e-3 and np.allclose(psiL, -psi, atol=1e-9)
-    cw = np.outer(psi, psi.conj())          # (name kept distinct from the later 2α-block variable c)
-    okk &= eigmin(AR - cw / f2) > -1e-10 and eigmin(AL - cw / f2L) > -1e-10
-    okk &= np.linalg.norm(husimi_dbar_witness(4, True, z0=3.0)[0]) < 1e-12
-    # Husimi square cells: Tr A_N(V) -> |V|/pi, a coarse grid sums to ~1, and the nearly-rank-one
-    # certificate bounds an explicit common lower bound while a non-lower-bound (c = X) violates it.
+    # Husimi square cells: Tr A_N(V) -> |V|/pi and a coarse grid sums to ~1.
     X, Y = coherent_cell_matrix(0.5, 0.4, 9), coherent_cell_matrix(-0.5, 0.4, 9)
     okk &= abs(np.trace(X).real - 0.16 / math.pi) < 1e-9
     grid = sum(coherent_cell_matrix(complex(i + 0.5, j + 0.5) * 0.5, 0.5, 4, 12) for i in range(-8, 8) for j in range(-8, 8))
     okk &= np.linalg.norm(grid - np.eye(4), ord=2) < 1e-3
-    u, v = coherent_trunc_vector(0.5, 9), coherent_trunc_vector(-0.5, 9)
-    bound, ov, _, _ = nearly_rank_one_clb_bound(X, Y, u, v)
-    okk &= abs(ov - math.exp(-0.5)) < 1e-9
-    c = 0.5 * parallel_sum(X, Y)                      # an explicit common lower bound (delta-regularised: feasible to ~1e-9)
-    okk &= eigmin(X - c) > -1e-8 and eigmin(Y - c) > -1e-8 and np.trace(c).real <= bound
-    okk &= np.trace(X).real * (1 - ov) > bound        # foil: c = X is not <= Y and breaks the bound
-    Xs, Ys = symmetrised_coherent_cell(0.5, 0.4, 9), symmetrised_coherent_cell(-0.5, 0.4, 9)
-    cs = 0.5 * coherent_cell_matrix(0.5, 0.4, 9)      # foil model: A(V)/2 is a common lower bound of A'(V), A'(-V)
-    okk &= eigmin(Xs - cs) > -1e-12 and eigmin(Ys - cs) > -1e-12 and abs(np.trace(cs).real / np.trace(Xs).real - 0.5) < 1e-12
-    # (v) rank-one family anchors (docstring "Third route"): 4 non-parallel qubit directions — exact pairwise
+    # (v) rank-one family anchors: 4 non-parallel qubit directions — exact pairwise
     # range witness + Dykstra lands on the canonical joint; foil = split copies (a segment of joints appears).
     A4 = [0.5 * np.outer(v, v.conj()) for v in
           (np.array([math.cos(t), math.sin(t)], complex) for t in np.arange(4) * math.pi / 4)]
@@ -1267,21 +961,6 @@ def _selftest():
     _, info5 = dykstra_self_joint(A5, start5, iters=10000, tol=1e-11)
     okk &= report("foil: Dykstra lands off the canonical point when a parallel pair exists",
                   info5["marginal_err"] < 1e-3 and info5["offdiag_mass"] > 1e-2, f"offdiag {info5['offdiag_mass']:.2e}")
-    A2, B2 = rank_two_density_noncanonical_joint(6)
-    okk &= report("rank-2 density: explicit non-canonical joint of the discretised coin-like POVM",
-                  is_measurement(A2) and check_joint(A2, blocks_to_lists(B2)) and np.linalg.norm(B2 - canonical_joint(A2)) > 0.1)
-    # (vi) ∂̄-witness on the split disc: quadrature vs closed-form Stokes, J*k = 0, exact compressed inequality; foil.
-    wd = husimi_disc_dbar_witness(6, n_r=150, n_t=300)
-    ex = husimi_disc_dbar_witness_exact(6)
-    okk &= report("split-disc dbar witness: J*k = 0, psi_left = -psi_right, quadrature matches Stokes closed form",
-                  np.linalg.norm(wd["psi_full"]) < 1e-9 and np.allclose(wd["psi_left"], -wd["psi_right"], atol=1e-9)
-                  and np.linalg.norm(wd["psi_left"] - ex) < 1e-4 and abs(ex[0] - 96 / (210 * math.pi)) < 1e-12,
-                  f"|psi_0| = {abs(wd['psi_left'][0]):.5f}, max |quad - exact| = {np.abs(wd['psi_left'] - ex).max():.1e}")
-    okk &= report("split-disc dbar witness: ||1_U k||^2 A_N(U) - |psi><psi| >= 0 on both halves",
-                  all(eigmin(wd["k2_" + s] * wd["A_" + s] - np.outer(wd["psi_" + s], wd["psi_" + s].conj())) > -1e-10
-                      for s in ("left", "right")))
-    okk &= report("foil: bump inside one half -> no witness (psi_left = 0)",
-                  np.linalg.norm(husimi_disc_dbar_witness(4, n_r=100, n_t=200, bump_center=-0.5, bump_radius=0.2)["psi_left"]) < 1e-9)
     print("gpt_measurements selftest:", "PASS" if okk else "FAIL")
     return 0 if okk else 1
 

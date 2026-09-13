@@ -16,7 +16,7 @@ Each module's first docstring line is the description source of truth. Every scr
 | [`expanding-mode-growth.py`](expanding-mode-growth.py) | Linear growth of daughter-field modes in an expanding oscillating-inflaton background, with the time at which |
 | [`floquet-monodromy.py`](floquet-monodromy.py) | Floquet exponents by monodromy for parametric-resonance claims, with an exact (anharmonic) background (NumPy + SciPy). |
 | [`generate-script-index.py`](generate-script-index.py) | Generate scripts/README.md from each Python module's first docstring line; --check/--selftest. |
-| [`gpt_measurements.py`](gpt_measurements.py) | GPT / POVM の間主観性・sharpness・極値性を定義から検査する library (有限 outcome の certificate/LP、連続 Husimi POVM の有限 anchor + foil、--selftest; 無限次元の証明境界は physics-verification-cycle.md#continuous-rank-one-povm-extremality) |
+| [`gpt_measurements.py`](gpt_measurements.py) | GPT / POVM の間主観性・sharpness・極値性を定義から検査する library (有限 outcome の certificate/LP、連続 outcome と無限次元の汎用の有限 anchor、--selftest) |
 | [`heat_kernel_a4.py`](heat_kernel_a4.py) | Seeley–DeWitt a4 of Laplace-type operators by numerical invariant fitting (NumPy) — Gilkey's a4 from user-supplied E and Ω on random algebraic curvature tensors, least-squares fit onto an invariant basis, the 1/ε pole map per species, and built-in Dirac + axial torsion / Dirac + U(1) / scalar operators with textbook anchors; --selftest |
 | [`hpd-credible-level.py`](hpd-credible-level.py) | HPD credible level of points / a model trajectory in a 2D posterior from public MCMC chains (NumPy + SciPy only). |
 | [`init-verification-repo.py`](init-verification-repo.py) | Create a private verify-to-learn repo from `template/`: copy the skeleton, `git init`, install the |
