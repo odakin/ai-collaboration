@@ -28,7 +28,7 @@ Results (D = 4, Lorentzian, verified in the selftest):
     T = dê (a single Fourier mode) it vanishes (total derivative at quadratic order).
 The sign of gamma follows the sign convention of eps (flip eps and gamma flips); only gamma^2 enters the factors.
 
-Convention maps (2026-09-13, added after a sign slip in a printed dictionary; verified in the selftest):
+Convention maps (verified in the selftest):
   * weight-1/2 torsion from the contorsion.  With T^a_{mn} := D_[m e^a_n] (brackets of weight 1/2) and
     K^a_{b m} := omega^a_{b m} - Omega(e)^a_{b m} (Levi-Civita part torsion free), T^a_{mn} = K^a_{b[m} e^b_{n]} exactly,
     so with every index converted by the vierbein  T_[lmn] = - K_[lmn]  (contorsion: antisymmetric frame pair first,
@@ -37,7 +37,8 @@ Convention maps (2026-09-13, added after a sign slip in a printed dictionary; ve
     (derivative index FIRST) and T^a_{bc} = Gamma^a_{bc} - Gamma^a_{cb} (unit weight) has T_ref = +2 T_ours when
     "ours" has the derivative index LAST (Gamma^l_{n m} = e_a^l D_m e^a_n) and weight 1/2; a reference with unit weight
     and derivative index last has T_ref = -2 T_ours.  A factor of two between a unit-weight and a weight-1/2 torsion
-    therefore carries a sign fixed by the index order alone; check it before printing T = ±2K or eps T = ±12 S.
+    therefore carries a sign fixed by the index order alone; check it before printing any torsion-contorsion or
+    dual-torsion relation that contains such a factor.
     torsion_index_order_map() returns
     both conventions from one connection.
   * form-language Immirzi term.  With the Levi-Civita SYMBOL eps_[mnrs] (+1 on 0123, frame tensor eps_{0123} = +1,
