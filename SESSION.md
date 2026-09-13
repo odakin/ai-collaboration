@@ -12,6 +12,8 @@
 
 例示の見直し (2026-09-13〜14): 物理 script 4 本 (`nstar-fixed-point` / `floquet-monodromy` / `expanding-mode-growth` / `dilaton-spectator-growth`) の既定値・usage の例・selftest の pin を合成値に替え (pin は再計算)、`hpd-credible-level` と `svg-contour-extract` の例の点と、`gpt_measurements` の由来の段落を一般形にした。script を層1 へ上げるときの手順 = [`verification-cycle-ops.md#hoist-synthetic-parameters`](conventions/verification-cycle-ops.md#hoist-synthetic-parameters)。
 
+foil の歯の確かめ方 (2026-09-14): [`physics-verification-cycle.md#foil-teeth-per-fix-part`](conventions/physics-verification-cycle.md#foil-teeth-per-fix-part) = 修正の一部だけを外した mutant ごとに、 落ちるはずの check が落ち、 残るはずの check が PASS のまま (= foil の独立性) を見る。 機械は claude-config の `scripts/check-foil-teeth.py` + `<script>.mutants.json` (最初の spec で、 一致数のラベルなのに別の検査で落ちていた foil と、 状態を共有していた foil を見つけた)。
+
 ## 残タスク
 
 - 状態識別の数式と道具を追加。入口 = [証明と利用範囲](docs/state-discrimination.md)、[library](scripts/state_discrimination.py)、[検証時の certificate](conventions/physics-verification-cycle.md#state-discrimination-certificates)。reporter は未知の foil crash と marker 後の非ゼロ終了を失敗にし、`--run` の失敗を呼び元へ返す。実装判断 = DESIGN.md。
