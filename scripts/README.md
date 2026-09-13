@@ -12,7 +12,7 @@ Each module's first docstring line is the description source of truth. Every scr
 | [`covariant_moment_algebra.py`](covariant_moment_algebra.py) | Covariant moment algebra on the full line and finite windows; --selftest. |
 | [`dilaton-spectator-growth.py`](dilaton-spectator-growth.py) | Zero-mode growth of a spectator field with a dilaton-type coupling e^{-gamma chi/M_P} (d phi)^2 during inflation (NumPy + SciPy only). |
 | [`dirac_algebra.py`](dirac_algebra.py) | Mostly-plus Dirac algebra with asserted conventions (NumPy; exact sympy matrices on request) — γ^a, γ5, ε, σ^{ab}, antisymmetrised products, trace identities and the axial-torsion dictionary; --selftest |
-| [`editor-guard.py`](editor-guard.py) | 著者が editor で同じ原稿を開いている日の前検査と carrier commit: 未 commit 変更を exit code で止め、読んだ差分の hash と一致したときだけ著者の変更を commit する。 |
+| [`editor-guard.py`](editor-guard.py) | 著者が editor で同じ原稿を開いている日の書き込みと commit の保護: 未 commit 変更を exit code で止め (check)、自分が書いた直後の内容を記録し (mark)、commit の直前にその後の保存を検出し (verify)、読んだ差分と同じ hash のときだけ著者の変更を commit する (carrier)。 |
 | [`expanding-mode-growth.py`](expanding-mode-growth.py) | Linear growth of daughter-field modes in an expanding oscillating-inflaton background, with the time at which |
 | [`floquet-monodromy.py`](floquet-monodromy.py) | Floquet exponents by monodromy for parametric-resonance claims, with an exact (anharmonic) background (NumPy + SciPy). |
 | [`generate-script-index.py`](generate-script-index.py) | Generate scripts/README.md from each Python module's first docstring line; --check/--selftest. |
