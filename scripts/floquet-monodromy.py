@@ -22,7 +22,7 @@ Built-in models (all with period detected numerically where relevant):
 Examples:
   floquet-monodromy.py mathieu --A 1 --q 0.05            # -> mu = q/2 = 0.025
   floquet-monodromy.py gauge --cPhi 0.02 --k 0.5         # -> occupation growth 2 mu = q m/2 with q = 2 c Phi
-  floquet-monodromy.py conformal --g 1.0 --Phi 1.46 --k 0 0.25 0.5 0.75 1.0
+  floquet-monodromy.py conformal --g 1.0 --Phi 1.5 --k 0 0.25 0.5 0.75 1.0
 Selftest: python3 floquet-monodromy.py --selftest
 """
 from __future__ import annotations
@@ -61,7 +61,7 @@ def gauge_kinetic_exponent(cPhi, k=0.5, m=1.0):
     return floquet_exponent(rhs, 2 * math.pi / m)
 
 
-def make_potential(V_expr=None, dV_expr=None, gchi=0.13):
+def make_potential(V_expr=None, dV_expr=None, gchi=0.1):
     """Return (V, dV) callables. Default: V = x^2 exp(-gchi x)/2 so that the curvature at the minimum is 1."""
     if V_expr is None:
         V = lambda x: 0.5 * x * x * math.exp(-gchi * x)
@@ -92,7 +92,7 @@ def conformal_mass(g, dV, x, xd, linearised=False):
     return -(g / 2.0) * dV(x) - (g * g / 4.0) * xd * xd
 
 
-def conformal_exponents(g, Phi, ks, V_expr=None, dV_expr=None, gchi=0.13, linearised=False):
+def conformal_exponents(g, Phi, ks, V_expr=None, dV_expr=None, gchi=0.1, linearised=False):
     V, dV = make_potential(V_expr, dV_expr, gchi)
     sol, T = periodic_background(dV, Phi)
     out = []
@@ -111,9 +111,9 @@ def main(argv=None):
     p = sub.add_parser("gauge"); p.add_argument("--cPhi", type=float, nargs="+", default=[0.02]); p.add_argument("--k", type=float, default=0.5)
     p = sub.add_parser("conformal")
     p.add_argument("--g", type=float, default=1.0, help="conformal parameter gamma (M_P = 1)")
-    p.add_argument("--Phi", type=float, default=1.46, help="oscillation amplitude in M_P")
+    p.add_argument("--Phi", type=float, default=1.5, help="oscillation amplitude in M_P")
     p.add_argument("--k", type=float, nargs="+", default=[0.0, 0.25, 0.5, 0.75, 1.0])
-    p.add_argument("--gchi", type=float, default=0.13)
+    p.add_argument("--gchi", type=float, default=0.1)
     p.add_argument("--V", default=None, help="numpy expression in x for V(x) (default x^2 e^{-gchi x}/2)")
     p.add_argument("--dV", default=None, help="expression for V'(x); required with --V")
     p.add_argument("--linearised", action="store_true", help="drop the xdot^2 term and use V' -> x")
@@ -153,11 +153,11 @@ def selftest():
     for c in (0.01, 0.02):
         assert abs(2 * gauge_kinetic_exponent(c, 0.5) - c) < 0.02 * c, c
     # 4. exact background: k = 0 exactly marginal; linearised harmonic-background version is not
-    T, mus = conformal_exponents(1.0, 1.46, [0.0, 0.55])
+    T, mus = conformal_exponents(1.0, 1.5, [0.0, 0.55])                 # synthetic test amplitude
     assert abs(T - 2 * math.pi) < 0.2 and T > 2 * math.pi, T      # anharmonic period slightly longer
     assert abs(mus[0]) < 1e-4, mus                                  # marginal k=0 (integration residual ~1e-6)
-    assert mus[1] > 0.2, mus                                        # real instability at finite k (q = 1.46)
-    _, lin = conformal_exponents(1.0, 1.46, [0.0], linearised=True)
+    assert mus[1] > 0.2, mus                                        # real instability at finite k (q = 1.5)
+    _, lin = conformal_exponents(1.0, 1.5, [0.0], linearised=True)
     assert lin[0] > 0.1, lin                                        # spurious k=0 instability when linearised
     # 5. harmonic potential: period 2 pi to 1e-8 and no instability for uncoupled mode (g = 0)
     _, T0 = periodic_background(lambda x: x, 1.0)

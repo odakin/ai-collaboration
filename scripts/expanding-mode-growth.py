@@ -4,8 +4,8 @@ the vacuum is imposed as an explicit knob (NumPy + SciPy only).
 
 Why: "the resonance completes at coupling X" is a statement about how many e-folds of occupation a mode gains
 before the expansion redshifts the resonance parameter q ~ a^{-3/2} below unity.  That number depends on (a) the
-exact background (eps_H = 1 is not eps_V = 1: for x^2 e^{-0.13 x} the end-of-inflation energy differs by 1.9 and
-the "onset" amplitude Phi by 1.4), (b) where the vacuum is imposed (end of inflation vs a few e-folds earlier,
+exact background (eps_H = 1 is not eps_V = 1: for a plateau-type potential the end-of-inflation energy and the
+"onset" amplitude Phi differ by O(1) factors), (b) where the vacuum is imposed (end of inflation vs a few e-folds earlier,
 when a tachyonic mass term is already amplifying sub-horizon modes), and (c) which modes are counted (k/a at
 the start must exceed H for a Bunch-Davies start to mean anything).  This tool integrates the background in
 cosmic time from slow roll through the oscillations and the linear mode equation for a set of comoving k, and
@@ -19,8 +19,8 @@ Growth measure: n_k = (|pi_c|^2 + (k/a)^2 |h_c|^2) / (2 k/a) - 1/2 with h_c = a^
        occupation, equal to the adiabatic one once the mass term is negligible; well defined while M < 0).
 
 Examples:
-  expanding-mode-growth.py --g 10 --start end --start eps_V=1 --start x=3 --osc 10
-  expanding-mode-growth.py --g 0.7 --k 0.3 0.5 1.0 --osc 20
+  expanding-mode-growth.py --g 5 --start end --start eps_V=1 --start x=3 --osc 10
+  expanding-mode-growth.py --g 0.5 --k 0.3 0.5 1.0 --osc 20
 Selftest: expanding-mode-growth.py --selftest
 """
 from __future__ import annotations
@@ -36,7 +36,7 @@ from scipy.optimize import brentq
 
 class Model:
     def __init__(self, fexpr="x**2*exp(-gchi*x)", params=None, Mexpr=None):
-        self.params = {"gchi": 0.13}; self.params.update(params or {})
+        self.params = {"gchi": 0.1}; self.params.update(params or {})
         self.fexpr = fexpr
         self.Mexpr = Mexpr or "-(g/2)*dV - (g**2/4)*xd**2"
         self.norm = self._f2(0.0)
@@ -131,7 +131,7 @@ def selftest():
     model = Model()
     sol, t_end = background(model)
     xe = sol.sol(t_end)[0]
-    assert abs(xe - 0.907) < 0.01, xe                          # exact eps_H = 1 for x^2 e^{-0.13 x}
+    assert abs(xe - 0.929) < 0.01, xe                          # exact eps_H = 1 for x^2 e^{-0.1 x} (synthetic test parameter)
     a_ref = math.exp(sol.sol(t_end)[2]); ks = np.array([0.5, 1.0])
     out0 = run_modes(model, 0.0, ks, t_end, t_end + 2 * math.pi * 5, sol, a_ref)
     assert np.all(out0[-1]["lnn"] < 0.5), out0[-1]["lnn"]                  # no coupling -> no growth (n stays < 1)
@@ -139,13 +139,13 @@ def selftest():
     out3 = run_modes(model, 3.0, ks, t_end, t_end + 2 * math.pi * 5, sol, a_ref)
     assert out3[-1]["lnn"].max() > out1[-1]["lnn"].max() > out0[-1]["lnn"].max(), (out1[-1]["lnn"], out3[-1]["lnn"])
     tV = start_time(model, sol, t_end, "eps_V=1"); assert 0 < t_end - tV < 2.0, (tV, t_end)
-    print("selftest OK (x_end 0.907, g=0 flat, growth monotone in g, eps_V=1 start earlier than eps_H=1)")
+    print("selftest OK (x_end 0.929, g=0 flat, growth monotone in g, eps_V=1 start earlier than eps_H=1)")
     return 0
 
 
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--g", type=float, default=10.0)
+    ap.add_argument("--g", type=float, default=5.0)
     ap.add_argument("--f", default="x**2*exp(-gchi*x)"); ap.add_argument("--param", action="append", default=[])
     ap.add_argument("--M", default=None, help="mass term numpy expression in x, xd, g, V, dV")
     ap.add_argument("--k", type=float, nargs="+", default=list(np.concatenate([np.linspace(0.02, 0.5, 7), np.linspace(0.6, 3.0, 13)])))

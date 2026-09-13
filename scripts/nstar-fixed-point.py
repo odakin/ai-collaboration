@@ -20,9 +20,9 @@ Observables: LO potential slow roll, and second-order Hubble-flow (Stewart-Lyth)
         integrated in e-folds (the point N_* e-folds before eps_H = 1).
 
 Examples:
-  nstar-fixed-point.py --f "x**2*exp(-g*x)" --param g=0.13 --instantaneous
-  nstar-fixed-point.py --f "x**2*exp(-g*x)" --param g=0.13 --gamma-coeff 4.87e-3     # Gamma = gdH^2/(32 pi) m^3/M_P^2, gdH=0.7
-  nstar-fixed-point.py --f "x**2*exp(-g*x)" --scan g 0.05 0.25 41 --gamma-coeff 4.87e-3 --out traj.csv
+  nstar-fixed-point.py --f "x**2*exp(-g*x)" --param g=0.1 --instantaneous
+  nstar-fixed-point.py --f "x**2*exp(-g*x)" --param g=0.1 --gamma-coeff 2.49e-3      # Gamma = y^2/(32 pi) m^3/M_P^2 with y = 0.5
+  nstar-fixed-point.py --f "x**2*exp(-g*x)" --scan g 0.05 0.25 41 --gamma-coeff 2.49e-3 --out traj.csv
   nstar-fixed-point.py --separation trajA.csv trajB.csv        # Delta n_s at fixed r, r ratio at fixed n_s
 Selftest: nstar-fixed-point.py --selftest
 """
@@ -145,15 +145,15 @@ def separation(fileA, fileB, r_grid=(0.03, 0.035, 0.04, 0.045), ns_grid=(0.955, 
 def selftest():
     C0 = nstar_constant()
     assert abs(C0 - 61.49) < 0.02, C0
-    pot = Potential("x**2*exp(-g*x)", {"g": 0.13})
-    xe = pot.x_end(0.5, 5.0); assert abs(xe - 1.295) < 0.002, xe
-    inst = fixed_point(pot, xe, 2 / 0.13 - 1e-3, 2.1e-9, 106.75, MP_DEFAULT, C0, instantaneous=True)
-    assert abs(inst["N"] - 56.5) < 0.2 and abs(inst["ns_LO"] - 0.9611) < 0.001 and abs(inst["r_LO"] - 0.0273) < 0.0005, inst
-    ex = exact_observables(pot, inst["xs"], inst["N"], hi_cap=2 / 0.13 - 1e-3)
+    pot = Potential("x**2*exp(-g*x)", {"g": 0.1})                                                   # synthetic test parameter
+    xe = pot.x_end(0.5, 5.0); assert abs(xe - 1.321) < 0.002, xe
+    inst = fixed_point(pot, xe, 2 / 0.1 - 1e-3, 2.1e-9, 106.75, MP_DEFAULT, C0, instantaneous=True)
+    assert abs(inst["N"] - 56.7) < 0.2 and abs(inst["ns_LO"] - 0.9649) < 0.001 and abs(inst["r_LO"] - 0.0424) < 0.0005, inst
+    ex = exact_observables(pot, inst["xs"], inst["N"], hi_cap=2 / 0.1 - 1e-3)
     assert abs(ex["ns"] - inst["ns_LO"]) < 0.0005 and abs(ex["r"] - inst["r_LO"]) < 0.0005, ex   # 2nd order vs LO
-    assert abs(ex["x_end_exact"] - 0.907) < 0.01, ex["x_end_exact"]                                 # eps_H = 1 differs from eps_V = 1
-    pert = fixed_point(pot, xe, 2 / 0.13 - 1e-3, 2.1e-9, 106.75, MP_DEFAULT, C0, gamma_coeff=0.7**2 / (32 * math.pi))
-    assert 51.5 < pert["N"] < 52.2 and 1.5e9 < pert["Trh"] < 3e9, pert                               # slower reheating -> fewer e-folds
+    assert abs(ex["x_end_exact"] - 0.929) < 0.01, ex["x_end_exact"]                                 # eps_H = 1 differs from eps_V = 1
+    pert = fixed_point(pot, xe, 2 / 0.1 - 1e-3, 2.1e-9, 106.75, MP_DEFAULT, C0, gamma_coeff=0.5**2 / (32 * math.pi))
+    assert 51.6 < pert["N"] < 52.3 and 1.2e9 < pert["Trh"] < 2.2e9, pert                              # slower reheating -> fewer e-folds
     assert pert["ns_LO"] < inst["ns_LO"] and pert["r_LO"] > inst["r_LO"]
     print("selftest OK (constant 61.49, x_end LO/exact, instantaneous vs perturbative ordering, 2nd order = LO to 5e-4)")
     return 0

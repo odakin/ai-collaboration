@@ -1,12 +1,10 @@
 """GPT / POVM の間主観性・sharpness・極値性を定義から検査する library (有限 outcome の certificate/LP、連続 Husimi POVM の有限 anchor + foil、--selftest; 無限次元の証明境界は physics-verification-cycle.md#continuous-rank-one-povm-extremality)
 
-Layer-1 hoist (2026-09-05) of a helper first written for a verify-to-learn reading of
-Umekawa–Ono–Arai, arXiv:2603.01575 (intersubjectivity in generalized probabilistic theories; the
-definitions below follow that paper's Def. 1-3) and Arai–Hayashi, arXiv:2411.01873.  The per-paper
+Layer-1 hoist (2026-09-05) of a helper first written for a verify-to-learn campaign.  The campaign's
 check scripts live in a private verification repo (personal layer) and import this module through a
 thin shim; this file is the SoT for the mathematics and the numerical recipe.
 
-Everything here is built from the *definitions* — never from the papers' theorems — so that a
+Everything here is built from the *definitions* — never from published theorems — so that a
 check script using it is an independent derivation (conventions/scientific-computing.md
 #verify-independent-derivation).
 
@@ -98,7 +96,7 @@ Infinite-dimensional addendum (second-eye campaign on the finite-outcome criteri
     the two differ whenever a range is not closed.  Explicit pair on L^2(S^1) with p_supp(a) ∧ p_supp(b) != 0
     but no common lower bound:  a = sum_n e^{-2|n|}|e_n><e_n| (ran a^{1/2} = real-analytic class R),
     b = P_I = multiplication by 1_I for a proper arc I (ran = L^2(I));  R ∩ L^2(I) = {0} by the identity
-    theorem.  The step "e_{a,eps} ∧ e_{b,eps} -> p_a ∧ p_b strongly" is FALSE for this pair: e_{a,eps} is the
+    theorem.  For this pair e_{a,eps} ∧ e_{b,eps} does NOT converge strongly to p_a ∧ p_b: e_{a,eps} is the
     projector onto trig polynomials of degree <= N(eps), and e_N ∧ P_I = 0 for every N (`fourier_arc_gram`
     positive definite) while 1 ∧ P_I = P_I.  The projection lattice meet does not commute with increasing
     strong limits.

@@ -2,9 +2,10 @@
 """Zero-mode growth of a spectator field with a dilaton-type coupling e^{-gamma chi/M_P} (d phi)^2 during inflation (NumPy + SciPy only).
 
 Why (2026-09): scientific-computing.md#spectator-check-over-the-roll. A mass estimate at the pivot scale
-(m^2 ~ -0.1 gamma H^2) says "light spectator", but the canonical field phi_c = e^{-gamma chi/2 M_P} phi is stretched
-by the Weyl factor e^{gamma Delta chi / 2 M_P} over the whole roll (x27 at gamma = 0.7 for Delta chi ~ 9 M_P), and the
-mass term at the end of inflation is -(2 gamma + 0.5 gamma^2) H_end^2. The spectator region must be judged over the roll.
+(|m^2| a small fraction of gamma H^2) says "light spectator", but the canonical field phi_c = e^{-gamma chi/2 M_P} phi is
+stretched by the Weyl factor e^{gamma Delta chi / 2 M_P} over the whole roll (tens at gamma = O(1) for an excursion of
+several M_P), and the mass term at the end of inflation is -(c gamma + gamma^2/2) H_end^2 with c = O(1). The spectator
+region must be judged over the roll.
 
 What it does (units M_P = 1; potential V = x^p e^{-g x} / 2 with x = chi / M_P):
   1. integrates the exact inflationary background from horizon exit x_* (slow-roll initial velocity) to eps_H = 1;
@@ -14,10 +15,10 @@ What it does (units M_P = 1; potential V = x^p e^{-g x} / 2 with x = chi / M_P):
      and the value at which the field settles, sqrt(|m^2_end| / lambda) H_end, if lambda > 0 (runaway if lambda < 0).
 
 Usage:
-  dilaton-spectator-growth.py [--p 2] [--g 0.13] [--xstar 10.4] [--gammas 0.065,0.3,0.7,1,3] [--lam 0.01]
+  dilaton-spectator-growth.py [--p 2] [--g 0.1] [--xstar 11.5] [--gammas 0.05,0.3,0.7,1,3] [--lam 0.01]
   dilaton-spectator-growth.py --selftest
-The selftest pins: x_end = 0.907 for (p, g, x_*) = (2, 0.13, 10.4); growth = 1 at gamma = 0; growth within 2 % of the
-Weyl factor at gamma = 0.3 and 0.7; growth monotone in gamma.
+The selftest pins (synthetic test parameters): x_end = 0.929 for (p, g, x_*) = (2, 0.1, 11.5); growth = 1 at gamma = 0;
+growth within 2 % of the Weyl factor at gamma = 0.3 and 1; growth monotone in gamma.
 """
 from __future__ import annotations
 
@@ -99,16 +100,16 @@ def table(p, g, xstar, gammas, lam):
 
 def selftest() -> int:
     fails = []
-    _, _, x_end, _, _ = background(2.0, 0.13, 10.4)
-    if abs(x_end - 0.907) > 0.01:
-        fails.append(f"x_end = {x_end:.3f}, expected 0.907")
-    g0 = growth(2.0, 0.13, 10.4, 0.0)[0]
+    _, _, x_end, _, _ = background(2.0, 0.1, 11.5)
+    if abs(x_end - 0.929) > 0.01:
+        fails.append(f"x_end = {x_end:.3f}, expected 0.929")
+    g0 = growth(2.0, 0.1, 11.5, 0.0)[0]
     if abs(g0 - 1.0) > 1e-9:
         fails.append(f"gamma = 0 growth = {g0}, expected 1")
     prev = 1.0
-    for gm in (0.065, 0.3, 0.7):
-        gr, m2s, m2e, xe, He = growth(2.0, 0.13, 10.4, gm)
-        weyl = np.exp(gm * (10.4 - xe) / 2.0)
+    for gm in (0.05, 0.3, 1.0):
+        gr, m2s, m2e, xe, He = growth(2.0, 0.1, 11.5, gm)
+        weyl = np.exp(gm * (11.5 - xe) / 2.0)
         if gm >= 0.3 and abs(gr / weyl - 1.0) > 0.02:
             fails.append(f"gamma = {gm}: growth {gr:.2f} vs Weyl {weyl:.2f} differ by more than 2 %")
         if gr <= prev:
@@ -119,16 +120,16 @@ def selftest() -> int:
     if fails:
         print("selftest FAIL:\n  " + "\n  ".join(fails))
         return 1
-    print("selftest OK (x_end 0.907, gamma=0 flat, growth = Weyl factor within 2 % at 0.3 and 0.7, monotone, mass grows over the roll)")
+    print("selftest OK (x_end 0.929, gamma=0 flat, growth = Weyl factor within 2 % at 0.3 and 1, monotone, mass grows over the roll)")
     return 0
 
 
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--p", type=float, default=2.0)
-    ap.add_argument("--g", type=float, default=0.13)
-    ap.add_argument("--xstar", type=float, default=10.4)
-    ap.add_argument("--gammas", default="0.065,0.1,0.3,0.5,0.7,1,3")
+    ap.add_argument("--g", type=float, default=0.1)
+    ap.add_argument("--xstar", type=float, default=11.5)
+    ap.add_argument("--gammas", default="0.05,0.1,0.3,0.5,0.7,1,3")
     ap.add_argument("--lam", type=float, default=0.01)
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args(argv)

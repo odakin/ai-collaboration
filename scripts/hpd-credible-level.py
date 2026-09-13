@@ -7,9 +7,9 @@ region when a model sits at the edge; the honest question is which highest-poste
 point (or for every point of a trajectory), the posterior mass of the region whose density
 exceeds the density at that point, using a binned Gaussian KDE with boundary reflection
 (a construction similar to GetDist's, without the dependency; the bandwidth is Scott's rule, so
-levels differ from GetDist's by a few 0.1% -- measured on a public 66k-sample chain: 95.4% vs
-95.95%, 99.57% vs 99.74%, 99.995% vs 99.98% -- which is exactly why tails must not be quoted to
-0.01%).  It reports the 2-dof Delta chi^2 equivalent, a Gaussian-approximation cross-check, and
+levels differ from GetDist's by a few 0.1% -- measured on a public 66k-sample chain: up to about
+half a percentage point near 95% and a few 0.01% in the far tail -- which is exactly why tails
+must not be quoted to 0.01%).  It reports the 2-dof Delta chi^2 equivalent, a Gaussian-approximation cross-check, and
 a smoothing-sensitivity sweep so that tail levels (99.9x%) are quoted only to their robustness.
 
 Inputs:  a GetDist / Cobaya-style chain root (<root>.txt with columns weight, -loglike, params;
@@ -17,7 +17,7 @@ Inputs:  a GetDist / Cobaya-style chain root (<root>.txt with columns weight, -l
 Points:  --point X Y (repeatable) and/or --trajectory FILE (CSV: label,x,y or x,y).
 
 Examples:
-  hpd-credible-level.py chains/SPA_BK/CLASS --params n_s r --point 0.9611 0.0273
+  hpd-credible-level.py chains/SPA_BK/CLASS --params n_s r --point 0.965 0.03
   hpd-credible-level.py chains/SPA_BK/CLASS --params n_s r --trajectory traj.csv --smooth-sweep
 
 Selftest: python3 hpd-credible-level.py --selftest

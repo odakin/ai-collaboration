@@ -73,7 +73,7 @@
 ## 2026-09-11: 符号 anchor の engine (`check-sign-anchors.py`) + `--readers`
 
 - 起源: private paper repo で、 有効作用の全体符号が逆のまま検査 fleet が全 PASS した (fleet は全体反転に不変で、 見分けたのは外部の絶対量に結ぶ anchor だけ)。 engine = 登録簿 (印字量 → 外部 anchor → 全体反転 foil) の coverage / `--run` (foil の歯を end-to-end で、 traceback は歯に数えない) / `--fleet-scan` / `--deferrals` (carrier の無い「規約差」 の ratchet)、 `164d762`。 規則 = claude-config `paper-audit.md#absolute-sign-external-anchor` / `#convention-difference-closure`、 pvc §3 `#global-flip-foil`。
-- 追補 (同日、 owner「スクリプトと知見をなるべく上層に」): `--readers` = fleet の各検査が原稿 file を実行時に何回開くか (audit hook、 resolved path で比較、 子 process は数えない = 下限)。 source の grep は docstring の言及で過大に数える (同じ repo で grep 16 本 / 実行時 1 本)。 実 repo では 15 本中 3 本 (うち 2 本は今回足した anchor)。 selftest 27。 使い方 = CLAUDE.md の 1 行。
+- 追補 (同日、 owner「スクリプトと知見をなるべく上層に」): `--readers` = fleet の各検査が原稿 file を実行時に何回開くか (audit hook、 resolved path で比較、 子 process は数えない = 下限)。 source の grep は docstring の言及で過大に数える (同じ repo で grep の数は実行時の十倍以上)。 実 repo では原稿を開く検査は少数で、 その多くは今回足した anchor だった。 selftest 27。 使い方 = CLAUDE.md の 1 行。
 - 次: 変化なし (Phase 2 の監視)。
 
 ## 2026-09-12: 相手側の AI への作業委譲 (`delegated-work-packages.md`)

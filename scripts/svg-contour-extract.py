@@ -13,7 +13,7 @@ Workflow:
   pdftocairo -svg -f 3 -l 3 paper.pdf page3.svg
   svg-contour-extract.py page3.svg --list                       # colours, point counts, bboxes
   svg-contour-extract.py page3.svg --stroke "rgb(0.39" --calib-index 0 --calib-bbox 0.9604 0.9757 0 0.0411 \
-        --extract "rgb(94.66" --out planck95.csv --contains 0.9569 0.0354
+        --extract "rgb(94.66" --out planck95.csv --contains 0.965 0.02
   (calibration: x_svg = a x + b, y_svg = c y + d from the bbox of the reference path; y is flipped in SVG)
 
 Selftest: python3 svg-contour-extract.py --selftest
