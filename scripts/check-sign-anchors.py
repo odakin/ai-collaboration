@@ -70,6 +70,14 @@ Modes (combine freely; default = static only):
                 invariance, missing external, failing baseline, un-carried deferral, stale
                 baseline, unreadable registry).
 
+Repairs (2026-09-13, both on one day of prose passes in a research paper repo):
+  * "substitution '<literal>' matched 0 time(s)": the manuscript wording around a sign-carrying
+    statement changed (e.g. a dictionary moved from a display into a sentence).  Replace the literal
+    with the new wording that carries the same sign and keep the foil; never delete a foil to pass.
+  * "stale baseline entry": the deferral wording was removed from the manuscript (the deferral was
+    closed, e.g. an "up to conventions" clause replaced by the explicit convention map).  Delete
+    the baseline entry in the same commit as the closing edit; a closed entry left in place is a finding.
+
 Scratch trees: top-level entries are symlinked, `copy` globs (a name pattern at the top level or
 "dir/pattern" one level down) are copied, directories on the manuscript's path are mirrored as
 real directories, and the manuscript is written there -- so an audit that finds the manuscript

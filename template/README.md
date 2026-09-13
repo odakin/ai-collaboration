@@ -20,6 +20,7 @@ What you get:
 | `campaigns/TEMPLATE-spec.md` | the hand-off spec a worker session executes: role and isolation, pre-registered rubric, items to look at (never the expected verdict), output format, stop rules, return command |
 | `campaigns/TEMPLATE-retro.md` | the retro written after receipt: machine-derived numbers, what worked, what broke, proposals with a 3-way fate, hoist checklist |
 | `REVIEW-SPEC-blind-manuscript.md` | two-stage spec for a sealed-sandbox blind review of one's *own* manuscript (`scripts/make-review-sandbox.py create --spec`): Stage 1 = derivation tasks solved before the manuscript is opened (with the judgment criteria defined in the spec), Stage 2 = referee review + framing recommendation, HANDOFF packet, return command; the requester's proposal is never written into it |
+| `READTHROUGH-SPEC-non-blind.md` | spec for a cold-eyes **non-blind** read-through of one's own finished manuscript by another session (reads the repo, reports only): priorities A readability / B statements as written / C terminology / D surface / E substance, findings table with page + source line + verified column, plus the requester's receipt procedure and the hand-off prompt (2026-09-13) |
 | `campaigns/QUEUE.yaml` | queue for the unattended tick (schema in the header; `autorun: false` by default) |
 | `improvements.yaml` | fate ledger of retro proposals (implemented / deferred with review_by / rejected) |
 | `hooks/pre-commit` + `scripts/install-hooks.sh` | commit-cadence gate (≤ 3 ledger entries per commit) and worker scope gate (`CAMPAIGN_WORKER_DIR`) |

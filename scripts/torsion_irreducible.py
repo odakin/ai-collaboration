@@ -28,6 +28,25 @@ Results (D = 4, Lorentzian, verified in the selftest):
     T = dê (a single Fourier mode) it vanishes (total derivative at quadratic order).
 The sign of gamma follows the sign convention of eps (flip eps and gamma flips); only gamma^2 enters the factors.
 
+Convention maps (2026-09-13, added after a sign slip in a printed dictionary; verified in the selftest):
+  * weight-1/2 torsion from the contorsion.  With T^a_{mn} := D_[m e^a_n] (brackets of weight 1/2) and
+    K^a_{b m} := omega^a_{b m} - Omega(e)^a_{b m} (Levi-Civita part torsion free), T^a_{mn} = K^a_{b[m} e^b_{n]} exactly,
+    so with every index converted by the vierbein  T_[lmn] = - K_[lmn]  (contorsion: antisymmetric frame pair first,
+    form index last).  torsion_from_contorsion() builds T; the relation is a one-line anchor for any dictionary.
+  * index order of the affine connection.  A reference that writes nabla_b A^a = d_b A^a + Gamma^a_{b c} A^c
+    (derivative index FIRST) and T^a_{bc} = Gamma^a_{bc} - Gamma^a_{cb} (unit weight) has T_ref = +2 T_ours when
+    "ours" has the derivative index LAST (Gamma^l_{n m} = e_a^l D_m e^a_n) and weight 1/2; a reference with unit weight
+    and derivative index last has T_ref = -2 T_ours.  A factor of two between a unit-weight and a weight-1/2 torsion
+    therefore carries a sign fixed by the index order alone; check it before printing T = ±2K or eps T = ±12 S.
+    torsion_index_order_map() returns
+    both conventions from one connection.
+  * form-language Immirzi term.  With the Levi-Civita SYMBOL eps_[mnrs] (+1 on 0123, frame tensor eps_{0123} = +1,
+    eps^{0123} = -1 raised with eta), the density (1/4) eps_[mnrs] eta_{ac} eta_{bd} F^{ab}_{mn} e^c_r e^d_s equals
+    -(1/4) |e| e_a^m e_b^n eta^{aa'} eta^{bb'} eps_[a'b'cd] F^{cd}_{mn} for ANY vierbein, i.e. -(1/4) of the Holst form.
+    Hence adding (m_P^2/gamma) times it to (m_P^2/2) e e F gives the Holst normalization above.  immirzi_form_density()
+    and holst_form_general() check this on a random vierbein; flipping the symbol convention flips the map (the sign of
+    gamma), which is why a paper should define gamma by printing the Holst form in its own conventions.
+
 Usage:
   python3 torsion_irreducible.py --factors 0.5      # print the two elimination factors for gamma = 0.5
   python3 torsion_irreducible.py --selftest
@@ -170,6 +189,46 @@ def elimination_factors(gamma: float, metric: np.ndarray = LORENTZ4, eps_sign: f
     return mass, float(c_g / c_inf)
 
 
+# ---------------------------------------------------------------------------- convention maps (2026-09-13)
+def torsion_from_contorsion(K: np.ndarray, e: np.ndarray, metric: np.ndarray) -> np.ndarray:
+    """Weight-1/2 torsion T_{l m n} (all spacetime indices) from the contorsion K_{a b m} (frame pair lower, form index
+    last) on a vierbein e[a, m] = e^a_m:  T^a_{mn} = K^a_{b[m} e^b_{n]}, then the frame index converted with e."""
+    gi = np.linalg.inv(metric)
+    Kud = np.einsum('ac,cbm->abm', gi, K)                                  # K^a_{b m}
+    Ta = 0.5 * (np.einsum('abm,bn->amn', Kud, e) - np.einsum('abn,bm->amn', Kud, e))
+    return np.einsum('ac,cl,amn->lmn', metric, e, Ta)                      # T_{l m n} = eta_{ac} e^c_l T^a_{mn}
+
+
+def contorsion_spacetime(K: np.ndarray, e: np.ndarray) -> np.ndarray:
+    """K_{l m n} = e^a_l e^b_m K_{a b n} (frame pair converted, form index kept)."""
+    return np.einsum('al,bm,abn->lmn', e, e, K)
+
+
+def torsion_index_order_map(Gamma: np.ndarray) -> dict:
+    """From one affine connection written with the derivative index LAST, Gamma[l, n, m] = Gamma^l_{n m} (m = derivative),
+    return the torsion in three conventions: ours (weight 1/2, derivative last), a unit-weight reference with the
+    derivative index FIRST (Gamma_ref^l_{m n} = Gamma^l_{n m}, T_ref = Gamma_ref^l_{mn} - Gamma_ref^l_{nm}), and a
+    unit-weight reference with the derivative index LAST (T = Gamma^l_{mn} - Gamma^l_{nm})."""
+    ours = 0.5 * (np.transpose(Gamma, (0, 2, 1)) - Gamma)                  # T^l_{mn} = Gamma^l_{[n m]} (weight 1/2)
+    G_first = np.transpose(Gamma, (0, 2, 1))
+    return {"ours": ours,
+            "unit_derivative_first": G_first - np.transpose(G_first, (0, 2, 1)),
+            "unit_derivative_last": Gamma - np.transpose(Gamma, (0, 2, 1))}
+
+
+def holst_form_general(F: np.ndarray, e: np.ndarray, metric: np.ndarray, symbol_sign: float = 1.0) -> float:
+    """|e| e_a^m e_b^n eta^{aa'} eta^{bb'} eps_[a'b'cd] F^{cd}_{mn} for a vierbein e[a, m] and F[a, b, m, n] = F^{ab}_{mn}."""
+    gi = np.linalg.inv(metric); einv = np.linalg.inv(e)                    # einv[m, a] = e_a^m
+    eps_ud = symbol_sign * np.einsum('ai,bj,ijkl->abkl', gi, gi, levi_civita(4))
+    return float(abs(np.linalg.det(e)) * np.einsum('ma,nb,abkl,klmn->', einv, einv, eps_ud, F))
+
+
+def immirzi_form_density(F: np.ndarray, e: np.ndarray, metric: np.ndarray, symbol_sign: float = 1.0) -> float:
+    """(1/4) eps_[mnrs] eta_{ac} eta_{bd} F^{ab}_{mn} e^c_r e^d_s with the Levi-Civita symbol (symbol_sign = +1: +1 on 0123)."""
+    F_low = np.einsum('ac,bd,abmn->cdmn', metric, metric, F)
+    return float(0.25 * symbol_sign * np.einsum('mnrs,cdmn,cr,ds->', levi_civita(4), F_low, e, e))
+
+
 # ---------------------------------------------------------------------------- selftest
 def selftest() -> int:
     failed = []
@@ -226,6 +285,27 @@ def selftest() -> int:
     expect("elimination: mass x (1 + 1/gamma^2), four-fermion x gamma^2/(gamma^2+1), both eps signs", ok_f)
     m_bad, ff_bad = elimination_factors(0.5, holst_denominator=1.0)
     expect("foil: the eps/gamma normalization does not give gamma^2/(gamma^2+1)", abs(ff_bad - 0.2) > 1e-3)
+    # convention maps (2026-09-13)
+    ok_t = ok_i = True
+    for _ in range(3):
+        ev = np.eye(4) + 0.3 * rng.normal(size=(4, 4))
+        if np.linalg.det(ev) < 0:
+            ev[0] *= -1.0
+        A2 = rng.normal(size=(4, 4, 4)); K2 = A2 - np.swapaxes(A2, 0, 1)
+        T2 = torsion_from_contorsion(K2, ev, g); K2s = contorsion_spacetime(K2, ev)
+        ok_t &= np.allclose(antisym3(T2), -antisym3(K2s)) and not np.allclose(antisym3(T2), antisym3(K2s))
+        Gm = rng.normal(size=(4, 4, 4)); mp = torsion_index_order_map(Gm)
+        ok_t &= np.allclose(mp["unit_derivative_first"], 2 * mp["ours"]) and np.allclose(mp["unit_derivative_last"], -2 * mp["ours"])
+        G4 = rng.normal(size=(4, 4, 4, 4)); F = G4 - np.swapaxes(G4, 0, 1); F = F - np.swapaxes(F, 2, 3)
+        h = holst_form_general(F, ev, g); scale = max(1.0, abs(h))
+        ok_i &= abs(immirzi_form_density(F, ev, g) + h / 4.0) < 1e-10 * scale
+        ok_i &= abs(immirzi_form_density(F, ev, g, symbol_sign=-1.0) - h / 4.0) < 1e-10 * scale
+    expect("maps: T_[lmn] = -K_[lmn] on a random vierbein; unit-weight torsion = +2 x ours (derivative index first), -2 x ours (last)", ok_t)
+    expect("maps: form-language Immirzi density = -(1/4) Holst form on a random vierbein; the opposite symbol sign flips it", ok_i)
+    # the Holst form on a flat vierbein agrees with the flat-space holst_form used for the elimination factors
+    Kf = rng.normal(size=(4, 4, 4)); Kf = Kf - np.swapaxes(Kf, 0, 1)
+    expect("maps: holst_form_general(curvature_K2, flat e) = holst_form",
+           abs(holst_form_general(curvature_K2(Kf, g), np.eye(4), g) - holst_form(Kf, g)) < 1e-9 * max(1.0, abs(holst_form(Kf, g))))
     print("selftest:", "ALL PASS" if not failed else "FAILED (" + str(len(failed)) + ")")
     return 0 if not failed else 1
 
