@@ -72,10 +72,10 @@ Modes (combine freely; default = static only):
 
 Repairs (2026-09-13, both on one day of prose passes in a research paper repo):
   * "substitution '<literal>' matched 0 time(s)": the manuscript wording around a sign-carrying
-    statement changed (e.g. a dictionary moved from a display into a sentence).  Replace the literal
+    statement changed (e.g. the statement moved from a display into running text).  Replace the literal
     with the new wording that carries the same sign and keep the foil; never delete a foil to pass.
   * "stale baseline entry": the deferral wording was removed from the manuscript (the deferral was
-    closed, e.g. an "up to conventions" clause replaced by the explicit convention map).  Delete
+    closed, e.g. a hedging clause replaced by the explicit statement it deferred).  Delete
     the baseline entry in the same commit as the closing edit; a closed entry left in place is a finding.
 
 Scratch trees: top-level entries are symlinked, `copy` globs (a name pattern at the top level or

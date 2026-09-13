@@ -4,7 +4,7 @@
      then send the worker session a one-paragraph prompt that names this file (see "Hand-off" at the end).
      Use this when the authors consider the text complete and want a reader who did not write it.
      For a sealed blind review (the reviewer must not know the authors' reasoning) use REVIEW-SPEC-blind-manuscript.md instead.
-     First use: 2026-09-13, a 45-page theory paper; 11 findings, all confirmed, 0 must-fix. -->
+     First use: 2026-09-13, on a theory paper. -->
 
 token: `<PROJECT>READ-<YYYYMMDD>-<6 random>`
 
