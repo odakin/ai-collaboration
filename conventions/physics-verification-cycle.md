@@ -27,7 +27,7 @@ summary: 物理主張の検証サイクル (= 生成 → 機械検査 → 独立
 - **ALL PASS gate を merge / pull ごとに再測** (前回の compile / audit 結果を流用しない — 共著 live 編集は push に巻き込まれる)。
 - **主張文の隣に machine pointer comment** を置く (`% machine-verified: <script> <check-id>` の類) — 読者 (含む未来の自分) が「この文は検査済みか」を文の場所で判別できる。
 - **散文の exactness 主張 (terminates / vanishes / to all orders / unique) は display 化してから anchor** — prose は隠す、式と機械は暴く (実例: 「一方の側の展開は終端する」という偽主張が、display 化 → 実計算の要求で即座に露呈した。 [`paper-audit.md#relocation-rebinding-sweep`](../../claude-config/conventions/paper-audit.md#relocation-rebinding-sweep) class (e))。
-- <a id="identifier-anchor-coverage"></a>**anchor の coverage は式・数値だけでなく identifier (人名・引用 ID・記号) にも張る** — 生成された identifier は流暢で、 SoT と突合されない限り権威を偽装する。 実測: 派生文書 (研究費調書) の parity gate が式と数値だけを anchor していた時、 事故はちょうど un-anchored の 3 class で 1 件ずつ起きた (名指しの誤帰属 / 被引用数の arXiv ID 取り違え / SoT に存在しない記号が図に 2 週間)。 帰属主張の一般則 = [`actor-attribution.md#claim-target-attribution`](../../claude-config/conventions/actor-attribution.md#claim-target-attribution)。
+- <a id="identifier-anchor-coverage"></a>**anchor の coverage は式・数値だけでなく identifier (人名・引用 ID・記号) にも張る** — 生成された identifier は流暢で、 SoT と突合されない限り権威を偽装する。 実測: ある派生文書の parity gate が式と数値だけを anchor していた時、 事故は un-anchored の class で起きた (名指しの誤帰属 / 引用 ID の取り違え / SoT に存在しない記号)。 帰属主張の一般則 = [`actor-attribution.md#claim-target-attribution`](../../claude-config/conventions/actor-attribution.md#claim-target-attribution)。
 
 **なぜ**: 検査は書いた瞬間の正しさでなく**将来の編集に対する正しさ**を守る。数ヶ月運用の実績 (audit 数十本): 共著ノートからの転記誤り (符号と向き) を初稿レビューで即捕捉 / 印字した最終恒等式が丸ごと −1 倍 (添字の順の入れ替え) を機械が検出 / 人間と AI が両方誤った符号論争を独立な probe が裁定。
 
