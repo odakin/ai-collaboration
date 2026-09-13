@@ -10,6 +10,8 @@
 
 論文の推敲 session (2026-09-13 夜〜09-14、ledger 項目 123–159) からの昇格: [`scripts/torsion_irreducible.py`](scripts/torsion_irreducible.py) に convention maps 3 つ (weight-½ torsion と contorsion の $T_{[\cdot]}=-K_{[\cdot]}$、接続の添字順で unit-weight torsion が ±2 倍、form 言語の Immirzi 項 = Holst 形の −¼) を selftest 込みで追加 / [`scripts/check-sign-anchors.py`](scripts/check-sign-anchors.py) に foil の literal がずれた時と閉じた deferral の直し方 / 非盲検の通読 spec の雛形 [`template/READTHROUGH-SPEC-non-blind.md`](template/READTHROUGH-SPEC-non-blind.md) (受領手順つき、初回 11 件全部真) / [`conventions/edit-intent-record.md`](conventions/edit-intent-record.md) §7 規則 11–13 (著者の疑問形は指示でない、diff の基準は著者の完成版、identity は hash を宣言する file を全部) と規則 8 の順序 (ledger → `--fill`)。
 
+例示の見直し (2026-09-13〜14): 物理 script 4 本 (`nstar-fixed-point` / `floquet-monodromy` / `expanding-mode-growth` / `dilaton-spectator-growth`) の既定値・usage の例・selftest の pin を合成値に替え (pin は再計算)、`hpd-credible-level` と `svg-contour-extract` の例の点と、`gpt_measurements` の由来の段落を一般形にした。script を層1 へ上げるときの手順 = [`verification-cycle-ops.md#hoist-synthetic-parameters`](conventions/verification-cycle-ops.md#hoist-synthetic-parameters)。
+
 ## 残タスク
 
 - 状態識別の数式と道具を追加。入口 = [証明と利用範囲](docs/state-discrimination.md)、[library](scripts/state_discrimination.py)、[検証時の certificate](conventions/physics-verification-cycle.md#state-discrimination-certificates)。reporter は未知の foil crash と marker 後の非ゼロ終了を失敗にし、`--run` の失敗を呼び元へ返す。実装判断 = DESIGN.md。
