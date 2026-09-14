@@ -25,6 +25,11 @@ foil の歯の確かめ方 (2026-09-14): [`physics-verification-cycle.md#foil-te
 - Session 宛て board との受領経路の接続は [verification-cycle-ops](conventions/verification-cycle-ops.md#board-receipt-boundary)。一般則の正本は README から既存 home へ参照し、Phase 2 の移設は未実施。
 
 - [ ] Phase 2 の trigger 監視 (= DESIGN の表): Codex runner Pilot A 開始で `multi-session-coordination.md` と `codex/` を移設
+## 2026-09-15: 自分が辿り着いた構造の先行研究照合 — 主張でなく「操作」 で引く
+
+- **kernel 19** ([#prior-art-by-operation](conventions/physics-verification-cycle.md#prior-art-by-operation)): 引く前に**操作を分類する** (同じ言い方が 2 つの別操作を指していると、文献のほぼ全部が片方に集まり、もう片方はその論文の**極限の段落**に 1 つだけ在る) / 検索語は主張でなく**手つき**の語 / **abstract では必要条件が読めない** (その構成に何が要るかは本文の最初の数式にある。確かめずに「既出」 とも「未踏」 とも言わない) / **数往復で辿り着いた構造は先行研究の 1 段落に既出のことがある** ので、結論が出た瞬間に最も近い論文の極限・特殊ケース・脚注を開く / 結果は **既出 / 未踏 (検索範囲を明記) / 自分の外挿 (⚠️ + 未検算)** の 3 つに仕分けて書く / 書誌は `inspire-bibliography.py` で照合してから書く。
+- 自著側の対 = layer 1 [`paper-audit.md#invariant-structure-before-asymmetry-claim`](../claude-config/conventions/paper-audit.md#invariant-structure-before-asymmetry-claim) (「X だけが運動項を持つ / X は補助場」 と言う前に背景まわりの 2 次形式を書く)。起源は同じ回で、**先に 2 次形式を書いていれば往復も文献調査も 1 回で済んだ**。
+
 ## 2026-09-12: 記法の一括改稿を盲検検査させた回 (第 6 回) — 「読む」 を「逆写像する」 に置き換えた
 
 対象が主張でなく**原稿全体にわたる記法の一括改稿**だった初めての round。 owner 指示「script も知見もできるだけ上層へ」 で reviewer session がそのまま hoist した ([#hoist-station](conventions/verification-cycle-ops.md#hoist-station))。 kernel 9 (worker に `HANDOFF.md` を書かせる) が入った後の最初の round で、 **hoist の材料が事後指示でなく sandbox の中から出てきた** = 9 が想定どおり効いた。

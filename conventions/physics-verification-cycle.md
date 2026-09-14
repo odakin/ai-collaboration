@@ -302,6 +302,34 @@ spec 側の教訓 (= 起票者向け): 環境の道具の欠落 (SDP solver 不�
 
 **証明の依存順**は、scalar test integrability → dense closed zeroth form → concrete zeroth-operator identification → represented symmetric higher moments → invariant test space → covariance polynomial → strong difference quotient → CCR とする。この順序なら「core だから operator と一致」「operator と一致するから core」という循環を避けられる。機械 anchor は符号・係数・有限次元 algebra・反例を守るが、closed form、endpoint limit、infinite angular sum、選択した realization の定理を代替しない。
 
+## <a id="prior-art-by-operation"></a>19. 自分が辿り着いた構造の先行研究照合 — 主張の語でなく「操作」で引く (2026-09)
+
+自分の計算・議論で構造が見えた直後 (= 論文の主張にする前、講演で言う前) に、その構造が既出かを確かめる pass。
+verify-to-learn ([#verify-to-learn](#verify-to-learn)) が「他人の論文を使うために読む」 のに対し、こちらは
+**「自分が言おうとしていることを、誰がいつ、どの条件で書いたか」** を確かめる向き。
+
+- **先に「操作」を分類してから引く**。同じ言い方が別の操作を指していると、文献が噛み合わない。起源事例では
+  「補助場 A を先に積分する」 が (i) 可逆な背景で A を代数的に解いて閉じた作用を得る (ii) 着目する背景の 2 次形式で
+  A を Lagrange 乗数として落とす、の 2 つを含んでいた。文献のほぼ全部が (i) で、(ii) は (i) の論文の極限の段落に 1 つあった。
+  分類を先にしないと、(ii) を探しているのに (i) の論文を読んで「違う話だ」 と捨てる。
+- **検索語は主張でなく操作**。「A を消す」「A を積分する」「A のない定式化」 のような**手つき**の語で引く。主張の語
+  (結果の名前) で引くと、同じ操作を別の目的でやった系統が落ちる。
+- **abstract では「必要条件」が読めない**。その構成に何が要るか (背景が非自明であること、パラメータが非ゼロであること、
+  複素化の要否、真空に限るか) は本文の最初の数式に書いてある。**必要条件を確かめずに「既出」 とも「未踏」 とも言わない**。
+  起源事例では、閉じた形は「定数 ≠ 0」 が必須で、自分が見ていた背景ではその閉じた形が定義できず、しかし摂動展開は正則
+  — この区別は abstract には無い。
+- **自分が数往復で辿り着いた構造は、先行研究の 1 段落に書かれていることがある**。結論が出た瞬間に、最も近い論文の
+  **極限・特殊ケース・脚注**を開く (abstract と結論節には出ない場所)。起源事例では、こちらが 3 往復で辿った
+  「閉じた形は特異だが経路積分は δ 汎関数になる」 が、当の論文の極限の段落そのものだった。
+- **結果は 3 つに仕分けて書く**: **既出** (誰の何のどこ) / **未踏** (その組合せの論文が無い = 検索した範囲を明記) /
+  **自分の外挿** (⚠️ 印 + 未検算と明記)。3 つを混ぜた文は、後から自分でも区別できなくなる。
+- **書誌は照合してから書く**。題・著者・誌名巻号・年は記憶で書かず、[`../scripts/inspire-bibliography.py`](../scripts/inspire-bibliography.py) 等で引く。
+  用語がどちらの言い方で通っているかは [`../scripts/inspire-phrase-frequency.py`](../scripts/inspire-phrase-frequency.py)。
+- 隣接: 自著側で構造の主張を書く前の検査 = layer 1
+  [`paper-audit.md#invariant-structure-before-asymmetry-claim`](../../claude-config/conventions/paper-audit.md#invariant-structure-before-asymmetry-claim)
+  (背景まわりの 2 次形式を先に書く) / 新規性を venue の型で測る =
+  [`paper-audit.md#novelty-calibrated-to-venue`](../../claude-config/conventions/paper-audit.md#novelty-calibrated-to-venue)。
+
 ## <a id="sibling-routing"></a>16. 隣接 doc への routing
 
 自著の投稿前検査 = [`paper-audit.md`](../../claude-config/conventions/paper-audit.md) / ノートの書き方 = [`physics-notes.md`](../../claude-config/conventions/physics-notes.md) / 数値検証 kernel = [`scientific-computing.md`](../../claude-config/conventions/scientific-computing.md) / 審査側 = [`peer-review-workflow.md`](../../claude-config/conventions/peer-review-workflow.md) / 文脈手術時の散文 sweep = [`paper-audit.md#relocation-rebinding-sweep`](../../claude-config/conventions/paper-audit.md#relocation-rebinding-sweep) / 検出失敗 RCA の方法論 = [`convention-design-principles.md#detection-zero-location`](../../claude-config/docs/convention-design-principles.md#detection-zero-location) / 委譲・cold-eyes の機構 = [`multi-session-coordination.md`](../../claude-config/conventions/multi-session-coordination.md)。 **どう回し続けるか (導出 state・台帳 3 種・retro・無人層・fresh session の手順) = [`verification-cycle-ops.md`](verification-cycle-ops.md)**。 符号・全体規格化を持つ印字量の外部 anchor 登録簿と foil の歯 = [`scripts/check-sign-anchors.py`](../scripts/check-sign-anchors.py) ([§3 全体反転 foil](#global-flip-foil))。 campaign の道具 = 層1 [`scripts/ledger-commit-cadence-gate.py`](../scripts/ledger-commit-cadence-gate.py) + [`scripts/verification-campaign-report.py`](../scripts/verification-campaign-report.py) + [`scripts/gpt_measurements.py`](../scripts/gpt_measurements.py) (数学 library、 [§定義 level 判定](#definition-level-judge))。 **決定を AI が原稿に実装する pass の意図記録 (hunk → finding / decision / 裁量 / 削除 の sidecar + commit 前 gate `check-edit-intent.py`) = [`edit-intent-record.md`](edit-intent-record.md)** (= [§12](#external-ai-referee-premise-verification) の次の station、 2026-09-08)。
