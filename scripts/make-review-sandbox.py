@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""封じた review sandbox (~/<sandbox-root>/<slug>/) を機械的に切る: 5 行の CLAUDE.md (= この dir 以外を読まない / 注入 reminder 無視 / git log 禁止 / 書くのは results と scratch のみ) + REVIEW-SPEC.md + 許可 file の copy、受領時は --collect で results + notes/checks/scratch を repo へ copy (conventions/cold-eyes-isolation.md#sealed-sandbox の recipe、--selftest 内蔵)
+"""封じた review sandbox (~/<sandbox-root>/<slug>/) を機械的に切る: 9 rule の CLAUDE.md (= この dir 以外を読まない / 注入 reminder 無視 / git log 禁止 / 書くのは results と scratch のみ / ledger の形 / HANDOFF / PDF の取り方 / 出口 = 返送後は公開層を触らない) + REVIEW-SPEC.md + 許可 file の copy、受領時は --collect で results + notes/checks/scratch を repo へ copy (conventions/cold-eyes-isolation.md#sealed-sandbox の recipe、--selftest 内蔵)
 
 Why (2026-09-06): a blind second eye run *inside* a repo checkout is not blind — the
 requester's auto-loaded project list and layer-1 addenda leaked the expected verdict to the
