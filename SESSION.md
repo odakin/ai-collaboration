@@ -1,5 +1,13 @@
 # SESSION.md — ai-collaboration
 
+## 現在地：共変作用・密度frameの検査module
+
+作用の等価性・境界項・有限多項式性を再利用可能な形にした。
+入口は [検証kernel](conventions/physics-verification-cycle.md#action-equivalence-and-polynomiality)、
+実装判断は [DESIGN](DESIGN.md#covariant-action-audit-hoist)、コードは生成された
+[script索引](scripts/README.md)から辿る。次の利用時は、制限背景の必要条件と一般共変な十分条件、
+有限ambient polynomialと場依存制約を別々に判定する。個別論文の判定はこのpublic repoに置かない。
+
 ## 現状 (2026-09-11)
 
 隔離の出口 (2026-09-14): 封じた sandbox の reviewer session が「知見を上層に」 の口頭指示で公開 doc に審査対象の件数・日付を書いた回の再点検から、 [`conventions/cold-eyes-isolation.md#post-check`](conventions/cold-eyes-isolation.md#post-check) に「hoist の中身 — 出口の規律」 (reviewer は公開 repo を直接編集せず `scratch/hoist-candidates.md` に一般形で渡す)、 [`scripts/make-review-sandbox.py`](scripts/make-review-sandbox.py) の sandbox CLAUDE.md template に rule 9 (exit rule)、 [`conventions/verification-cycle-ops.md#hoist-station`](conventions/verification-cycle-ops.md#hoist-station) 3 に同じ 1 文を追補。 例示から相対時間の日付を外した。

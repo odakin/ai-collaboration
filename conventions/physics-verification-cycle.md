@@ -330,6 +330,44 @@ verify-to-learn ([#verify-to-learn](#verify-to-learn)) が「他人の論文を�
   (背景まわりの 2 次形式を先に書く) / 新規性を venue の型で測る =
   [`paper-audit.md#novelty-calibrated-to-venue`](../../claude-config/conventions/paper-audit.md#novelty-calibrated-to-venue)。
 
+## <a id="action-equivalence-and-polynomiality"></a>20. 作用の等価性・多項式性を検証する kernel
+
+作用を別の場・補助場・境界項で書き換えた主張は、印字された二つの密度を眺めるだけでは検証できない。
+同じ作用は全微分だけ異なり得る一方、同じ背景に代入した値の一致は、その背景が両作用の差を消しているだけかもしれない。
+次の順に、等価性・有限次数・使える摂動処方を別 item にする。
+
+1. **密度でなく Euler 微分を比較する**: 「境界項を除いて等価」なら、compact support の変分に対する
+   全場の Euler--Lagrange 微分が一致する。係数関数を一般のまま変分してから、背景・定数・線形関数へ特殊化する。
+   先に背景値や係数を固定すると、変分すべき依存性を自分で消してしまう。定数係数が位相項・Bianchi divergence に
+   落ちる模型では、**最初の非自明な係数** (しばしば線形関数) が最も安い discriminator になる。
+2. **係数の梯子で主張を切る**: 定数 → 線形 → 二次 → 一般関数を順に試す。定数で一致しても、両辺がとも境界項なら
+   情報はゼロ。線形で片方だけ bulk source を持てば、その一点で一般等価性は反証できる。修正候補の確認は、同じ
+   discriminator と、より一般の係数を使う別の背景で行う。反例の成立と修正候補の一般証明を同じ status にしない。
+3. **共変作用の必要条件には lapse を変分する**: FLRW などへ制限するときも
+   (ds^2=N(t)^2dt^2-a(t)^2d\mathbf{x}^2) と lapse を残し、(N=1) は Euler 微分の後に置く。
+   covariant な metric-null action なら任意の (N,a,\phi) 上で lapse/scale/scalar の制限変分もゼロでなければならない。
+   これは必要条件であり、制限背景で三変分がゼロだけでは一般背景の十分性にならない。十分性は別の共変恒等式で閉じる。
+4. **補助場の ambient polynomial と許容配置を分ける**: 補助場を含む表示が有限次数でも、
+   (A\in\operatorname{Im}O[E]) のような場依存制約が付けば、独立変数の通常の多項式理論とは違う。
+   自由背景の像条件を非線形に固定してよいかは、(E=E_0+t\Delta E) と (B\in\operatorname{Im}O[E_0]) を取り、
+   (B\in\operatorname{Im}O[E]) の residual を exact に計算する。非零なら、有限な頂点表、BRST の独立場実現、
+   functional measure を別の ledger item に保つ。
+5. **homogeneity の no-go は表現を明記する**: 密度の重み (w\) に対し非零 Euler 微分が (w-1<0) なら、
+   その変数と jet の有限多項式からは出ない。ただし補助場の消去は多項式を有理式へ変え得るので、これは
+   「指定した変数・指定した補助場」の no-go であって、あらゆる場の再定義・追加補助場に対する不可能定理ではない。
+6. **一様 scaling の blind spot を非等方 slice で破る**: conformal invariant な項は (E\mapsto zE) で分母が相殺し、
+   逆行列式を持っていても多項式に見える。flat point を通る `diag(u,1,...)` のような非等方 slice で (1/u) や
+   (\sqrt u) を露出させ、全 Taylor 係数または根の重複度で非多項式性を判定する。特定のゼロ場・定数場での終端を
+   generic functional の終端と混同しない。
+7. **signature と体積密度を次元ごとに点検する**: mostly-minus の実 coframe では
+   (det g=(-1)^{d-1}(det e)^2)。任意次元の式に (sqrt{-g}) を使うなら偶奇を確認し、一般次元では
+   (sqrt{|g|}) または向き付き密度として定義する。偶数次元の検査が奇数次元の real branch を保証しない。
+
+機械 anchor は [`density_frame_algebra.py`](../scripts/density_frame_algebra.py) (frame・接続・核・制限逆写像・動く像・
+Fierz--Pauli からの自由 propagator) と [`covariant_action_audit.py`](../scripts/covariant_action_audit.py)
+(任意 lapse の curvature・Euler 微分・解析的 null-kernel・非等方 slice)。これらは検査方法と公刊済みの標準恒等式を持ち、
+個別論文の判定・式番号・誤り finding は持たない。
+
 ## <a id="sibling-routing"></a>16. 隣接 doc への routing
 
 自著の投稿前検査 = [`paper-audit.md`](../../claude-config/conventions/paper-audit.md) / ノートの書き方 = [`physics-notes.md`](../../claude-config/conventions/physics-notes.md) / 数値検証 kernel = [`scientific-computing.md`](../../claude-config/conventions/scientific-computing.md) / 審査側 = [`peer-review-workflow.md`](../../claude-config/conventions/peer-review-workflow.md) / 文脈手術時の散文 sweep = [`paper-audit.md#relocation-rebinding-sweep`](../../claude-config/conventions/paper-audit.md#relocation-rebinding-sweep) / 検出失敗 RCA の方法論 = [`convention-design-principles.md#detection-zero-location`](../../claude-config/docs/convention-design-principles.md#detection-zero-location) / 委譲・cold-eyes の機構 = [`multi-session-coordination.md`](../../claude-config/conventions/multi-session-coordination.md)。 **どう回し続けるか (導出 state・台帳 3 種・retro・無人層・fresh session の手順) = [`verification-cycle-ops.md`](verification-cycle-ops.md)**。 符号・全体規格化を持つ印字量の外部 anchor 登録簿と foil の歯 = [`scripts/check-sign-anchors.py`](../scripts/check-sign-anchors.py) ([§3 全体反転 foil](#global-flip-foil))。 campaign の道具 = 層1 [`scripts/ledger-commit-cadence-gate.py`](../scripts/ledger-commit-cadence-gate.py) + [`scripts/verification-campaign-report.py`](../scripts/verification-campaign-report.py) + [`scripts/gpt_measurements.py`](../scripts/gpt_measurements.py) (数学 library、 [§定義 level 判定](#definition-level-judge))。 **決定を AI が原稿に実装する pass の意図記録 (hunk → finding / decision / 裁量 / 削除 の sidecar + commit 前 gate `check-edit-intent.py`) = [`edit-intent-record.md`](edit-intent-record.md)** (= [§12](#external-ai-referee-premise-verification) の次の station、 2026-09-08)。

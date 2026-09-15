@@ -30,6 +30,24 @@
 
 **初期判断**: file 7 本では README / CLAUDE.md の一覧を手書きし、15 本を超えたら生成へ移る。**trigger 到達**: 2026-09-11 に scripts が19本を超え、同日の3本昇格で手書き一覧が再び二重化した。**現判断**: 各 module の docstring 1行目を説明の正本とし、`generate-script-index.py` が全 `scripts/*.py` を [`scripts/README.md`](scripts/README.md) に生成する。main README と CLAUDE.md はその索引への pointer だけを持つ。CI は `--check` と全 script の `--selftest` を別 gate として実行する。これにより script の存在・説明・実行検査を混同せず、追加漏れだけを機械で止める。
 
+## <a id="covariant-action-audit-hoist"></a>共変作用・密度frame検査の層1 module (2026-09-15)
+
+**判断**: 密度frameの局所テンソル代数を `scripts/density_frame_algebra.py`、共変作用の等価性と多項式性を
+`scripts/covariant_action_audit.py` に置く。前者はframe・接続・quadratic map・斜交kernel projector・制限逆写像・
+動く補助場image・Fierz--Pauliからの自由kernelを所有する。後者は任意lapseのFLRW geometry・Euler operator・
+scalar-tensor action evaluator・解析的surface kernel・公刊済みscalar--Gauss--Bonnet写像を所有する。
+
+**Why**: campaignごとのcheckに埋めると、幾何の再構築、Euler変分、非等方slice、moving-image membershipを次の
+作用検査でまた書き直す。二つのmoduleに分けることで、局所多添字代数と1次元の変分代数を独立に再利用できる。
+一つの巨大な「重力検証器」にはしない。前者は任意次元の局所線形代数、後者は4次元の背景制限で、前提と証明力が違う。
+
+**境界**: 公開moduleは検査方法と公刊済み恒等式だけを持つ。個別論文の式番号・判定・修正提案・第三者の誤り疑いは
+owner側のprivate campaignに残す。FLRWでの一致は一般共変等価性の必要条件に使い、十分性は別の共変恒等式がある時だけ閉じる。
+有限ambient polynomialは場依存制約を消さず、functional measureや独立補助場のBRSTを検証したことにしない。
+
+**検査**: 両moduleは`--selftest`でexact SymPy計算を行い、意図したassertionを壊すfoilを内蔵する。
+private callerは共通helperをshim経由で読み、論文固有のcheck/foilと導出noteを保持する。script索引は既存の生成器から更新する。
+
 ## <a id="unbounded-moment-hoist"></a>非有界 moment-operator campaign からの層1昇格 (2026-09-11)
 
 **判断**: private paper campaign で得た検証器のうち、論文・検出器・次元に依らない三つの核を独立 script として層1へ上げる。`covariant_moment_algebra.py` は共変 moment の full-line ladder と finite-window endpoint 項、`povm_moment_variance.py` は $M_2$ と $M_1^2$ の差・noise・結合次数、`unbounded_operator_domains.py` は domain membership だけでは強微分を保証しない陽な反例と weak identity の最大実現の罠を所有する。Gaussian tail、三次元の角度積分、特定原稿の係数・判定・レビューは project instance に残す。
