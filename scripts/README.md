@@ -5,6 +5,7 @@ Each module's first docstring line is the description source of truth. Every scr
 
 | script | purpose |
 |---|---|
+| [`arxiv-equation-inventory.py`](arxiv-equation-inventory.py) | Extract numbered rows and complete equation groups from arXiv HTML without MathML duplication; --selftest. |
 | [`check-edit-intent.py`](check-edit-intent.py) | AI 原稿改稿の意図記録 (edit-intent sidecar) の骨組み生成 + 機械検査: hunk 被覆 / 位置 / 種類 / ID 実在 / 裁量枠 / 削除 verbatim を PASS/FAIL + exit code で。 --selftest 内蔵。 正本 = conventions/edit-intent-record.md |
 | [`check-rename-purity.py`](check-rename-purity.py) | 機械的と主張される一括改稿 (記法 rename・単位変更・記号統一) の純粋性を、読まずに逆写像して検査する: new→old の逆写像を後版に当てて前版と diff し、残った行だけを非機械変更として出す + 旧綴りの残存 (orphan) 走査 + 変更行の前後行番号列挙。--selftest 内蔵、正本 = conventions/physics-verification-cycle.md#referee-side-kernels |
 | [`check-sign-anchors.py`](check-sign-anchors.py) | Sign-carrying printed claims: external-anchor coverage, end-to-end foil teeth, fleet-invariance scan, which checks open the manuscript at all, un-carried convention deferrals. |
@@ -16,6 +17,7 @@ Each module's first docstring line is the description source of truth. Every scr
 | [`dirac_algebra.py`](dirac_algebra.py) | Mostly-plus Dirac algebra with asserted conventions (NumPy; exact sympy matrices on request) — γ^a, γ5, ε, σ^{ab}, antisymmetrised products, trace identities and the axial-torsion dictionary; --selftest |
 | [`editor-guard.py`](editor-guard.py) | 著者が editor で同じ原稿を開いている日の書き込みと commit の保護: 未 commit 変更を exit code で止め (check)、自分が書いた直後の内容を記録し (mark)、commit の直前にその後の保存を検出し (verify)、読んだ差分と同じ hash のときだけ著者の変更を commit する (carrier)。 |
 | [`expanding-mode-growth.py`](expanding-mode-growth.py) | Linear growth of daughter-field modes in an expanding oscillating-inflaton background, with the time at which |
+| [`exterior_algebra.py`](exterior_algebra.py) | Exact coordinate differential forms and complementary inverse minors; --selftest. |
 | [`floquet-monodromy.py`](floquet-monodromy.py) | Floquet exponents by monodromy for parametric-resonance claims, with an exact (anharmonic) background (NumPy + SciPy). |
 | [`generate-script-index.py`](generate-script-index.py) | Generate scripts/README.md from each Python module's first docstring line; --check/--selftest. |
 | [`gpt_measurements.py`](gpt_measurements.py) | GPT / POVM の間主観性・sharpness・極値性を定義から検査する library (有限 outcome の certificate/LP、連続 outcome と無限次元の汎用の有限 anchor、--selftest) |
@@ -28,6 +30,7 @@ Each module's first docstring line is the description source of truth. Every scr
 | [`make-review-sandbox.py`](make-review-sandbox.py) | 封じた review sandbox (~/<sandbox-root>/<slug>/) を機械的に切る: 9 rule の CLAUDE.md (= この dir 以外を読まない / 注入 reminder 無視 / git log 禁止 / 書くのは results と scratch のみ / ledger の形 / HANDOFF / PDF の取り方 / 出口 = 返送後は公開層を触らない) + REVIEW-SPEC.md + 許可 file の copy、受領時は --collect で results + notes/checks/scratch を repo へ copy (conventions/cold-eyes-isolation.md#sealed-sandbox の recipe、--selftest 内蔵) |
 | [`nstar-fixed-point.py`](nstar-fixed-point.py) | N_* fixed point for single-field inflation with a given reheating history, exact-background observables, and |
 | [`one_loop_pole.py`](one_loop_pole.py) | Exact 1/ε pole of one-loop Minkowski integrals with ≤ 2 propagators by large-loop-momentum expansion and covariant angular averaging (sympy, exact rationals only) — re-computes printed pole terms of self-energies, tadpoles and mixed two-point functions from printed Feynman rules; --selftest |
+| [`one_loop_vacuum.py`](one_loop_vacuum.py) | Exact radial log integrals, one-loop MSbar vacuum terms and logarithmic stationary points; --selftest. |
 | [`povm_moment_variance.py`](povm_moment_variance.py) | Finite-POVM measured moments, first-operator variance and noise; --selftest. |
 | [`review-markup-clean.py`](review-markup-clean.py) | review markup cleaner: 共著 review 用の着色と著者間問答を LaTeX source から外す (投稿前清掃 + 清掃版どうしの diff 用)。 |
 | [`state_discrimination.py`](state_discrimination.py) | Binary discrimination certificates, qubit models and foil helpers (NumPy only). |

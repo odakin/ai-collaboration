@@ -1,5 +1,12 @@
 # SESSION.md — ai-collaboration
 
+## 現在地：有限積分・外積・式の転記
+
+共通道具を追加した。再利用時は [実装の分担](DESIGN.md#finite-vacuum-and-transcription-tools) と
+[主張の依存関係・物理的な解釈](conventions/physics-verification-cycle.md#claim-dependencies-and-observables) を読み、
+[生成索引](scripts/README.md)から該当 module へ進む。caller の量子測度・適用範囲・個別判定は各 project が持つ。
+次の利用では必要な module の selftest を通し、独立検査の原本を共通実装への別名に置き換えない。
+
 ## 現在地：共変作用・密度frameの検査module
 
 作用の等価性・境界項・有限多項式性を再利用可能な形にした。

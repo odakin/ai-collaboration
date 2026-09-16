@@ -2,6 +2,19 @@
 
 現在採用している設計判断の snapshot。超越されたら `claude-config/docs/convention-design-principles.md#design-snapshot-operation` の lifecycle で処理。
 
+## <a id="finite-vacuum-and-transcription-tools"></a>有限積分・外積・転記の再利用境界
+
+`one_loop_vacuum.py` は標準的な scalar/fermion の有限真空積分と対数関数の極値、
+`exterior_algebra.py` は座標微分形式と Jacobi の補小行列、
+`arxiv-equation-inventory.py` は MathML alttext と式番号を使う転記を担当する。
+極だけを計算する `one_loop_pole.py`、作用の等価性を検査する `covariant_action_audit.py`、
+生成された script 索引とは役割を重ねない。
+
+公開 API と selftest は標準恒等式・合成データで閉じる。特定の論文の式番号、判定、
+モデルの測度や matching 条件、ベンチマーク値は呼び元に残す。
+凍結された独立検査の原本は保持し、再利用用 library との一致を別の integration check で検査する。
+原本二つを同じ実装への alias に変えて、独立した二経路と数え続けない。
+
 ## claude-config から分離した理由と、何を持ってきたか (2026-09-06)
 
 **判断**: 検証サイクルの platform (規約 3 本 + script 4 本) を新 repo `ai-collaboration` (layer 1、public) に移す。`claude-config` は Claude Code の harness (setup / hooks / gitignore / domain 規約 / 生成 tool) として残す。

@@ -61,6 +61,29 @@ summary: 物理主張の検証サイクル (= 生成 → 機械検査 → 独立
 
 **成果物の拡張 — 「確かめ直せる材料」も研究成果**: 論文と並んで、 検証 record (audit script・check 結果・出典・**失敗と未解決**・人が判断した理由) を「次の人 / AI が確かめ直して続きを始められる形」 で repo に残す。 判断理由の残し方 = [`convention-design-principles.md#design-snapshot-operation`](../../claude-config/docs/convention-design-principles.md#design-snapshot-operation) (DESIGN.md snapshot 運用)。
 
+### <a id="claim-dependencies-and-observables"></a>局所的な一致・依存する前提・物理的な意味を分ける
+
+検査対象を、式の内部整合性、導出の成立、適用範囲、物理的な解釈に分ける。
+前段の導出や前提が成立していない場合、その後の関数を数値的に再現しても、
+元の物理的主張への支持には加算しない。数値照合を消す必要はないが、台帳に
+`verification_scope` と `upstream_obligations` を記し、必要なら `physical_evidence` を未成立として明示する。
+各 item の verified と、依存関係を含む結論の verified を混同しない。
+
+評価する成果の種類も先に固定する。平衡点の存在、非有界性、遷移率、時間発展は異なる主張であり、
+一つを計算して別の成立・不成立を結論しない。依頼された成果が不安定性や過渡的挙動なら、
+孤立した安定平衡点を勝手に成功条件へ追加しない。
+
+変数の大きさやポテンシャルの形を物理的に読む前に、座標・ゲージ・単位・基準場への依存を調べる。
+変数を変える時は測度、積分領域、境界条件、外部基準も一緒に変換する。
+座標体積当たりの密度と不変な作用、成分の変化と不変な幾何量を別々に検査する。
+正則化・有限 counterterm を変えた比較では、対応するパラメータの写像を明示する。
+
+共通の道具は [`one_loop_vacuum.py`](../scripts/one_loop_vacuum.py)（有限積分と規格化）、
+[`exterior_algebra.py`](../scripts/exterior_algebra.py)（外積・微分・余因子）、
+[`arxiv-equation-inventory.py`](../scripts/arxiv-equation-inventory.py)（式の転記）を参照する。
+共通 library へ整理した後も、独立性の証拠として保存した元の導出・検査は、
+同じ library を呼ぶ二つの wrapper に置き換えない。独立検査の原本と再利用用コードの照合を別に残す。
+
 ## <a id="verify-to-learn"></a>6. Verify-to-learn — 外部論文の検証読み (名 = 日高氏講演。 手順自体は当方の検証読み運用が先行)
 
 **ルール:** 外部論文を「使う」前提で読むときは、(1) 式・主張を item 化して抽出 → (2) 機械検査可能 (式・極限・数値・コード) と根拠追加が要る (散文主張) に分類 → (3) 機械検査可能分を 1 item ずつ独立導出で check → (4) 3 状態 ledger に記録、の順で読む。初回 run は**隔離した scratch ledger** で行い、本番の知識ベースへは verified のみ昇格させる。
