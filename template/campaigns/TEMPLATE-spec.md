@@ -2,14 +2,14 @@
 
 - token: `VERIFY-<SLUG>-<YYYYMMDD>-<RAND6>` (also put the same line in the chat that spawns the worker)
 - filed: <date, session, the owner's instruction quoted verbatim>
-- deliverable (deterministic path, this dir): `ledger.yaml` + `results.md` + `checks/check_<id>.py` (+ `checks/foil_<id>.py`) + `notes/`
+- deliverable (deterministic path, this dir): `ledger.yaml` + `results.md` + `checks/check_<id>.py` (+ `checks/foil_<id>.py`) + `notes/` + `notes/coverage.md` (every numbered equation → item; layer-1 `verification-ledger-tools.py coverage`)
 - **return (required)**: when done, run your harness's return command once, e.g.
   ```bash
   <RETURN-COMMAND> --token <TOKEN> --status done --result-path <this dir>/results.md --summary "<counts + one line on any refuted item>"
   ```
   `--status partial` if you stopped at the cap. One marker per lineage. Do not guess a recipient; if you cannot find the requester, leave the marker and stop.
 - **You are the worker**: execute directly; do not spawn grandchildren.
-- **First, once**: `export CAMPAIGN_WORKER_DIR=campaigns/<dir>` (the pre-commit gate refuses staged paths outside it). **Never write to** the layer-1 conventions/library, the bibliographic source of truth, or this repo's CLAUDE / DESIGN / SESSION / carryover.yaml — promotion is the receiver's job after receipt. Put proposals at the end of `results.md` under "questions for the requester".
+- **First, once**: `export CAMPAIGN_WORKER_DIR=campaigns/<dir>` (the pre-commit gate refuses staged paths outside it), and check that `.git/hooks/pre-commit` resolves to this repo's `hooks/pre-commit` (`ls -l .git/hooks/pre-commit`) — a machine-wide hook installer can overwrite it and silently remove the cadence and scope gates; if it does not, run the repo's hook install script before the first commit. **Never write to** the layer-1 conventions/library, the bibliographic source of truth, or this repo's CLAUDE / DESIGN / SESSION / carryover.yaml — promotion is the receiver's job after receipt. Put proposals at the end of `results.md` under "questions for the requester".
 
 ## Role and isolation
 
@@ -22,12 +22,15 @@
 
 | letter | paper | fetch |
 |---|---|---|
-| A | … | `curl -sL -o pdfs/<id>.pdf https://arxiv.org/pdf/<id>` |
+| A | … | `curl -sL -o pdfs/<id>v<N>.pdf https://arxiv.org/pdf/<id>v<N>` (+ `/html/<id>v<N>`) |
+
+Pin the version (`v<N>`) and write the sha256 of the PDF and the HTML here; the worker re-fetches and compares if the files are missing. At filing time put an equation inventory in `notes/equation-inventory.json` (layer-1 `arxiv-equation-inventory.py` on the HTML). The inventory is a **transcription (tier 📄)**: signs and indices are confirmed on the PDF rendering before use, and blocks the HTML collapses or rows it duplicates are fixed from the PDF.
 
 ## Pre-registered rubric (fixed before the run; do not change afterwards)
 
 **Deliverable integrity**: (i) every Def/Thm/Example/displayed equation is a ledger item (gaps listed in results as "not itemised") / (ii) every machine item has an independent-derivation check and a foil, and the foil's teeth were confirmed / (iii) every item is in one of three states, unverified ones say what is missing / (iv) results close with "checked / NOT checked / confidence boundary".
 **Efficacy proxy (pre-registered)**: number of findings the requester did not know before. **The worker does not fill it in** — the receiver writes `novel_to_requester` at receipt and `campaign-report.py --write` counts it.
+**Claim kinds (default lines)**: record for every item whether it is (a) an algebraic identity, (b) an approximation / limit (which order, which regime, what was dropped), (c) a physical interpretation / observability claim, (d) a generality claim ("any", "always", "robust"). A numerical match of a downstream formula does not support an upstream claim whose derivation is not closed: write `verification_scope` and `upstream_obligations`. Agreement in a restricted configuration (a special background, window, model) is *verified in that configuration*, not in general; a mismatch there is a valid counterexample. Approximation validity is closed by computation, otherwise unverified.
 **Undecidable conditions**: <how proofs you cannot follow / convex analysis that does not close are handled>.
 **Integrity ≠ efficacy**: a passing check is evidence about the paper, not about the method.
 **Cap**: <N> ledger items / <M> minutes; beyond that stop and return `partial`.
@@ -49,6 +52,8 @@
 - `results.md`: stats table (= the AUTO block of `scripts/campaign-report.py <dir> --run --write`, never hand-written) → independent derivations of refuted items → verdicts on C → "checked / NOT / confidence boundary" → questions for the requester
 - **Commit cadence (machine gate)**: at most 3 ledger items per commit. One or two items per turn → `git add <this dir> && git commit -m "<id>: …"` → next. Never `git add -A`. Batch only with `CAMPAIGN_BATCH_OK=1` (recorded in `hygiene.txt`).
 - On completion: `python3 scripts/campaign-report.py campaigns/<dir> --run --write` → commit → push → return marker.
+- **Optional parallelisation into groups**: background sub-workers write only `notes/<group>-items.yaml` (+ their `checks/`) and never touch git; the primary runs every sub-worker check/foil, re-derives headline numbers, then merges ≤ 3 entries per commit with the layer-1 `verification-ledger-tools.py merge`. Each sub-worker brief says "append each finished item to the file" and "one file per response", so a network stall or watchdog stop loses nothing on resume. Same-model sub-workers are not an independent second eye (`physics-verification-cycle.md#campaign-tooling` M).
+- **While a blind second-eye pass is pending**, keep commit subjects neutral (item ids and "record"; no verdict words): harnesses inject recent commit subjects into a new agent's context (`cold-eyes-isolation.md#contamination-channels` (e)).
 - **If the worker is another vendor** (a Codex-style agent): return via your shared board plus the commit, not the marker; assume a small context window (~250K, auto-compaction): minimise what it reads, and **write every step to notes and commit** (`output-cap-death-loop.md#context-compaction-loss`). State explicitly that promotion to layer 1 is forbidden — agent defaults tend to override the spec here. The worker's own "second context" review of its work is *not* an independent second eye; the receiver does that separately.
 
 ## Variant: second eye on a *new result* / cross-vendor pass
