@@ -1,5 +1,9 @@
 # SESSION.md — ai-collaboration
 
+## 現在地：CI の依存 (2026-09-23)
+
+CI の selftest に PyMuPDF を足した (`e992822`)。 `scripts/pdf-locator-grep.py` の selftest が `fitz` を使い、 入れていない runner で red が続いていた。 新しい script が selftest で import する package は、 同じ commit で `.github/workflows/checks.yml` の `pip install` にも足す。
+
 ## 現在地：有限積分・外積・式の転記
 
 共通道具を追加した。再利用時は [実装の分担](DESIGN.md#finite-vacuum-and-transcription-tools) と
