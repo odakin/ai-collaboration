@@ -77,11 +77,13 @@ private callerは共通helperをshim経由で読み、論文固有のcheck/foil�
 
 ## 相手側の AI への作業委譲を層1 に置く (2026-09-12)
 
-**判断**: 共同研究者 (人間 + その AI) に数か月の解析を実行してもらうときの文書形式を `conventions/delegated-work-packages.md` として本 repo に置く。中身 = 判断と実行の分離、常設 3 層 (入口 / 手順 / 定義) + 1 セッション 1 WP、WP の 7 要素、**受入基準を依頼側の独立実装の出力で埋める**、全部書いて ready だけ着手、書き込み zone、結果ノートの様式、作業者に書かせないもの。
+**判断**: 共同研究者 (人間 + その AI) に数か月の解析を実行してもらうときの文書形式を `conventions/delegated-work-packages.md` として本 repo に置く。中身 = 判断と実行の分離、常設 3 層 (状態 / 手順 / 定義、README は入口だけ) + 1 セッション 1 WP、WP の 7 要素、**受入基準を依頼側の独立実装の出力で埋める**、全部書いて ready だけ着手、書き込み zone、結果ノートの様式、作業者に書かせないもの。
 
 **Why**: 本 repo の趣旨 (what to hand to the machine, what a human must still check) の一例そのもので、vendor 中立 — 相手の AI が Claude でも Codex でも、あるいは人間だけでも形式は同じ。既存 3 本が「自分の書いたものを検証する」側なのに対し、これは「他人に実行してもらう」側で、station として隣り合う。
 
 **代替案**: (a) `claude-config` に置く → あちらは Claude Code harness の規約で、相手のツールを規定しない本形式とは層が違う。(b) `dropbox-refs.md#counterpart-ai-parallel-work` を拡張する → あれは Pattern B (Dropbox 共有) 固有の運用で、委譲形式は同期手段に依らない。(c) project 内に留める → 次の project が同じ形式を作り直す (kernel-up / instance-down の原則に反する)。
+
+**状態の層を README と分ける**: WP 一覧・状態・決定待ち・現在地は STATUS に置き、README は入口 (目的と pointer) だけにする。README が状態の正本を兼ねると、入口の説明と変わり続ける状態が 1 つの file に混ざり、README に現在進捗を置かない repo 共通の規則 (`claude-config/CONVENTIONS.md#readme-style` の禁忌) とも食い違う。
 
 **境界**: 分野固有の中身 (観測データの QC、統計モデル、判定閾値) は project の SPEC に残す。本 doc が持つのは形式だけ。受入基準の数値そのもの・参照実装も project 側。
 

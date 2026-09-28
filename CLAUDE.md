@@ -16,7 +16,7 @@ ai-collaboration/
 │   ├── cold-eyes-isolation.md          # 第二の目の隔離: 汚染経路 7 口 / 封じた sandbox / spec に書いてよいこと / 審査文書の変種 / 受領後の汚染 grep
 │   ├── edit-intent-record.md           # AI による原稿改稿の意図記録: 1 pass 1 sidecar (hunk → finding / decision / 種類 = 実装・裁量・削除) / 裁量枠 / 削除 verbatim + 共著者本文の単独削除禁止 / 量の指示 / commit 前 gate / 依頼 spec の 3 行 /
 │   │                                   #   §7 実装 pass の作業規律 (当てる→組版 gate→記録、 anchor assert、 削除前の blame、 清掃版どうしの diff) / §8 投稿前の清掃
-│   └── delegated-work-packages.md      # 相手側の AI への作業委譲: 判断と実行の分離 / 常設 3 層 (入口・手順・定義) + WP 1 本 = 1 セッション / WP の 7 要素 /
+│   └── delegated-work-packages.md      # 相手側の AI への作業委譲: 判断と実行の分離 / 常設 3 層 (状態・手順・定義、README は入口だけ) + WP 1 本 = 1 セッション / WP の 7 要素 /
 │                                       #   受入基準は依頼側の独立実装の出力 / 全部書いて ready だけ着手 / 書き込み zone / 結果ノート / 解釈は書かせない
 ├── docs/state-discrimination.md       # 状態識別の一般数式・凸錐と座標の仮定・certificate の正本
 ├── template/                           # clone-and-run skeleton of a private verification repo (scripts/init-verification-repo.py が展開)
