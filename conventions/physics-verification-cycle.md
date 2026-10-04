@@ -408,6 +408,18 @@ Fierz--Pauli からの自由 propagator) と [`covariant_action_audit.py`](../sc
 (任意 lapse の curvature・Euler 微分・解析的 null-kernel・非等方 slice)。これらは検査方法と公刊済みの標準恒等式を持ち、
 個別論文の判定・式番号・誤り finding は持たない。
 
+## <a id="sequential-integration-and-neutral-hypotheses"></a>21. 逐次の積分で落ちる項と、 対等な 2 仮説で渡す総当たり検算 (実測)
+
+多変数の積分を 1 変数ずつ鞍点法・留数で処理した結果を検証するときの kernel。 検査方法だけを持ち、 個別論文の判定は持たない。
+
+- **先に積分した変数の結果が、 後の変数にどう依るかを見る。** 1 段目 (他の変数を固定した積分) が厳密でも、 その結果は残りの変数の関数である。 2 段目でそれを定数として扱うと、 交差項と、 鞍点の 2 階微分への寄与が落ちる。 落とした項が小さい条件を、 落とした項と残した項の比として式で書く。 「ある極限で delta 関数になるから」 は大きさの評価ではない。
+- **特異点が住んでいる変数で積分する。** 極や閾値の位置が複数の積分変数の組み合わせで決まるなら、 その組み合わせを 1 つの積分変数に取り直す。 残りの変数の積分は特異点を含まなくなり、 閉じた形で実行できることが多い。 逐次の近似を重ねた結果と、 取り直した変数での結果を比べる。
+- **Gauss の積は重みつき最小二乗として読む。** 当てはめた値・その誤差・当てはまりの良さに分かれ、 重みつき平均と残差は独立なので積分が因子に分かれる。 二次形式が重みつきなら、 直交分解もその重みの内積で取る。 重みなしで対角化すると、 本来は厳密な分離が近似に見える。
+- **総当たりの検算には、 2 つの仮説を対等に渡す。** 検算役に「正しいと思う式」 だけを渡すと確認が返りやすい。 既存の式と新しい式を同じ形式・同じ重みで書いて渡し、 「どちらにも合わない所を全部報告する」 ことを依頼に含める。 対照として、 2 つの式が一致する特別な場合を必ず入れる (そこで両方が合わなければ検算側の誤り)。 定数は合わせ込まずに比べ、 合わせ込んだ場合は別の列にする。
+- **測る量は仮説に依らない定義にする。** 切り替わりの位置や幅は、 どちらの式も使わずに数値から直接読む定義 (漸近形との比が半分になる点など) で測り、 そのあとで各仮説の予言と並べる。
+- **低い次元の検算は、 周辺化と条件つきの区別を隠す。** 1 次元では行列の対角成分と逆行列の対角成分の逆数が一致するので、 どちらが効くかを区別できない。 非等方な設定を 2 次元以上で 1 つ入れる。 積分する変数と固定する変数の選び方、 分散の強さの領域ごとに、 効く組み合わせが変わりうる。
+- **新しい式の限界も同じ検算で出す。** 新しい式が合わなくなる所を、 原因の候補 (止めた依存性、 捨てた極、 分散) ごとに分けて報告させ、 診断用の補正で誤差が消えるかを見る。 補正で消えない残差は「原因未特定」 として記録する。
+
 ## <a id="sibling-routing"></a>16. 隣接 doc への routing
 
 自著の投稿前検査 = [`paper-audit.md`](../../claude-config/conventions/paper-audit.md) / ノートの書き方 = [`physics-notes.md`](../../claude-config/conventions/physics-notes.md) / 数値検証 kernel = [`scientific-computing.md`](../../claude-config/conventions/scientific-computing.md) / 審査側 = [`peer-review-workflow.md`](../../claude-config/conventions/peer-review-workflow.md) / 文脈手術時の散文 sweep = [`paper-audit.md#relocation-rebinding-sweep`](../../claude-config/conventions/paper-audit.md#relocation-rebinding-sweep) / 検出失敗 RCA の方法論 = [`convention-design-principles.md#detection-zero-location`](../../claude-config/docs/convention-design-principles.md#detection-zero-location) / 委譲・cold-eyes の機構 = [`multi-session-coordination.md`](../../claude-config/conventions/multi-session-coordination.md)。 **どう回し続けるか (導出 state・台帳 3 種・retro・無人層・fresh session の手順) = [`verification-cycle-ops.md`](verification-cycle-ops.md)**。 符号・全体規格化を持つ印字量の外部 anchor 登録簿と foil の歯 = [`scripts/check-sign-anchors.py`](../scripts/check-sign-anchors.py) ([§3 全体反転 foil](#global-flip-foil))。 campaign の道具 = 層1 [`scripts/ledger-commit-cadence-gate.py`](../scripts/ledger-commit-cadence-gate.py) + [`scripts/verification-campaign-report.py`](../scripts/verification-campaign-report.py) + [`scripts/gpt_measurements.py`](../scripts/gpt_measurements.py) (数学 library、 [§定義 level 判定](#definition-level-judge))。 **決定を AI が原稿に実装する pass の意図記録 (hunk → finding / decision / 裁量 / 削除 の sidecar + commit 前 gate `check-edit-intent.py`) = [`edit-intent-record.md`](edit-intent-record.md)** (= [§12](#external-ai-referee-premise-verification) の次の station、 2026-09-08)。
