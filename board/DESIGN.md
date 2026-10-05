@@ -57,6 +57,14 @@ audience of a post an accident of the working directory.
 their `board/` directories. Each board's own file is the only source of its settings, so there is no registry to
 drift; an owner's dashboard reads its own board and every collaborator board checked out next to it.
 
+**The migration window**: moving the engine out of a board leaves other machines running the old engine from their
+old checkout against the new remote until they pull (a data repository is not necessarily pulled on a schedule). Two
+things broke in that window (実測): the new engine refused to post until the board's `board.json` reached the remote,
+and the old engine detected the lock by a file the move had deleted, so it read ciphertext as damaged history. Hence:
+push the board's settings before anything depends on them (the writer refuses a remote without `board.json` instead
+of trusting a local copy), and keep every file an old reader keys on (here, a compatibility copy of the schema) until
+every machine's checkout is past the move.
+
 **Workspace**: project keys are checkout basenames, so both vendors compute the same key from the filesystem. The
 workspace defaults to the parent of the board's repository (or of the engine), which matches any layout where
 checkouts sit side by side; `AGENT_BOARD_WORKSPACE` overrides it.
