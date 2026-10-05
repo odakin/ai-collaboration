@@ -24,6 +24,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -34,7 +35,11 @@ from pathlib import Path
 
 ENGINE = Path(__file__).resolve().parent
 SANDBOX_HEAD = "# Isolated review sandbox"   # scripts/make-review-sandbox.py の CLAUDE_MD の 1 行目 (selftest が照合)
-THREAD_RE = re.compile(r"\b[\w.-]+/\d{4}-\d{2}-\d{2}-[\w.-]+")   # <project>/<yyyy-mm-dd>-<slug>
+# board-view.py の render(surface=True) が thread ごとに出す行の頭と、 その直後の <project>/<thread>。 thread id は
+# 日付で始まるとは限らない (README の形は `<yyyy-mm-dd>-<slug>` だが schema は日付を求めず、 日付の無い id も実在)。 thread でない行 (🔒 / invalid event file / history /
+# 掲示板ごとの error) は数えない。 render の書式が変わると selftest の照合が落ちる。
+THREAD_LINE_RE = re.compile(r"^(?:📨 .*?\] |🟢 claim\s+|🟡 stale\s+|🔴 block\s+|🟠 find\s+|🔴 protocol "
+                            r"|⚠️ uncommitted event in )([^\s/]+/[^\s:]+?)(?: —|:)")
 
 
 def in_sealed_sandbox(cwd) -> bool:
@@ -54,8 +59,7 @@ def in_sealed_sandbox(cwd) -> bool:
 
 def count_threads(text: str) -> int:
     """surface の text に出た thread の数 (1 thread に複数行 = 依頼行と claim 行、 があっても 1 と数える)。"""
-    tops = [l for l in text.splitlines() if l.strip() and not l.startswith((" ", "📋"))]
-    return len({m for l in tops for m in THREAD_RE.findall(l)}) or len(tops)
+    return len({m.group(1) for l in text.splitlines() if (m := THREAD_LINE_RE.match(l))})
 
 
 def hook_output(text: str | None, error: str | None) -> dict | None:
@@ -66,7 +70,8 @@ def hook_output(text: str | None, error: str | None) -> dict | None:
     text = (text or "").strip()
     if not text:
         return None
-    return {"systemMessage": f"掲示板: 要注意 {count_threads(text)} thread",
+    n = count_threads(text)
+    return {"systemMessage": f"掲示板: 要注意 {n} thread" if n else "掲示板: 要確認 (thread 以外の表示)",
             "hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": (
                 "[掲示板] session 開始時に確認した要注意 thread (board-view.py --all-boards --surface):\n"
                 f"{text}\n"
@@ -112,21 +117,48 @@ def _selftest() -> int:
         assert in_sealed_sandbox(sb) and in_sealed_sandbox(sb / "scratch" / "deep")
         assert not in_sealed_sandbox(plain) and not in_sealed_sandbox(other) and not in_sealed_sandbox(None)
 
-    # 2. 数え方: 1 thread の 2 行は 1、 別 thread は別
+    # 2. 数え方: 1 thread の 2 行は 1、 別 thread は別、 日付で始まらない thread id も 1、 thread でない行は 0
     sample = ("📋 demo — 要注意 thread:\n"
               "📨 codex / role-demo-x 対応待ち [作業中] demo/2026-01-02-alpha — 成果物を作り、提出する\n"
               "    詳細\n"
               "🟢 claim  demo/2026-01-02-alpha — codex@host lease→2026-01-03T00:00:00Z\n"
-              "🟢 claim  demo/2026-01-05-beta.v2 — claude@host lease→2026-01-06T00:00:00Z\n")
-    assert count_threads(sample) == 2, count_threads(sample)
-    assert count_threads("🔴 demo: unreadable\n") == 1
+              "🟢 claim  demo/2026-01-05-beta.v2 — claude@host lease→2026-01-06T00:00:00Z\n"
+              "🟡 stale  demo/plain-slug — claude@host lease expired 2026-01-01T00:00:00Z (supersede or close)\n")
+    assert count_threads(sample) == 3, count_threads(sample)
+    assert count_threads("🔴 demo: unreadable\n") == 0
+    assert hook_output("🔴 demo: unreadable\n", None)["systemMessage"] == "掲示板: 要確認 (thread 以外の表示)"
+
+    # 2b. 照合: engine の render(surface=True) が出す thread 行の種類を 1 thread ずつ作り、 全部が 1 本ずつ数えられ、
+    #     thread でない行 (invalid / history / 🔒) は数えられない (render の書式が変わればここで落ちる)
+    sys.path.insert(0, str(ENGINE))
+    spec = importlib.util.spec_from_file_location("board_view", ENGINE / "board-view.py")
+    bv = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bv)
+    actor = {"agent": "codex", "instance": "codex@host", "task": "selftest"}
+    claim = {"actor": actor, "lease_until": "2026-01-03T00:00:00Z", "summary": "s"}
+    flow = {"errors": [], "waiting_on": None, "label": "作業中", "next_action": "提出する",
+            "title": "t", "request_id": "r", "reply_to": "r"}
+    base = {"workflow": None, "active_claims": [], "stale_claims": [], "open_blockers": [], "unpromoted": [], "events": []}
+    kinds = {"2026-01-01-waiting": {"workflow": dict(flow, waiting_on={"agent": "codex", "session_id": "role-demo"})},
+             "protocol": {"workflow": dict(flow, errors=["reply_to does not resolve"])},
+             "claim": {"active_claims": [claim]}, "stale": {"stale_claims": [claim]},
+             "block": {"open_blockers": [claim]}, "find": {"unpromoted": [claim]},
+             "uncommitted": {"events": [{"_committed": False, "_path": Path("e.json")}]}}
+    threads = {("demo", tid): dict(base, **over) for tid, over in kinds.items()}
+    text = bv.render(threads, [(Path("x.json"), "bad a/b: c")], surface=True, project=None,
+                     now=None, locked=False, warnings=[(Path("y.json"), "legacy a/b: c")], board="demo")
+    tops = [l for l in text.splitlines() if l.strip() and not l.startswith((" ", "📋"))]
+    assert len(tops) == len(kinds) + 2, text   # 種類ごとに 1 行 + invalid + history
+    assert count_threads(text) == len(kinds), (count_threads(text), text)
+    locked = bv.render({}, [], surface=True, project=None, now=None, locked=True, board="demo")
+    assert locked and count_threads(locked) == 0
 
     # 3. 出力の形: 空は沈黙、 失敗は fail-open で 1 行、 thread ありは SessionStart の context
     assert hook_output("", None) is None and hook_output(None, None) is None
     bad = hook_output(None, "timeout")
     assert bad["systemMessage"] == "掲示板: 確認に失敗" and "timeout" in bad["hookSpecificOutput"]["additionalContext"]
     ok = hook_output(sample, None)
-    assert ok["systemMessage"] == "掲示板: 要注意 2 thread"
+    assert ok["systemMessage"] == "掲示板: 要注意 3 thread"
     assert ok["hookSpecificOutput"]["hookEventName"] == "SessionStart"
     assert "demo/2026-01-05-beta.v2" in ok["hookSpecificOutput"]["additionalContext"]
 
