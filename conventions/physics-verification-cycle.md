@@ -232,6 +232,11 @@ spec 側の教訓 (= 起票者向け): 環境の道具の欠落 (SDP solver 不�
 
 **H. 別ベンダー pass の scope は spec だけでは縛れない (n=1)**: 「書くのは自分の campaign dir だけ、 promote は受領側」 と spec に書いても、 受け手の AGENTS 既定 (= 確定知見は owning project へ昇格) が勝ち、 別ベンダー worker が層1 library・規約・文献 SoT・repo の DESIGN へ直接 commit した。 中身は review で健全と判明し採用したが、 (i) 受領側が突合する前に SoT が動く (ii) 別 campaign の決着で即 stale になる (実測: 文献 note の「unverified」 が同夜 refuted に)。 → cross-vendor spec には **「promote 禁止、 提案は results.md に書く」 を AGENTS 既定より強い language で明記** し、 board の claim event を受領側が監視、 昇格は受領・突合の後に受領側が行う (C′ の「hoist は受領後」 と同じ時間順)。
 
+<a id="cross-vendor-repo-copy"></a>**H′. 別ベンダー pass を repo の写しで走らせるとき (sandbox を切らない非盲検の pass、 実測 3 点を 1 回で)**:
+1. 写しを `git clone` で作ったら、 渡す前に `git remote remove origin`。 remote が手元の checkout を指したままだと、 (a) worker が検証対象より新しい版を fetch し、 2 つの版を判定してしまう (b) worker 側の完了 gate のうち「remote があれば HEAD と remote の先頭を比べ、 違えば push を求める」 種類 (例 = 層1 [`codex/hooks/session_touch.py`](../../claude-config/codex/hooks/session_touch.py)、 remote が 0 本なら黙る) が終了を 1 回差し戻す。 push 禁止の仕事では満たせない条件なので worker は満たせない理由を述べて終わるが、 差し戻しの前に出した結果の要約が画面から流れて見えなくなる。
+2. 検証する commit を依頼の本文 (要約か完了条件) に書く。 結果を本体に持ち込む前に、 行き先に同じ名前の file が無いかを見る (共同研究の相手側が同じ検証を走らせて同名の回答 file を置いていることがある。 確かめずに checkout すると index の上で上書きする)。
+3. model と推論量は、 所有者への説明でなく、 窓に貼る文面そのものに書く (文面に無いと、 窓にたまたま入っていた model で走り、 途中からやり直しになる)。
+
 **I. 新結果の第二の目は sandbox を 1 コマンドで切る**: [`cold-eyes-isolation.md#sealed-sandbox`](cold-eyes-isolation.md#sealed-sandbox) の recipe を層1 [`scripts/make-review-sandbox.py`](../scripts/make-review-sandbox.py) (`create <slug> --spec … --include …` / 受領 `collect <slug> --into <campaign dir>`) にした。 `~/Claude` 配下を root にすると refuse (= 祖先 CLAUDE.md の auto-load を構造で断つ)。 C′ の n=2 が動機: 「安い方の選択肢が隔離されている」 状態にしないと deny list に流れる。
 
 **J. hoist は受領側 1 session が直列に、 worker の書込みは自 dir に閉じる (機械 gate)**: 2 周目で 3 session (worker 2 + 別ベンダー) が同じ層1 file へ同時に hoist し、 受領側自身の file 単位 `git add` が他 session の未 commit hunk を 3 回巻き込んだ (HEAD に番号重複、 作業ツリーで selftest FAIL、 解消に cross-session 4 往復)。 → **worker spec に `export CAMPAIGN_WORKER_DIR=campaigns/<dir>` を必須行**とし、 [`scripts/ledger-commit-cadence-gate.py`](../scripts/ledger-commit-cadence-gate.py) `--worker-scope-env` がその dir 外の staged path を refuse。 受領側は `-a` / `-A` を使わず path 指定で add。 層1・文献 SoT・DESIGN への昇格は受領・突合後に**受領側 1 session だけ**が行う (H の別ベンダー、 C′ の時間順と同じ結論を機械で)。

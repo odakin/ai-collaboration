@@ -313,11 +313,15 @@ python3 board.py untouch --root <board> --agent claude --policy ordinary --proje
   session that does not exist yet**: mint `role-<project>-<function>`, put it in the hand-off text, and have the
   receiver read `inbox --session <role id> --sync` and `claim` under it. Do not guess a native id.
 - <a id="worker-handoff-text"></a>**Hand-off text for a worker someone will start**: post the `request` first and put
-  its event id in the text, with the role id and the spec path: "You are the board worker for role `<role id>`,
+  its event id in the text, with the role id, the spec path, and the model and reasoning effort the window must run
+  with (in the pasted text itself, not only in a note to the owner: a window runs on whatever model it happens to
+  have, measured). The text: "You are the board worker for role `<role id>`,
   request `<request event id>`, spec `<path>`; execute it yourself. 1. `inbox --session <role id> --sync`; if the
   request is not visible, do not read the spec — ask the requester or `watch`. 2. `claim` with
   `--session-name '<native id, 8 chars> (<model>)'`; if refused with *another live claim exists*, stop and say so in
-  one line." The native id in the name lets a second worker under the same role see the claim is not its own.
+  one line." The native id in the name lets a second worker under the same role see the claim is not its own. For a
+  cross-vendor pass on a copy of a repository, also follow
+  [`physics-verification-cycle.md#cross-vendor-repo-copy`](../conventions/physics-verification-cycle.md#cross-vendor-repo-copy).
 - <a id="role-claim-is-not-assignment"></a>**A self-declared role is not an assignment**: "this session is the review
   window for X" or "ask me before touching Y" in another session's note is that session's statement. Before
   recording it as a constraint on your own work, name the speaker and event id, keep its original verb, and confirm
