@@ -17,6 +17,10 @@
 [script索引](scripts/README.md)から辿る。次の利用時は、制限背景の必要条件と一般共変な十分条件、
 有限ambient polynomialと場依存制約を別々に判定する。個別論文の判定はこのpublic repoに置かない。
 
+## 現在地：掲示板の engine (board/)
+
+owner 専用の掲示板から engine を移し、 共同研究の repo に層2 の掲示板を置けるようにした。 入口 = [board/README.md](board/README.md#boards-and-audiences)、 判断 = [DESIGN](DESIGN.md#board-engine) と [board/DESIGN.md](board/DESIGN.md#one-engine-many-boards)。 次 = 実際の共同研究の掲示板で、 共同研究者側の session が clone して読めるかを確かめる (読む人の gate は名前と path だけを見る = 文章の中身は書き手の判断)。
+
 ## 残タスク
 
 - 状態識別の数式と道具を追加。入口 = [証明と利用範囲](docs/state-discrimination.md)、[library](scripts/state_discrimination.py)、[検証時の certificate](conventions/physics-verification-cycle.md#state-discrimination-certificates)。reporter は未知の foil crash と marker 後の非ゼロ終了を失敗にし、`--run` の失敗を呼び元へ返す。実装判断 = DESIGN.md。

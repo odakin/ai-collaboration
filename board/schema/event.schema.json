@@ -1,0 +1,518 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/odakin/ai-collaboration/board/schema/event.schema.json",
+  "title": "Agent Board event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_id",
+    "thread_id",
+    "project",
+    "actor",
+    "kind",
+    "source_policy",
+    "created_at",
+    "summary",
+    "touches",
+    "references",
+    "promoted_to",
+    "supersedes"
+  ],
+  "properties": {
+    "schema_version": {
+      "enum": [
+        1,
+        2
+      ]
+    },
+    "event_id": {
+      "type": "string",
+      "pattern": "^[0-9]{8}T[0-9]{6}Z-[a-z0-9][a-z0-9-]{5,63}$"
+    },
+    "thread_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{2,95}$"
+    },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "repo"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"
+        },
+        "repo": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agent",
+        "task"
+      ],
+      "properties": {
+        "agent": {
+          "enum": [
+            "claude",
+            "codex",
+            "human",
+            "other"
+          ]
+        },
+        "task": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "instance": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "session_id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{2,127}$"
+        }
+      }
+    },
+    "kind": {
+      "enum": [
+        "claim",
+        "update",
+        "finding",
+        "blocker",
+        "done",
+        "abandoned",
+        "request",
+        "submit",
+        "accept",
+        "revise",
+        "release",
+        "handover",
+        "note"
+      ]
+    },
+    "source_policy": {
+      "enum": [
+        "ordinary",
+        "encrypted-metadata-only"
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "lease_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000
+    },
+    "details": {
+      "type": "string",
+      "maxLength": 4000
+    },
+    "touches": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string"
+      }
+    },
+    "references": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string"
+      }
+    },
+    "promoted_to": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string"
+      }
+    },
+    "supersedes": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string"
+      }
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "reply_to": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "assignee": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agent",
+        "session_id"
+      ],
+      "properties": {
+        "agent": {
+          "enum": [
+            "claude",
+            "codex",
+            "human",
+            "other"
+          ]
+        },
+        "session_id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{2,127}$"
+        }
+      }
+    },
+    "acceptance": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "deliverables": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1000
+      },
+      "maxItems": 20
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agent",
+        "session_id"
+      ],
+      "properties": {
+        "agent": {
+          "enum": [
+            "claude",
+            "codex",
+            "human",
+            "other"
+          ]
+        },
+        "session_id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{2,127}$"
+        }
+      }
+    },
+    "handover_role": {
+      "enum": [
+        "assignee",
+        "reviewer"
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "claim"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "required": [
+          "lease_until"
+        ],
+        "properties": {
+          "lease_until": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "source_policy": {
+            "const": "encrypted-metadata-only"
+          }
+        },
+        "required": [
+          "source_policy"
+        ]
+      },
+      "then": {
+        "properties": {
+          "project": {
+            "properties": {
+              "key": {
+                "const": "restricted"
+              },
+              "repo": {
+                "type": "null"
+              }
+            }
+          },
+          "actor": {
+            "properties": {
+              "task": {
+                "const": "restricted-task"
+              }
+            }
+          },
+          "summary": {
+            "enum": [
+              "Work claimed.",
+              "Work updated.",
+              "Finding recorded in source.",
+              "Work blocked.",
+              "Work completed.",
+              "Work abandoned.",
+              "Work requested.",
+              "Work submitted.",
+              "Work accepted.",
+              "Revision requested.",
+              "Work released.",
+              "Work handed over.",
+              "Status noted."
+            ]
+          },
+          "touches": {
+            "maxItems": 0
+          },
+          "references": {
+            "maxItems": 0
+          },
+          "promoted_to": {
+            "maxItems": 0
+          },
+          "deliverables": {
+            "maxItems": 0
+          },
+          "acceptance": {
+            "const": "Confirm completion in source."
+          }
+        },
+        "not": {
+          "required": [
+            "details"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "const": 1
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "claim",
+              "update",
+              "finding",
+              "blocker",
+              "done",
+              "abandoned"
+            ]
+          }
+        },
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "request_id"
+              ]
+            },
+            {
+              "required": [
+                "reply_to"
+              ]
+            },
+            {
+              "required": [
+                "assignee"
+              ]
+            },
+            {
+              "required": [
+                "acceptance"
+              ]
+            },
+            {
+              "required": [
+                "deliverables"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "const": 2
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "request_id"
+        ],
+        "properties": {
+          "supersedes": {
+            "maxItems": 0
+          },
+          "actor": {
+            "required": [
+              "session_id"
+            ],
+            "properties": {
+              "instance": {
+                "minLength": 1
+              }
+            }
+          },
+          "kind": {
+            "enum": [
+              "claim",
+              "update",
+              "finding",
+              "blocker",
+              "abandoned",
+              "request",
+              "submit",
+              "accept",
+              "revise",
+              "release",
+              "handover",
+              "note"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "request"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "assignee",
+          "acceptance"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "submit",
+              "accept",
+              "revise",
+              "release"
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "reply_to"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "submit"
+          },
+          "source_policy": {
+            "const": "ordinary"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "deliverables"
+        ],
+        "properties": {
+          "deliverables": {
+            "minItems": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "accept"
+          },
+          "source_policy": {
+            "const": "ordinary"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "references": {
+            "minItems": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "handover"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "target",
+          "handover_role",
+          "reply_to"
+        ]
+      }
+    }
+  ]
+}

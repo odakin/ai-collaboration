@@ -18,6 +18,8 @@ ai-collaboration/
 │   │                                   #   §7 実装 pass の作業規律 (当てる→組版 gate→記録、 anchor assert、 削除前の blame、 清掃版どうしの diff) / §8 投稿前の清掃
 │   └── delegated-work-packages.md      # 相手側の AI への作業委譲: 判断と実行の分離 / 常設 3 層 (状態・手順・定義、README は入口だけ) + WP 1 本 = 1 セッション / WP の 7 要素 /
 │                                       #   受入基準は依頼側の独立実装の出力 / 全部書いて ready だけ着手 / 書き込み zone / 結果ノート / 解釈は書かせない
+├── board/                              # AI session どうしの掲示板の engine (board.py ほか)。 運用の契約 = board/README.md、 判断 = board/DESIGN.md
+│                                       #   掲示板 1 枚 = repo の中の board.json + events/ (owner 専用 = 層3 / 共同研究者 = 層2 の `<project>/board/`)
 ├── docs/state-discrimination.md       # 状態識別の一般数式・凸錐と座標の仮定・certificate の正本
 ├── template/                           # clone-and-run skeleton of a private verification repo (scripts/init-verification-repo.py が展開)
 ├── examples/verification-repo/         # 完結した見本 campaign 1 本 (spec / ledger / check+foil / results AUTO block / retro + hoist)
@@ -42,6 +44,7 @@ layer 1 (public、全 Claude Code / Codex ユーザー向け)。**依存でき�
 - AI に決定 ledger どおりの原稿改稿を実装させる: 依頼 spec に `edit-intent-record.md#requester-spec-line` の 3 行 → 実装側は `check-edit-intent.py --scaffold … --out review/edit-intent-<date>.md` → 種類 / ID / 意図 を埋める → 同 script の検査 ALL PASS → 原稿と同じ pass で commit。 受領は裁量枠から読む / --fill (JSON から 種類・ID・意図 を一括で埋めて検査)
 - 自分が実装側のとき: 当てる → 別 dir で組版 → 記録 → commit の順 ([`#apply-then-record`](conventions/edit-intent-record.md#apply-then-record))。 削除の前に `git blame`。 共著 review 中の原稿の読み合わせは `review-markup-clean.py` を基準版と現在版の両方に当ててから latexdiff ([`#cleaned-base-diff`](conventions/edit-intent-record.md#cleaned-base-diff))、 投稿前清掃も同じ script ([`#submission-cleanup`](conventions/edit-intent-record.md#submission-cleanup))
 - 「記法を統一しただけ」 型の機械的改稿を受け取った / 出した: [`check-rename-purity.py`](scripts/check-rename-purity.py) `--before … --after … --map … --strict` で **new→old の逆写像を後版に当てて前版と diff** し、畳まれずに残った行だけを読む (`--forbid` で旧綴りの残存を comment 行まで走査)。綴りの棚卸しは同 script の `--census '<regex>'` (綴りごとに出現数・行範囲・住んでいる節を出す = 2 綴りが別の節に居るのが一目で分かる)。組版は [`compare-tex-builds.py`](scripts/compare-tex-builds.py) で 2 版の log と `.aux` を比べる (**総頁数の一致は頁割りが動いていない証拠でない**)。`--build <REV>:<file>.tex` は `git archive` で版ごと取り出して組むので、凍結稿の gate が live の図を掴まない ([`#frozen-revision-build`](conventions/edit-intent-record.md#frozen-revision-build))。他人が組んだ PDF を見て報告する前に `--reproduce` で自分の build が再現することを証明する。規律 = [`physics-verification-cycle.md#referee-side-kernels`](conventions/physics-verification-cycle.md#referee-side-kernels) kernel 17-21、人が読む側の検査 = [`paper-audit.md#notation-rename-sweep`](../claude-config/conventions/paper-audit.md#notation-rename-sweep)
+- 共同研究者の AI session とも依頼・提出・受領を残したい: 共同研究の repo に掲示板を置く (`python3 board/board.py init --root <project>/board --audience collaborators --encryption none --sources <project>` → commit)。 使い方・読む人の gate・owner 専用の掲示板との分け方 = [`board/README.md`](board/README.md#boards-and-audiences)
 - 数か月の解析を共同研究者 (人間 + その AI) に実行してもらう: 定義を 1 つの SPEC に固め、1 セッション分の作業書 (WP) に割り、**受入基準は自分の独立実装で出した数値**で埋める ([`delegated-work-packages.md`](conventions/delegated-work-packages.md))。解釈・結論・基準値の書き換えは作業者に渡さない ([`#what-the-worker-must-not-write`](conventions/delegated-work-packages.md#what-the-worker-must-not-write))
 - 印字した係数の符号を外部の絶対量で守る: project に登録簿 `sign-anchors.json` (印字量 → 外部 anchor → 全体反転 foil) → `check-sign-anchors.py --run --deferrals` (gate = anchor が現稿で PASS し、 全体反転の foil で assertion により FAIL、 carrier の無い「規約差」 0) / `--fleet-scan` (fleet のどの検査が変換を見分けるか) / `--readers` (どの検査が原稿を実行時に開くか)。 規則 = claude-config `paper-audit.md#absolute-sign-external-anchor` / `#convention-difference-closure`
 - 共変作用の等価性・境界項・多項式性を検査する: [`physics-verification-cycle.md#action-equivalence-and-polynomiality`](conventions/physics-verification-cycle.md#action-equivalence-and-polynomiality) の順で、Euler微分、任意lapse、係数の特殊化、動く補助場制約、非等方sliceを分けて見る。再利用コードは [`density_frame_algebra.py`](scripts/density_frame_algebra.py) と [`covariant_action_audit.py`](scripts/covariant_action_audit.py)。個別論文の判定はowner側のprivate campaignに残す
@@ -62,9 +65,10 @@ layer 1 (public、全 Claude Code / Codex ユーザー向け)。**依存でき�
 ```bash
 set -e
 for s in scripts/*.py; do python3 "$s" --selftest; done
+python3 board/board-view.py --selftest && python3 board/test_board.py   # git-crypt が要る (暗号化 transport の試験)
 ```
 
-CI = `.github/workflows/checks.yml` (全 script の selftest。`secure-new-repo.sh --code` の baseline)。失敗した script の終了値を loop で失わない。
+CI = `.github/workflows/checks.yml` (全 script の selftest。`secure-new-repo.sh --code` の baseline)。 `board/` の試験は CI に未配線 = 手元で回す (配線は本人の裁定待ち)。失敗した script の終了値を loop で失わない。
 
 ## How to Resume
 

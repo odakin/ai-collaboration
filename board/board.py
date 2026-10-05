@@ -1,0 +1,656 @@
+#!/usr/bin/env python3
+"""Board CLI: one-command request/claim/submit/accept, note, touch, addressed inbox (--json for runners), boards, init. See README.md."""
+from __future__ import annotations
+import argparse
+import contextlib
+import hashlib
+import importlib.util
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+import tempfile
+import time
+from board_workflow import KINDS, COARSE
+import board_config as bc
+
+ENGINE=Path(__file__).resolve().parent
+SCHEMA_PATH=ENGINE/'schema/event.schema.json'
+spec=importlib.util.spec_from_file_location('board_view', ENGINE/'board-view.py')
+view=importlib.util.module_from_spec(spec); spec.loader.exec_module(view)
+
+
+GIT_TIMEOUT=int(os.environ.get('AGENT_BOARD_GIT_TIMEOUT','120'))  # seconds per git call (clone/push of the temporary checkout)
+
+
+def run(root, *args, check=True):
+    p=subprocess.run(['git','-C',str(root),*args],capture_output=True,check=False,timeout=GIT_TIMEOUT)
+    if check and p.returncode:
+        raise ValueError(f'git {args[0]} failed: '+p.stderr.decode(errors='replace')[:1200])
+    return p
+
+
+def source_gate(source, policy):
+    # Classification is an explicit decision by the caller after reading source
+    # instructions. Detect encryption without opening source content.
+    if policy == 'no-post': raise ValueError('source policy forbids posting')
+    if not source.is_dir(): raise ValueError('source directory missing')
+    run(source,'rev-parse','--show-toplevel')
+    encrypted=run(source,'check-attr','filter','--','CLAUDE.md').stdout.decode()
+    if 'git-crypt' in encrypted and policy != 'encrypted-metadata-only':
+        raise ValueError('encrypted source requires encrypted-metadata-only')
+    if policy not in {'ordinary','encrypted-metadata-only'}:
+        raise ValueError('explicit source classification required')
+
+
+def board_branch(root):
+    """The board's branch (board.json), read before cloning; `main` for a locked or unreadable config."""
+    try: return bc.load(root)['branch']
+    except ValueError: return 'main'
+
+
+@contextlib.contextmanager
+def snapshot(root):
+    """Clone the board's remote into a private temporary directory and yield the board directory inside it.
+
+    Never touches the caller's index or working tree. A board that is a subdirectory of a project repository
+    (`<project>/board/`) is cloned partially (no file contents) with only that subdirectory checked out, so a
+    large project costs commits and trees, not its files.
+    """
+    remote=run(root,'remote','get-url','origin').stdout.decode().strip()
+    common=Path(run(root,'rev-parse','--path-format=absolute','--git-common-dir').stdout.decode().strip())
+    sub=bc.subdir(root); branch=board_branch(root)
+    with tempfile.TemporaryDirectory(prefix='agent-board-') as td:
+        dest=Path(td)/'checkout'
+        if sub:
+            run(root,'clone','--quiet','--no-local','--filter=blob:none','--no-checkout','--branch',branch,'--single-branch',remote,str(dest))
+            run(dest,'sparse-checkout','set','--no-cone','/'+sub+'/')
+            run(dest,'checkout','--quiet',branch)
+        else:
+            run(root,'clone','--quiet','--no-local','--branch',branch,'--single-branch',remote,str(dest))
+        board_dir=dest/sub if sub else dest
+        # Reuse existing encryption capability. No key material is printed/exported.
+        if bc.is_locked(board_dir):
+            key=common/'git-crypt/keys/default'
+            if not key.is_file(): raise ValueError('unlock the source board before using synchronized posting')
+            p=subprocess.run(['git-crypt','unlock',str(key)],cwd=dest,capture_output=True,timeout=30)
+            if p.returncode: raise ValueError('temporary board could not be unlocked')
+        yield board_dir
+
+
+def read(root):
+    if bc.is_locked(root): raise ValueError('board is encrypted and locked')
+    # EventList carries invalid-history diagnostics into the shared reducer.
+    # Readers surface them; writers must check the target before every attempt.
+    events, _=view.load_events(root)
+    return events
+
+
+NONE_TOUCH='(none)'  # a touch note's set when the session holds no path any more (an empty list is an ordinary note)
+NO_POST_PARTS={'secrets-config','secrets','.secrets'}
+
+
+def touch_base(root=None):
+    """The workspace that holds the checkouts (board_config.workspace): touches are `<checkout>/<path>` below it."""
+    return bc.workspace(root)
+
+
+def norm_touch(raw, base=None):
+    """A path a session declares it will write, as `<repo>/<path>` below the workspace (one name per file, symlinks resolved).
+
+    Outside the workspace (shared-drive folders, home dotfiles) and credential repos are no-post sources: refused, so
+    not even an opaque status reaches the board. A git-crypt file (or a file in a repo whose CLAUDE.md is git-crypt)
+    becomes `h:<sha256 prefix>` = sessions still collide on the same file, but the board never names it.
+    """
+    base=Path(os.path.realpath(base or touch_base()))
+    p=Path(os.path.expanduser(raw))
+    p=Path(os.path.realpath(p if p.is_absolute() else base/p))
+    try: rel=p.relative_to(base)
+    except ValueError: raise ValueError(f'{raw}: workspace ({base}) の外 = 掲示板に載せない (no-post)。 相手とは直接 message で調整する')
+    if not rel.parts: raise ValueError(f'{raw}: repo か file を指す')
+    if NO_POST_PARTS & set(rel.parts): raise ValueError(f'{raw}: 認証情報の置き場 = 掲示板に載せない (no-post)')
+    repo=base/rel.parts[0]; inner=Path(*rel.parts[1:]) if len(rel.parts)>1 else None
+    if (repo/'.git').exists():
+        probe=[str(inner)] if inner else []
+        if inner and p.is_dir(): probe.append(str(inner/'x'))
+        attrs=run(repo,'check-attr','filter','--','CLAUDE.md',*probe,check=False).stdout.decode()
+        if 'git-crypt' in attrs: return 'h:'+hashlib.sha256(rel.as_posix().encode()).hexdigest()[:16]
+    return rel.as_posix()
+
+
+def touch_overlaps(a, b):
+    if a.startswith('h:') or b.startswith('h:'): return a==b
+    a=a.rstrip('/'); b=b.rstrip('/')
+    return a==b or a.startswith(b+'/') or b.startswith(a+'/')
+
+
+def touch_state(events, now, hours, *, project=None, thread=None):
+    """Who holds which path now: {(agent, session): {'name', 'last', 'paths': {path: (since, 'project/thread')}}}.
+
+    A session's set in a thread is the `touches` of its latest note that carries any (empty `touches` = an ordinary
+    note, ignored; `(none)` = holds nothing). A path's `since` is when it entered that unbroken set, so the first
+    declarer keeps a file while others queue behind it. Sets older than `hours` (a session that died) do not count.
+    """
+    per={}
+    for e in sorted((e for e in events if e.get('kind')=='note' and e.get('touches')), key=lambda e: e.get('created_at','')):
+        pk,tid=(e.get('project') or {}).get('key'),e.get('thread_id')
+        if (project and pk!=project) or (thread and tid!=thread): continue
+        act=e.get('actor') or {}; k=(act.get('agent'),act.get('session_id'),pk,tid)
+        old=per.get(k,{}).get('paths',{})
+        per[k]={'paths':{p:old.get(p,e['created_at']) for p in e['touches'] if p!=NONE_TOUCH},'last':e['created_at'],'name':act.get('task'),'summary':e.get('summary')}
+    cutoff=view.iso_z(now-view.dt.timedelta(hours=hours)); out={}
+    for (agent,sid,pk,tid),v in per.items():
+        if not v['paths'] or v['last']<cutoff: continue
+        s=out.setdefault((agent,sid),{'name':v['name'],'last':v['last'],'summary':v['summary'],'paths':{}})
+        if v['last']>=s['last']: s['last'],s['name'],s['summary']=v['last'],v['name'] or s['name'],v['summary']
+        for p,since in v['paths'].items():
+            if p not in s['paths'] or since<s['paths'][p][0]: s['paths'][p]=(since,f'{pk}/{tid}')
+    return out
+
+
+def touch_owner(state, path):
+    """The session that declared an overlapping path first, or None."""
+    best=None
+    for who,s in state.items():
+        for p,(since,thr) in s['paths'].items():
+            if touch_overlaps(p,path) and (best is None or (since,who)<(best['since'],best['who'])):
+                best={'who':who,'since':since,'thread':thr,'path':p,'name':s['name']}
+    return best
+
+
+def touch_verdict(state, me, paths, labels=None):
+    """labels: token -> the path as typed, shown locally beside an `h:` token (the board itself never holds it)."""
+    lines=[]; blocked=False
+    for tok in paths:
+        o=touch_owner(state,tok); p=f'{tok} (= {labels[tok]})' if tok.startswith('h:') and labels and tok in labels else tok
+        if o is None or o['who']==me:
+            lines.append(f"🟢 {p} — 書いてよい ({'この session が持ち主' if o else '宣言している session は居ない'})"); continue
+        blocked=True; agent,sid=o['who']
+        lines.append(f"🔴 {p} — 先に {o['name'] or '—'} ({agent}/{sid[:8]}) が {o['since'][:16]}Z から {o['path']} を宣言 ({o['thread']})。"
+                     f" 書かない: 中身を相手に SendMessage で渡すか、 相手が手放すまで待つ (touching --path {(labels or {}).get(tok,tok)} --wait を background で)")
+    return lines, blocked
+
+
+def post(root, event, *, before_push=None):
+    # Caller has completed source_gate (and, on a collaborators board, check_post) before entering a snapshot.
+    from board_schema import errors
+    schema=json.loads(SCHEMA_PATH.read_text())
+    errs=errors(event,schema)
+    if errs: raise ValueError('; '.join(errs))
+    if event['source_policy']=='encrypted-metadata-only':
+        if not re.fullmatch(r'r-[a-f0-9]{10,}',event['thread_id']):
+            raise ValueError('restricted thread requires opaque r-<10+ hex> identifier')
+    rel=Path('events')/event['project']['key']/event['thread_id']/(view.compact(view.parse_ts(event['created_at']))+'--'+event['event_id']+'.json')
+    with snapshot(root) as dest:
+        cfg=bc.load(dest)  # the remote's settings decide, not a stale local copy
+        if cfg['audience']=='collaborators' and event['source_policy']!='ordinary':
+            raise ValueError('a collaborators board takes ordinary posts only')
+        if cfg['audience']=='collaborators' and event['project']['key'] not in cfg['sources']:
+            raise ValueError(f"project {event['project']['key']} is not a source of this board")
+        # Global user identity may be absent in test/CI; inherit transport identity only.
+        for field in ('user.name','user.email'):
+            v=run(root,'config','--get',field,check=False).stdout.decode().strip()
+            if v: run(dest,'config',field,v)
+        encrypted='git-crypt' in run(dest,'check-attr','filter','--',str(rel)).stdout.decode()
+        if cfg['encryption']=='git-crypt' and not encrypted: raise ValueError('board event encryption is not configured')
+        branch=cfg['branch']
+        for attempt in range(3):
+            events=read(dest)
+            view.assert_writable(events, event['project']['key'], event['thread_id'], event['event_id'])
+            existing=next((e for e in events if e['event_id']==event['event_id']),None)
+            if existing:
+                if {k:v for k,v in existing.items() if not k.startswith('_')} != event:
+                    raise ValueError('event_id already exists with different content')
+                return event['event_id']
+            same=[e for e in events if e['project']['key']==event['project']['key'] and e['thread_id']==event['thread_id']]
+            from board_workflow import reduce_workflow
+            if event['kind']=='submit':
+                current=reduce_workflow(same,view.now_utc())
+                if current['claim'] is None or view.parse_ts(current['claim']['lease_until']) <= view.now_utc():
+                    raise ValueError('claim expired; reclaim before submission')
+            w=reduce_workflow(same+[event],view.now_utc())
+            if w['errors']: raise ValueError('; '.join(w['errors']))
+            if event['kind'] == 'claim' and view.parse_ts(event['lease_until']) <= view.now_utc():
+                raise ValueError('new claim already expired')
+            p=dest/rel; p.parent.mkdir(parents=True,exist_ok=True)
+            p.write_text(json.dumps(event,ensure_ascii=False,indent=2)+'\n')
+            run(dest,'add','--',str(rel)); run(dest,'commit','--quiet','-m','Add event')
+            blob=run(dest,'show',f'HEAD:./{rel.as_posix()}').stdout
+            if cfg['encryption']=='git-crypt' and not blob.startswith(view.GITCRYPT_MAGIC): raise ValueError('refusing to push an unencrypted event')
+            if before_push: before_push(attempt)
+            pushed=run(dest,'push','origin',f'HEAD:{branch}',check=False)
+            if pushed.returncode==0: return event['event_id']
+            run(dest,'fetch','--quiet','origin',branch)
+            # Reset only this disposable checkout, then revalidate the transition
+            # against the winner. A concurrent claim cannot sneak through rebase.
+            run(dest,'reset','--hard',f'origin/{branch}')
+        raise ValueError('posting failed after three attempts; use retry with the saved --event-id')
+
+
+def target_model_note(to_session, expect=None):
+    """One line about the model the addressed session actually runs on, read before posting (never after).
+
+    The title tag and the chip text do not decide a session's model; its transcript's last assistant turn does
+    (layer-1 scripts/lib/session_model.py). A role id names a session that does not exist yet, so its model is
+    whatever the app opens it with. With `expect` (a tier such as fable / opus, or a model-id substring), a
+    known model that does not match refuses the post; an unknown model (another machine, no answer yet) is
+    reported and lets the post through. Rule: claude-config/conventions/multi-session-coordination.md#delegate-model-routing
+    """
+    if not to_session: return None
+    if to_session.startswith(('role-','resident-')):
+        return f"宛先 {to_session} は役割 id = 開く session の model は成り行き (chip の tag は推奨、 起票元と同じ model が既定)。 仕事の難しさに合う model で開くよう文面に書く。"
+    # Optional companion tool (layer-1 claude-config, cloned next to this engine); absent = the model is unknown.
+    lib=ENGINE.parent.parent/'claude-config'/'scripts'/'lib'/'session_model.py'
+    try:
+        spec=importlib.util.spec_from_file_location('session_model',lib); sm=importlib.util.module_from_spec(spec); spec.loader.exec_module(sm)
+        rows=[sm.describe(s) for s in sm.resolve(to_session)]
+    except Exception:
+        rows=[]
+    known=[r for r in rows if r.get('model')]
+    if not known:
+        if expect: return f"宛先 {to_session[:8]} の model はこの機の記録に無い (別の機の session か、 まだ応答が無い) = --expect-model {expect} は確かめられない。 送る前に相手の機で session-model.py を回すか、 相手に聞く。"
+        return f"宛先 {to_session[:8]} の model はこの機の記録に無い (別の機の session か、 まだ応答が無い)。 仕事の難しさに合うかは送る前にしか直せない = 相手に model を聞くか文面に書く。"
+    r=known[0]
+    line=f"宛先 {r['sessionId'][:8]} の実際の model = {r['model']} (tier {r['tier']}、 最後の応答 {r['model_at'][:16]}{', name=' + r['name'] if r.get('name') else ''})。 仕事の難しさに合うか送る前に見る (規約 #delegate-model-routing)。"
+    if expect and expect.lower() not in (r['model'].lower(), r['tier'].lower()) and expect.lower() not in r['model'].lower():
+        raise ValueError(f"宛先の model が --expect-model {expect} と違う: {r['model']} (tier {r['tier']})。 合う宛先に変える / 自分でやる / 本人に 1 行で聞く (名指しの宛先でも同じ)。 承知の上なら --expect-model を外して送る")
+    return line
+
+
+def event_from(a, events):
+    restricted=a.policy=='encrypted-metadata-only'
+    if a.command=='request' or (a.command=='note' and not a.request):
+        if not restricted and a.project != a.source.resolve().name: raise ValueError('project must equal source checkout basename')
+        if not a.thread or (not restricted and not a.project): raise ValueError(f'{a.command} needs --thread and --project (or restricted policy)')
+        if a.command=='request':
+            if not a.to or not a.to_session: raise ValueError('request needs --to and --to-session')
+            if not restricted and not a.acceptance: raise ValueError('request needs --acceptance')
+        pk, tid, repo=a.project or 'restricted',a.thread,a.repo
+    else:
+        req=next((e for e in events if e['event_id']==a.request and e['kind']=='request'),None)
+        if req is None: raise ValueError('--request must identify an existing request')
+        if req['source_policy']!=a.policy: raise ValueError('source policy differs from request')
+        pk,tid,repo=req['project']['key'],req['thread_id'],req['project']['repo']
+    kind=a.command
+    # Existing template supplies metadata; workflow fields are added below.
+    ev,path=view.build_template(kind='update',project=pk,thread=tid,task=a.session_name or 'workflow',agent=a.agent,
+        repo=repo,restricted=restricted,lease_hours=a.lease_hours,summary=a.summary,now=view.now_utc())
+    ev.update(schema_version=2,kind=kind)
+    ev['actor']['instance']=a.instance or a.agent+'@'+view.socket.gethostname().split('.')[0]
+    ev['actor']['session_id']=a.session
+    if a.session_name and not restricted: ev['actor']['task']=a.session_name
+    if a.event_id: ev['event_id']=a.event_id
+    ev['request_id']=ev['event_id'] if (kind=='request' or (kind=='note' and not a.request)) else a.request
+    if kind=='claim': ev['lease_until']=view.iso_z(view.now_utc()+view.dt.timedelta(hours=a.lease_hours))
+    if a.reply_to: ev['reply_to']=a.reply_to
+    if restricted:
+        ev['summary']={**view.RESTRICTED_SUMMARY,**COARSE}[kind]
+        if a.deliverable or a.reference or a.summary or a.acceptance or a.project or a.repo or getattr(a,'touch',None):
+            raise ValueError('restricted posts forbid descriptive metadata; use source-side records')
+    else:
+        if not a.summary: raise ValueError('--summary required')
+        if '``' in a.summary or '``' in (a.acceptance or ''):
+            # Empty backticks are the fingerprint of a shell that command-substituted a `token` inside a
+            # double-quoted argument (measured: a thread name vanished from a posted note). Refuse, since events are immutable.
+            raise ValueError('summary/acceptance contains empty backticks (``) — the shell probably expanded a `...` token; quote the argument with single quotes and retry')
+        if kind=='accept' and not a.reference:
+            # The schema needs >= 1 reference on an ordinary accept; say so here instead of the bare "$.references: too few items".
+            raise ValueError('accept needs --reference (the evidence you checked: the results / receipt file or a link)')
+        ev['references']=a.reference
+        if a.deliverable: ev['deliverables']=a.deliverable
+        if getattr(a,'touch',None):
+            if kind!='note': raise ValueError('--touch is for note (touch / untouch) only')
+            ev['touches']=list(dict.fromkeys(a.touch))
+    if kind=='request':
+        ev['assignee']={'agent':a.to,'session_id':a.to_session}
+        ev['acceptance']='Confirm completion in source.' if restricted else a.acceptance
+    if kind=='handover':
+        if not a.to or not a.to_session or not a.role: raise ValueError('handover needs --to, --to-session, --role')
+        ev.update(target={'agent':a.to,'session_id':a.to_session},handover_role=a.role)
+    return ev
+
+
+def outbox_dir(root):
+    """Where an attempted post is kept for `retry`: never inside a tracked tree."""
+    root=Path(root)
+    if not bc.subdir(root) and (root/'.local').is_dir(): return root/'.local/outbox'  # a whole-repo board with its ignored .local/
+    common=Path(run(root,'rev-parse','--path-format=absolute','--git-common-dir').stdout.decode().strip())
+    return common/'board-outbox'/(bc.subdir(root).replace('/','_') or 'root')
+
+
+def cmd_boards(a):
+    rows=bc.discover(a.workspace)
+    if a.json:
+        print(json.dumps([{'name':b['name'],'root':str(b['root']),'locked':b['locked'],'error':b['error'],
+                           **({k:b['config'].get(k) for k in ('audience','encryption','branch','sources')} if b['config'] else {})}
+                          for b in rows],ensure_ascii=False,indent=2)); return
+    for b in rows:
+        c=b['config'] or {}
+        state='🔒 locked' if b['locked'] else ('🔴 '+b['error']) if b['error'] else f"{c['audience']} / encryption {c['encryption']}"
+        src=f" / sources {','.join(c['sources'])}" if c.get('sources') else ''
+        print(f"{b['name']}  {str(b['root']).replace(str(Path.home()),'~')}  [{state}{src}]")
+    if not rows: print(f'no board under {a.workspace or bc.workspace()} (board.json in a checkout or its board/ directory)')
+
+
+def cmd_init(a, ap):
+    if not a.root: ap.error('init needs --root <new board directory> (for a shared project: <project>/board)')
+    if a.audience not in bc.AUDIENCES: ap.error('init needs --audience owner|collaborators')
+    if a.encryption not in bc.ENCRYPTIONS: ap.error('init needs --encryption none|git-crypt (none = the repository\'s private membership is the only boundary)')
+    sources=[s for s in (a.sources or '').split(',') if s]
+    root=Path(os.path.expanduser(str(a.root))).absolute()
+    files=bc.scaffold(root,audience=a.audience,encryption=a.encryption,sources=sources,branch=a.branch,name=a.name)
+    top=bc.toplevel(root)
+    print('\n'.join(f'wrote {f}' for f in files))
+    if top:
+        rel=' '.join(str(Path(os.path.realpath(f)).relative_to(top)) for f in files)
+        print(f'→ commit them in {top}: git -C {top} add {rel} && git -C {top} commit -m "Add board" -- {rel} && git -C {top} push')
+    else:
+        print('→ the directory is not in a Git repository yet: create or clone the repository whose members are this board\'s readers')
+
+
+def inbox_show(a, root, *, board_name=None, collect=None):
+    """inbox / show for one board. `collect` (a list) gathers rows across boards instead of printing."""
+    with snapshot(root) if a.sync else contextlib.nullcontext(root) as root:
+        events=read(root); all_threads=view.derive(events,view.now_utc())
+        if any(issue.unscoped for issue in events.invalid):
+            raise ValueError('unscoped invalid history: inbox/request state cannot be determined')
+        me={'agent':a.agent,'session_id':a.session}
+        threads={k:v for k,v in all_threads.items() if (v.get('workflow') or {}).get('waiting_on')==me or (v.get('workflow') or {}).get('errors')
+                 or (a.include_closed and v['closed'] and v.get('workflow') and view.participated(v,me))}
+        for p, why in view.history_warnings(events):
+            print(f'ℹ️ history {p.name}: {why}', file=sys.stderr if a.json else sys.stdout)
+        tag=(lambda row: dict(row,board=board_name)) if board_name else (lambda row: row)
+        if a.command == 'show':
+            found=[(pk,tid,t) for (pk,tid),t in all_threads.items()
+                   if (t.get('workflow') or {}).get('request_id') == a.request]
+            if collect is not None:
+                if len(found)==1: collect.append(tag(view.workflow_row(*found[0],reader=me)))
+                return
+            if len(found) != 1: raise ValueError('request not found or ambiguous: '+a.request)
+            pk,tid,t=found[0]; w=t['workflow']
+            if a.json:
+                print(json.dumps(view.workflow_row(pk,tid,t,reader=me),ensure_ascii=False,indent=2))
+            else:
+                print(f"{pk}/{tid} [{w['label']}] request={w['request_id']}")
+                print(w.get('title') or '')
+                print('\n'.join(view.handoff_lines(w)))
+                for err in w.get('errors',[]): print('🔴 '+err)
+                print(w.get('next_action') or 'この依頼は終了しています。')
+            return
+        if a.json:
+            rows=[tag(view.workflow_row(pk,tid,t,reader=me)) for (pk,tid),t in sorted(threads.items())]
+            if collect is not None: collect.extend(rows); return
+            print(json.dumps(rows,ensure_ascii=False,indent=2)); return
+        if board_name: print(f'== board {board_name}')
+        print(view.render(threads,events.invalid,surface=True,project=None,now=view.now_utc(),locked=False,board=board_name)
+            or 'このセッション宛ての対応待ちはありません。')
+        if a.include_closed:
+            for (pk,tid),t in sorted(threads.items()):
+                if t['closed']:
+                    print(f"✓ {pk}/{tid} [{t['workflow']['label']}] (対応不要)")
+                    print('\n'.join(view.handoff_lines(t['workflow'])))
+        # Progress of requests this session filed or is assigned to but that are waiting on someone else:
+        # not actionable, but the requester wants to see claims/submissions without reading history.
+        mine=[]
+        for (pk,tid),t in sorted(all_threads.items()):
+            w=t.get('workflow') or {}
+            if not w or w.get('waiting_on')==me or w.get('status') in {'accepted','abandoned'}: continue
+            if w.get('requester')==me or w.get('assignee')==me or w.get('reviewer')==me:
+                who=w.get('waiting_on') or {}
+                mine.append(f"⏳ {pk}/{tid} [{w.get('label')}] waiting on {who.get('agent')} / {who.get('session_id')} — {w.get('title') or ''}")
+        if mine: print('自分が関与する進行中 (対応は相手側):'); print('\n'.join(mine))
+
+
+def main():
+    ap=argparse.ArgumentParser(description=__doc__)
+    ap.add_argument('command',choices=sorted(KINDS|{'inbox','show','retry','sessions','watch','touch','untouch','touching','boards','init'}))
+    ap.add_argument('--root',type=Path,help='the board directory (holds board.json and events/)')
+    ap.add_argument('--board',help='a board in the workspace by name (`boards` lists them)')
+    ap.add_argument('--all-boards',action='store_true',help='inbox / show: every unlocked board in the workspace')
+    ap.add_argument('--workspace',type=Path,help='boards / --all-boards: the directory holding the checkouts (default: AGENT_BOARD_WORKSPACE, else the parent of the engine checkout)')
+    ap.add_argument('--audience',help='init: owner | collaborators'); ap.add_argument('--encryption',help='init: none | git-crypt')
+    ap.add_argument('--sources',help='init: comma-separated project keys whose collaborators read the board'); ap.add_argument('--branch',default='main',help='init: the branch posts go to')
+    ap.add_argument('--name',help='init: board name (default: the checkout, or the project for <project>/board)')
+    ap.add_argument('--agent',choices=['claude','codex','human','other'])
+    ap.add_argument('--session',help='stable task/session ID from the calling app; keep across compaction')
+    ap.add_argument('--session-name',help='human-readable session label')
+    ap.add_argument('--instance',help='optional host/surface metadata; not routing identity')
+    ap.add_argument('--source',type=Path)
+    ap.add_argument('--policy',choices=['ordinary','encrypted-metadata-only','no-post'])
+    ap.add_argument('--project'); ap.add_argument('--repo'); ap.add_argument('--thread',help='thread id; today:<slug> = <local yyyy-mm-dd>-<slug>')
+    ap.add_argument('--request'); ap.add_argument('--reply-to'); ap.add_argument('--event-id')
+    ap.add_argument('--to',choices=['claude','codex','human','other'])
+    ap.add_argument('--to-session'); ap.add_argument('--role',choices=['assignee','reviewer'])
+    ap.add_argument('--expect-model',help='request/handover: refuse to post when the addressed session\'s actual model (its transcript) is known and does not match this tier (fable/opus) or model-id substring')
+    ap.add_argument('--summary'); ap.add_argument('--acceptance')
+    ap.add_argument('--deliverable',action='append',default=[]); ap.add_argument('--reference',action='append',default=[])
+    ap.add_argument('--lease-hours',type=float,default=12)
+    ap.add_argument('--sync',action='store_true',help='read latest remote inbox in an isolated checkout')
+    ap.add_argument('--preview',action='store_true',help='validate and show the proposed event without posting')
+    ap.add_argument('--json',action='store_true',help='inbox: waiting rows; show: one request object; boards: the list; warnings go to stderr')
+    ap.add_argument('--include-closed',action='store_true',help='inbox: also show completed requests involving this exact session (not actionable)')
+    ap.add_argument('--interval',type=float,default=120,help='watch: seconds between synced reads')
+    ap.add_argument('--max-minutes',type=float,default=240,help='watch: give up after this long (exit 3)')
+    ap.add_argument('--since',help='watch: treat events after this event id as new (resume after a restart)')
+    ap.add_argument('--path',action='append',default=[],help='touch / untouch / touching: a file or directory below the workspace (repeatable; relative = from the workspace)')
+    ap.add_argument('--hours',type=float,default=12,help='touching: declarations older than this no longer hold a path (a session that died)')
+    ap.add_argument('--wait',action='store_true',help='touching --path: return only when no earlier session holds the paths (background)')
+    a=ap.parse_args()
+    if a.command=='boards': return cmd_boards(a)
+    if a.command=='init': return cmd_init(a,ap)
+    if not a.agent: ap.error('--agent is required')
+    if not a.session and a.agent=='codex': a.session=os.environ.get('CODEX_THREAD_ID')
+    if not a.session and a.agent=='claude': a.session=os.environ.get('CLAUDE_CODE_SESSION_ID')  # native UUID the harness exports (desktop + CLI)
+    if not a.session and a.command!='sessions': ap.error('--session requires the actual native session ID')
+    if a.thread and a.thread.startswith('today:'): a.thread=f"{view.dt.date.today():%Y-%m-%d}-{a.thread[6:]}"  # local date, any shell
+    if a.include_closed and a.command != 'inbox': ap.error('--include-closed is for inbox only')
+    if a.command == 'show' and not a.request: ap.error('show requires --request')
+    if a.all_boards:
+        if a.command not in {'inbox','show'}: ap.error('--all-boards is for inbox / show')
+        found=bc.discover(a.workspace)
+        for b in found:
+            if not b['config']: print(f"⚠️ board {b['name']} not read: {'locked' if b['locked'] else b['error']}",file=sys.stderr)
+        rows=[] if (a.json or a.command=='show') else None
+        for b in (b for b in found if b['config']): inbox_show(a,b['root'],board_name=b['name'],collect=rows)
+        if a.command=='show':
+            if len(rows)!=1: raise ValueError('request not found or ambiguous across boards: '+a.request)
+            if a.json: print(json.dumps(rows[0],ensure_ascii=False,indent=2))
+            else: print(f"board {rows[0]['board']}: rerun with --board {rows[0]['board']} for the full view")
+        elif a.json: print(json.dumps(rows,ensure_ascii=False,indent=2))
+        return
+    a.root=bc.resolve(a.root,a.board)
+    ws=touch_base(a.root)
+    if a.command == 'touching':
+        # Read-only. With --path the verdict covers the whole board (a file is one file whichever thread declared it);
+        # --project / --thread narrow only the listing. Exit 2 = an earlier session holds a path, 3 = --wait timed out.
+        me=(a.agent,a.session); labels={norm_touch(x,ws):x for x in a.path}; paths=list(labels); deadline=time.time()+a.max_minutes*60
+        while True:
+            with snapshot(a.root) if (a.sync or a.wait) else contextlib.nullcontext(a.root) as root:
+                events=read(root)
+            if paths:
+                lines,blocked=touch_verdict(touch_state(events,view.now_utc(),a.hours),me,paths,labels)
+                if blocked and a.wait:
+                    if time.time()+a.interval<=deadline: time.sleep(a.interval); continue
+                    print('\n'.join(lines)); print('touching: 時間切れ (先の session がまだ持っている)'); sys.exit(3)
+                print('\n'.join(lines)); sys.exit(2 if blocked else 0)
+            state=touch_state(events,view.now_utc(),a.hours,project=a.project,thread=a.thread)
+            for (agent,sid),st in sorted(state.items(),key=lambda kv: kv[1]['last']):
+                print(f"{st['name'] or '—'} ({agent}/{sid[:8]}) 最後の宣言 {st['last'][:16]}Z{' ← この session' if (agent,sid)==me else ''}")
+                if st.get('summary'): print(f"    「{st['summary'][:200]}」")
+                for p,(since,thr) in sorted(st['paths'].items()): print(f'    {p}  ({since[:16]}Z から、 {thr})')
+            if not state: print(f'いま file を宣言している session はありません (過去 {a.hours:g} 時間)。')
+            if a.thread:
+                # Everything the thread ever declared or cited, released or not: where a closing sweep finds the day's work.
+                notes=[e for e in events if e.get('kind')=='note' and e.get('thread_id')==a.thread and e.get('touches')
+                       and (not a.project or (e.get('project') or {}).get('key')==a.project)]
+                repos=sorted({p.split('/')[0] for e in notes for p in e['touches'] if p!=NONE_TOUCH and not p.startswith('h:')})
+                refs=list(dict.fromkeys(r for e in notes for r in e.get('references') or []))
+                if repos: print('この thread で宣言された repo: '+', '.join(repos))
+                if refs: print('この thread の touch / untouch が挙げた参照: '+', '.join(refs))
+            if not a.sync: print('(手元の写し。 最新は --sync)')
+            return
+    if a.command == 'watch':
+        # A post is a record, not a push: a session working on a request sees the other side's note,
+        # answer or review only when it reads again. Run this in the background after claim/request
+        # (Claude: Bash run_in_background) so the session is woken when the other side writes to the thread.
+        if not a.request: ap.error('watch requires --request')
+        me={'agent':a.agent,'session_id':a.session}; deadline=time.time()+a.max_minutes*60; key=None; seen=None
+        while True:
+            with snapshot(a.root) as root:
+                events=read(root)
+                if key is None:
+                    found=[k for k,t in view.derive(events,view.now_utc()).items()
+                           if (t.get('workflow') or {}).get('request_id')==a.request]
+                    if len(found)!=1: raise ValueError('request not found or ambiguous: '+a.request)
+                    key=found[0]
+                thread=[e for e in events if (e['project']['key'],e['thread_id'])==key]
+            ids=[e['event_id'] for e in thread]
+            if seen is None:
+                if a.since and a.since not in ids: raise ValueError('--since event not in this thread: '+a.since)
+                seen=set(ids[:ids.index(a.since)+1]) if a.since else set(ids)
+            new=[e for e in thread if e['event_id'] not in seen
+                 and {'agent':e['actor'].get('agent'),'session_id':e['actor'].get('session_id')}!=me]
+            if new:
+                for e in new:
+                    act=e['actor']
+                    print(f"📮 {key[0]}/{key[1]} {e.get('kind')} {e.get('created_at','')[:16]} from {act.get('agent')}/{act.get('session_id')}: {(e.get('summary') or '')[:600]}")
+                print(f"→ 読み直す: board.py show --root {a.root} --agent {a.agent} --session {a.session} --request {a.request} --sync"
+                      f" / 続きを見張る: board.py watch ... --since {new[-1]['event_id']}")
+                return
+            seen.update(ids)
+            if time.time()+a.interval>deadline: print('watch: 新しい書き込みなし (時間切れ)'); sys.exit(3)
+            time.sleep(a.interval)
+    if a.command=='sessions':
+        with snapshot(a.root) if a.sync else contextlib.nullcontext(a.root) as root:
+            events=read(root)
+            for p, why in events.invalid:
+                print(f'🔴 invalid history (address list may be incomplete): {p.name}: {why}')
+            for p, why in view.history_warnings(events):
+                print(f'⚠️ history {p.name}: {why}')
+            # Directory derived from history: who posted as whom, what they called themselves, where they were
+            # last seen, and what is waiting on them. Roles (resident-*/role-*) are stable addresses a human
+            # assigns to a session; native ids are ephemeral per session. Never a liveness registry.
+            seen={}
+            for e in events:
+                act=e.get('actor',{})
+                if act.get('session_id'):
+                    k=(act['agent'],act['session_id']); r=seen.setdefault(k,{'name':None,'instance':None,'last':None,'n':0,'projects':set()})
+                    r['n']+=1; r['last']=max(r['last'] or '',e.get('created_at','')); r['projects'].add((e.get('project') or {}).get('key'))
+                    if act.get('task') and act.get('task')!='workflow' and len(act['task'])<=80: r['name']=act['task']  # early writers stored the summary here
+                    if act.get('instance'): r['instance']=act['instance']
+                for x in [e.get('assignee',{}),e.get('target',{})]:
+                    if isinstance(x,dict) and x.get('session_id'): seen.setdefault((x['agent'],x['session_id']),{'name':None,'instance':None,'last':None,'n':0,'projects':set()})
+            threads=view.derive(events,view.now_utc()); waiting={}
+            for (pk,tid),t in threads.items():
+                w=(t.get('workflow') or {}).get('waiting_on')
+                if w: waiting.setdefault((w['agent'],w['session_id']),[]).append(f'{pk}/{tid}')
+            for (agent,sid),r in sorted(seen.items()):
+                kind='role' if sid.startswith(('resident-','role-')) else 'native'
+                print(f"{agent} / {sid}  [{kind}] name={r['name'] or '—'} instance={r['instance'] or '—'} last={(r['last'] or '—')[:16]} events={r['n']} projects={','.join(sorted(p for p in r['projects'] if p)) or '—'} waiting_on={len(waiting.get((agent,sid),[]))}")
+                for th in waiting.get((agent,sid),[]): print(f'    ↳ waiting: {th}')
+            print('Known session addresses from history; not a live-process registry. A session is reachable only if its id is known here or handed to you by the owner.')
+        return
+    if a.command in {'inbox', 'show'}:
+        inbox_show(a,a.root); return
+    # ---- posting
+    cfg=bc.load(a.root)
+    if cfg['audience']=='collaborators':
+        # A board for one project's collaborators: its project and checkout are the defaults, and the only choice.
+        if not a.policy: a.policy='ordinary'
+        if a.policy!='ordinary': bc.check_post(cfg,a.root,project=None,policy=a.policy)  # refuse before building anything
+        if not a.project and len(cfg['sources'])==1 and (a.command in {'request','touch','untouch'} or (a.command=='note' and not a.request)):
+            a.project=cfg['sources'][0]
+        if not a.source:
+            top=bc.toplevel(a.root); key=a.project or (cfg['sources'][0] if len(cfg['sources'])==1 else None)
+            if top and key and top.name==key: a.source=top
+    if not a.source and a.project and a.project!='restricted': a.source=ws/a.project  # project key = checkout basename in the workspace
+    if not a.source or not a.policy: ap.error('posting requires --source and --policy')
+    touch_cmd=a.command if a.command in {'touch','untouch'} else None
+    if touch_cmd and (a.policy!='ordinary' or a.request or not a.thread or not a.project):
+        ap.error(f'{touch_cmd} needs --policy ordinary, --project and --thread (no --request): paths are metadata, restricted posts carry none')
+    if a.command=='touch' and not a.path: ap.error('touch needs --path')
+    source_gate(a.source,a.policy) # before constructing an event or temporary files
+    outbox=outbox_dir(a.root)
+    if a.command=='retry':
+        if not a.event_id or not re.fullmatch(r'[a-zA-Z0-9-]+',a.event_id): ap.error('retry requires --event-id')
+        saved=outbox/(a.event_id+'.json')
+        ev=json.loads(saved.read_text())
+        if ev['source_policy']!=a.policy or ev['actor']['agent']!=a.agent or ev['actor']['session_id']!=a.session:
+            raise ValueError('retry identity/policy differs from saved event')
+        print('posted '+post(a.root,ev)); return
+    labels={}
+    with snapshot(a.root) as dest:
+        events=read(dest)
+        if touch_cmd:
+            # The note restates the session's whole set in this thread (touch adds, untouch removes; nothing left = `(none)`).
+            me=(a.agent,a.session); labels={norm_touch(x,ws):x for x in a.path}; want=list(labels)
+            cur=list(touch_state(events,view.now_utc(),a.hours,project=a.project,thread=a.thread).get(me,{'paths':{}})['paths'])
+            if touch_cmd=='touch':
+                new=cur+[p for p in want if p not in cur]; released=[]
+                a.summary=a.summary or ('触る: '+', '.join(want))[:1000]
+            else:
+                new=[p for p in cur if want and not any(touch_overlaps(p,w) for w in want)]; released=[p for p in cur if p not in new]
+                a.summary=a.summary or ('手放す: '+(', '.join(released) or '(なし)'))[:1000]
+            a.touch=new or [NONE_TOUCH]; a.command='note'
+        ev=event_from(a,events)
+        view.assert_writable(events, ev['project']['key'], ev['thread_id'], ev['event_id'])
+    # What the board's readers may see is checked before anything leaves this machine (owner boards pass).
+    bc.check_post(cfg,a.root,project=ev['project']['key'],policy=a.policy,
+        texts=[('--summary',ev.get('summary')),('--acceptance',ev.get('acceptance')),('--session-name',a.session_name)],
+        refs=[('--reference',r) for r in ev.get('references') or []]+[('--deliverable',d) for d in ev.get('deliverables') or []],
+        touches=[(t,labels.get(t,t)) for t in ev.get('touches') or [] if t!=NONE_TOUCH])
+    if cfg['audience']=='owner' and a.policy=='ordinary':
+        for b in bc.collaborator_boards_for(ev['project']['key'],ws):
+            print(f"ℹ️ {ev['project']['key']} には共同研究者も読む掲示板がある ({str(b['root']).replace(str(Path.home()),'~')})。"
+                  f" 共同研究者に見せる話なら --board {b['name']} で投稿する (この投稿は owner だけが読む)",file=sys.stderr)
+    if a.command in {'request','handover'}:
+        # The addressed session's model can only be matched to the work before sending (switching later costs
+        # the context and cache); a title tag is a recommendation, so read the transcript instead.
+        note=target_model_note(a.to_session,a.expect_model)
+        if note: print(note)
+    if a.preview:
+        from board_schema import errors
+        probs=errors(ev,json.loads(SCHEMA_PATH.read_text()))
+        from board_workflow import reduce_workflow
+        same=[e for e in events if e['project']['key']==ev['project']['key'] and e['thread_id']==ev['thread_id']]
+        probs+=reduce_workflow(same+[ev],view.now_utc())['errors']
+        if probs: raise ValueError('; '.join(probs))
+        print(json.dumps(ev,ensure_ascii=False,indent=2)); return
+    from board_schema import errors
+    probs=errors(ev,json.loads(SCHEMA_PATH.read_text()))
+    if probs: raise ValueError('; '.join(probs))
+    outbox.mkdir(parents=True,exist_ok=True,mode=0o700)
+    saved=outbox/(ev['event_id']+'.json')
+    with saved.open('x',encoding='utf-8') as f: json.dump(ev,f,ensure_ascii=False,indent=2)
+    saved.chmod(0o600)
+    print('event_id='+ev['event_id'],flush=True) # retain for ambiguous network outcomes
+    print('posted '+post(a.root,ev))
+    print('Local view is a snapshot; use inbox --sync to read the latest remote state.')
+    if touch_cmd:
+        # Read again after the post: two sessions that declared one file within seconds learn here who came first.
+        with snapshot(a.root) as root: events=read(root)
+        me=(a.agent,a.session); state=touch_state(events,view.now_utc(),a.hours)
+        if touch_cmd=='touch':
+            lines,blocked=touch_verdict(state,me,[p for p in ev['touches'] if p!=NONE_TOUCH],labels)
+            print('\n'.join(lines))
+            if blocked: sys.exit(2)
+            return
+        for p in released:
+            o=touch_owner(state,p)
+            if o and o['who']!=me:
+                print(f"→ {p} の次の持ち主 = {o['name'] or '—'} ({o['who'][0]}/{o['who'][1][:8]}): 生きていれば SendMessage で「手放した、 読み直してから書いてよい」 と 1 行")
+        if not [w for w in touch_state(events,view.now_utc(),a.hours,project=a.project,thread=a.thread) if w!=me]:
+            print(f'この thread ({a.project}/{a.thread}) で file を持つ session は他に居ない = 最後の 1 本。')
+        return
+    rid = ev['event_id'] if a.command=='request' else a.request
+    if rid and a.command in {'request','claim','submit','blocker','revise','update'}:
+        # A post is a record, not a push: the other side's reply reaches this session only if it reads again.
+        print(f"→ 相手の書き込みで起こされるように、 background で見張る (Claude = Bash の run_in_background):"
+              f" python3 {Path(__file__).resolve()} watch --root {a.root} --agent {a.agent} --session {a.session} --request {rid}")
+
+if __name__=='__main__':
+    try: main()
+    except (ValueError,OSError,subprocess.SubprocessError) as ex:
+        print('ERROR: '+str(ex),file=sys.stderr); sys.exit(1)
