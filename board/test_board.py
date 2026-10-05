@@ -774,6 +774,17 @@ class CollaboratorBoards(unittest.TestCase):
         t=self.cli('touch','--root',b,'--agent','claude','--session','c-1','--thread','2026-10-05-wrap','--path','private-notes/plan.md',check=False)
         self.assertNotEqual(t.returncode,0); self.assertIn('not a source',t.stderr)
 
+    def test_readable_checkouts_may_be_named_but_not_posted_from_or_touched(self):
+        import board_config as bc
+        cfg=bc.validate({'board_format':1,'audience':'collaborators','encryption':'none','sources':['proj'],'readable':['private-notes']})
+        bc.check_post(cfg,self.proj/'board',project='proj',policy='ordinary',
+                      texts=[('--summary','see private-notes/plan.md')],refs=[('--reference','private-notes/plan.md')])
+        with self.assertRaisesRegex(ValueError,'not a source'):
+            bc.check_post(cfg,self.proj/'board',project='proj',policy='ordinary',touches=[('private-notes/plan.md','private-notes/plan.md')])
+        with self.assertRaisesRegex(ValueError,'not a source'):
+            bc.check_post(cfg,self.proj/'board',project='private-notes',policy='ordinary')
+        with self.assertRaises(ValueError): bc.validate({'board_format':1,'audience':'owner','encryption':'none','readable':['x']})
+
     def test_owner_post_points_to_the_collaborator_board_and_views_merge(self):
         o=str(self.owner)
         p=self.cli('note','--root',o,'--agent','claude','--session','c-1','--policy','ordinary','--project','proj','--source',str(self.proj),

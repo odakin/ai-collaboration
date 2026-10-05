@@ -7,12 +7,14 @@ exactly the members of that repository: Git's read boundary is the repository, s
 board.json (format 1):
 
     {"board_format": 1, "audience": "owner" | "collaborators", "encryption": "git-crypt" | "none",
-     "branch": "main", "sources": ["<project key>", ...], "name": "...", "labels": {"codex": "..."},
-     "description": "..."}
+     "branch": "main", "sources": ["<project key>", ...], "readable": ["<checkout>", ...], "name": "...",
+     "labels": {"codex": "..."}, "description": "..."}
 
 - `audience: owner` — only the owner reads it; any source may post (still subject to source classification).
 - `audience: collaborators` — the collaborators of the listed `sources` read it. Only those projects may post,
   only `ordinary` posts, and no path, link or summary may name a checkout outside them (`check_post`).
+  `readable` lists further checkouts its readers can see anyway (public repositories): naming them passes,
+  posting from them or touching their files does not.
 - `encryption: git-crypt` — every event blob must be ciphertext before push; `none` — the repository's private
   visibility is the only boundary.
 """
@@ -30,7 +32,7 @@ CONFIG = 'board.json'
 GITCRYPT_MAGIC = b'\x00GITCRYPT'
 AUDIENCES = {'owner', 'collaborators'}
 ENCRYPTIONS = {'git-crypt', 'none'}
-FIELDS = {'board_format', 'name', 'audience', 'encryption', 'branch', 'sources', 'labels', 'description'}
+FIELDS = {'board_format', 'name', 'audience', 'encryption', 'branch', 'sources', 'readable', 'labels', 'description'}
 KEY_RE = re.compile(r'[a-z0-9][a-z0-9-]{1,63}')
 
 
@@ -90,6 +92,11 @@ def validate(cfg: dict) -> dict:
             problems.append('a collaborators board lists its project keys in sources (non-empty)')
     elif sources is not None:
         problems.append('an owner board takes any source; omit sources')
+    readable = cfg.get('readable', [])
+    if not isinstance(readable, list) or not all(isinstance(s, str) and s and '/' not in s for s in readable):
+        problems.append('readable is a list of checkout names')
+    elif readable and cfg.get('audience') != 'collaborators':
+        problems.append('readable is for collaborators boards')
     if not isinstance(cfg.get('branch', 'main'), str): problems.append('branch must be a string')
     if not isinstance(cfg.get('labels', {}), dict): problems.append('labels must be an object')
     if problems:
@@ -198,7 +205,8 @@ class Gate:
         self.cfg, self.root = cfg, Path(root)
         self.ws = workspace(root)
         top = toplevel(root)
-        self.allowed = set(cfg.get('sources') or []) | ({top.name} if top else set())
+        self.sources = set(cfg.get('sources') or []) | ({top.name} if top else set())
+        self.allowed = self.sources | set(cfg.get('readable') or [])   # may be named; only sources post or touch
         self.roots = [Path(os.path.realpath(self.ws / s)) for s in self.allowed]
         try:
             siblings = [d for d in self.ws.iterdir() if d.is_dir() and (d / '.git').exists()]
@@ -248,8 +256,8 @@ class Gate:
         if token.startswith('h:'):
             return
         first = token.split('/', 1)[0]
-        if first not in self.allowed:
-            raise ValueError(f'{typed}: {first} is not a source of this board ({", ".join(sorted(self.allowed))}); declare it on a board its readers may see')
+        if first not in self.sources:
+            raise ValueError(f'{typed}: {first} is not a source of this board ({", ".join(sorted(self.sources))}); declare it on a board its readers may see')
 
 
 def check_post(cfg, root, *, project, policy, texts=(), refs=(), touches=()):
