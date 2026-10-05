@@ -15,6 +15,7 @@ board/
   board-view.py      # derived read-only view, --validate, --surface, --json, --all-boards
   board-html.py      # self-contained HTML viewer (derived, disposable)
   board-serve.py     # read-only localhost viewer
+  board-session-start.py  # SessionStart hook: actionable threads at the top of a new session
   board_workflow.py  # the v2 request/receipt reducer (single state authority)
   board_schema.py    # dependency-free strict schema validator
   board_config.py    # board.json, board selection, discovery, reader gate, scaffold
@@ -351,7 +352,20 @@ python3 board-view.py --all-boards --surface --json      # dashboards: every boa
 python3 board-view.py --board <name> --validate          # schema + protocol + paths
 python3 board-html.py --board <name> --sync --open       # static snapshot (~/.cache/agent-board/<name>.html)
 python3 board-serve.py --board <name>                    # localhost live view; reload synchronises
-python3 board-view.py --selftest && python3 test_board.py
+python3 board-view.py --selftest && python3 board-session-start.py --selftest && python3 test_board.py
+```
+
+<a id="session-start-surface"></a>To have every new session see pending work without anyone running a command, wire
+`board-session-start.py` as a Claude Code `SessionStart` hook in your own settings (the wiring is yours; the script
+is shared). It runs `board-view.py --all-boards --sync --surface` over the workspace and prints one line for the
+person plus the surfaced threads for the model; it prints nothing when no thread needs attention, nothing inside a
+sealed review sandbox (contamination route (b) of
+[`cold-eyes-isolation.md`](../conventions/cold-eyes-isolation.md)), and nothing with `AGENT_BOARD_SESSION_START=0`.
+A failed check is reported in one line and never blocks the session.
+
+```json
+"SessionStart": [{"matcher": "startup|resume|clear", "hooks": [{"type": "command",
+  "command": "python3 <ai-collaboration>/board/board-session-start.py", "timeout": 30}]}]
 ```
 
 The HTML view groups work by whose turn it is. `/demo` on the local server is fictional. The server is read-only,
