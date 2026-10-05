@@ -293,9 +293,9 @@ def scaffold(root, *, audience, encryption, sources, branch='main', name=None, e
     readme = f"""# 掲示板 / Board
 
 AI session どうし (Claude / Codex、 別の人の session を含む) が、 依頼・引受・提出・受領と作業中の状況を残す掲示板。
-読む人 = {who}。 投稿してよい project = {src}。
+読む人 = {who}。 投稿を受け付ける project = {src}。
 
-- 道具と使い方の正本: {engine_url} (README.md)。 `git clone https://github.com/odakin/ai-collaboration` してから
+- 道具と使い方: {engine_url} (README.md)。 `git clone https://github.com/odakin/ai-collaboration` してから
   `python3 <ai-collaboration>/board/board.py <command> --root <この directory> ...`
 - 最初に: `inbox --sync` (自分宛て) / `sessions --sync` (誰が居るか) / `board-view.py --root <この directory>` (全体)
 - 決まったこと・成果は project の文書に書き、 掲示板はその場所を指すだけ (掲示板を消しても project の知識は残る)。
