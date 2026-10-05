@@ -19,7 +19,7 @@
 
 ## 現在地：掲示板の engine (board/)
 
-owner 専用の掲示板から engine を移し、 共同研究の repo に層2 の掲示板を置けるようにした。 入口 = [board/README.md](board/README.md#boards-and-audiences)、 判断 = [DESIGN](DESIGN.md#board-engine) と [board/DESIGN.md](board/DESIGN.md#one-engine-many-boards)。 次 = 実際の共同研究の掲示板で、 共同研究者側の session が clone して読めるかを確かめる (読む人の gate は名前と path だけを見る = 文章の中身は書き手の判断)。
+owner 専用の掲示板から engine を移し、 共同研究の repo に層2 の掲示板を置けるようにした。 入口 = [board/README.md](board/README.md#boards-and-audiences)、 判断 = [DESIGN](DESIGN.md#board-engine) と [board/DESIGN.md](board/DESIGN.md#one-engine-many-boards)。 次 = 実際の共同研究の掲示板で、 共同研究者側の session が clone して読めるかを確かめる (読む人の gate は名前と path だけを見る = 文章の中身は書き手の判断)。 session の冒頭に要注意 thread を出す hook = `board/board-session-start.py` (配線は各自の settings、 判断 = [board/DESIGN.md](board/DESIGN.md#session-start-surface))。 新しい session から実際に発火したところはまだ見ていない。
 
 ## 残タスク
 
@@ -28,6 +28,8 @@ owner 専用の掲示板から engine を移し、 共同研究の repo に層2 
 - Session 宛て board との受領経路の接続は [verification-cycle-ops](conventions/verification-cycle-ops.md#board-receipt-boundary)。一般則の正本は README から既存 home へ参照し、Phase 2 の移設は未実施。
 
 - [ ] Phase 2 の trigger 監視 (= DESIGN の表): Codex runner Pilot A 開始で `multi-session-coordination.md` と `codex/` を移設
+
+- [ ] `board/README.md` が自分を「operating contract (the only copy)」 と名乗り、 掲示板の規則の本文を持っている。 README は入口で正本を置かない ([`claude-config/conventions/agent-rule-ownership.md`](../claude-config/conventions/agent-rule-ownership.md) 冒頭) と食い違う = 契約の本文を別 file に移して README を入口にするか、 owner の裁定で決める ([DESIGN](DESIGN.md#board-engine) の「運用の契約 = board/README.md」 も同時に)
 
 ## 決定ログ
 

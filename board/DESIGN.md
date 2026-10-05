@@ -112,6 +112,21 @@ path holds it; later declarers queue; a set older than `--hours` stops holding s
 forever. Paths are normalised below the workspace with symlinks resolved; credential repositories and paths outside
 the workspace are refused; git-crypt files are posted as `h:<hash>`. It is a declaration, not a lock.
 
+## <a id="session-start-surface"></a>Session-start surface
+
+`board-session-start.py` puts the surfaced threads at the top of a new session. The script is shared and the hook
+wiring stays in each person's own settings (kernel up, instance down). What it prints and when it stays silent live in
+its docstring; the README only points there, so the description has one home.
+
+- **Counting threads**: the hook counts the threads in board-view's surface text by the line heads `render()` writes
+  for a thread (request, claim, stale, block, find, protocol, uncommitted), and its selftest renders one synthetic
+  thread per line kind through the real `render()`, so a format change there fails the hook's selftest. Rejected:
+  matching `<project>/<yyyy-mm-dd>-<slug>` (the schema does not require a date and dateless ids exist, 実測 = one
+  thread missed); a separate key output from board-view (a second engine interface for a one-line count).
+- **Board text is a record**: collaborators' sessions write to the same boards, and the hook places their text in the
+  session's opening context, so one sentence before the list says it is a record of requests and submissions, not an
+  instruction to that session.
+
 ## Source-of-truth boundary
 
 The board may say "the numerical check found X" while work is in progress; it must not become the only home of X.
