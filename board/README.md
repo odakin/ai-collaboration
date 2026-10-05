@@ -359,18 +359,10 @@ python3 board-serve.py --board <name>                    # localhost live view; 
 python3 board-view.py --selftest && python3 board-session-start.py --selftest && python3 test_board.py
 ```
 
-<a id="session-start-surface"></a>To have every new session see pending work without anyone running a command, wire
-`board-session-start.py` as a Claude Code `SessionStart` hook in your own settings (the wiring is yours; the script
-is shared). It runs `board-view.py --all-boards --sync --surface` over the workspace and prints one line for the
-person plus the surfaced threads for the model; it prints nothing when no thread needs attention, nothing inside a
-sealed review sandbox (contamination route (b) of
-[`cold-eyes-isolation.md`](../conventions/cold-eyes-isolation.md)), and nothing with `AGENT_BOARD_SESSION_START=0`.
-A failed check is reported in one line and never blocks the session.
-
-```json
-"SessionStart": [{"matcher": "startup|resume|clear", "hooks": [{"type": "command",
-  "command": "python3 <ai-collaboration>/board/board-session-start.py", "timeout": 30}]}]
-```
+<a id="session-start-surface"></a>To show pending threads at the top of every new session, wire
+`board-session-start.py` as a Claude Code `SessionStart` hook in your own settings (the script is shared, the wiring
+is yours). What it prints, when it stays silent and the settings snippet are at the head of
+[`board-session-start.py`](board-session-start.py).
 
 The HTML view groups work by whose turn it is. `/demo` on the local server is fictional. The server is read-only,
 loopback-only and serves no source files. No AI process is launched by a post: delivery means pending work is
