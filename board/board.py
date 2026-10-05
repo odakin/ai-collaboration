@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Board CLI: one-command request/claim/submit/accept, note, touch, addressed inbox (--json for runners), boards, init. See README.md."""
+"""Board CLI: one-command request/claim/submit/accept, note, touch, addressed inbox (--json for runners), boards, init. See CONTRACT.md."""
 from __future__ import annotations
 import argparse
 import contextlib

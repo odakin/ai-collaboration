@@ -2,7 +2,7 @@
 """board-view.py — 掲示板の派生 view (read-only) + event 検証 + 投稿 template.
 
 **ローカル read-only 実装** (投稿は board.py)。 v2 は session ID 宛ての依頼・提出・受領、
-v1 は従来の peer-status。 手順は README.md。 どの掲示板か = --root / --board / --all-boards / AGENT_BOARD_ROOT。
+v1 は従来の peer-status。 手順は CONTRACT.md。 どの掲示板か = --root / --board / --all-boards / AGENT_BOARD_ROOT。
 
 ## 述語 (= thread の現在状態の導出)
 

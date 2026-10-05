@@ -1,6 +1,6 @@
 # Board engine design
 
-Why the engine looks like this. The operating contract is [README.md](README.md); the general principles are
+Why the engine looks like this. The operating contract is [CONTRACT.md](CONTRACT.md) (the [README](README.md) is the entry point); the general principles are
 layer-1 [`multi-session-coordination.md §13`](../../claude-config/conventions/multi-session-coordination.md#git-immutable-event-board).
 
 ## Storage model
@@ -116,7 +116,7 @@ the workspace are refused; git-crypt files are posted as `h:<hash>`. It is a dec
 
 `board-session-start.py` puts the surfaced threads at the top of a new session. The script is shared and the hook
 wiring stays in each person's own settings (kernel up, instance down). What it prints and when it stays silent live in
-its docstring; the README only points there, so the description has one home.
+its docstring; the contract only points there, so the description has one home.
 
 - **Counting threads**: the hook counts the threads in board-view's surface text by the line heads `render()` writes
   for a thread (request, claim, stale, block, find, protocol, uncommitted), and its selftest renders one synthetic
