@@ -32,7 +32,7 @@
 
 **判断**: Git immutable-event 掲示板の実装 (CLI・reducer・schema・viewer・test) を owner 専用の暗号化 repo から [`board/`](board/) に移し、 掲示板 1 枚 = 「どこかの repo の中の `board.json` + `events/`」 にした。 読む人の範囲 (`owner` / `collaborators`)・暗号化・投稿してよい project は各掲示板の `board.json` が持つ。
 **Why**: 共同研究の repo で、 共同研究者側の AI session が掲示板を読めず、 引き継ぎが project 内の note に落ちた (実測)。 engine が層3 にある限り層2 の掲示板は作れない (依存先の観客 ⊇ 自分の観客)。 共同研究ごとに掲示板を増やすので、 engine の写しを各 repo に置くと drift する。
-**形**: 正本 = `board/README.md` (運用の契約) + `board/DESIGN.md` (判断)。 層2 の掲示板は共同研究の repo の `board/` に置くのが既定 (読む人 = repo の member、 招待不要)、 履歴を分けたいときは同じ member の companion repo。 owner の掲示板は旧 path の forwarder と `board.json` だけを持ち、 契約は本 repo を指す。 一般則 (主体は session・提出と受領を分ける) は claude-config `multi-session-coordination.md §13` のまま (Phase 2 の表の行は不変)。
+**形**: 運用の契約 = `board/README.md` (この道具を使う人の入口、 写しを作らない) + 判断 = `board/DESIGN.md`。 層2 の掲示板は共同研究の repo の `board/` に置くのが既定 (読む人 = repo の member、 招待不要)、 履歴を分けたいときは同じ member の companion repo。 owner の掲示板は旧 path の forwarder と `board.json` だけを持ち、 契約は本 repo を指す。 一般則 (主体は session・提出と受領を分ける) は claude-config `multi-session-coordination.md §13` のまま (Phase 2 の表の行は不変)。
 **代替案**: 層2 用に別の engine を作る → 二重実装 / engine を各掲示板に vendoring → drift / 1 repo に全員を入れて thread ごとに隠す → Git の読み取り境界は repo なので不可。
 
 ## Phase 2 (trigger 付き、speculative 実行禁止)
