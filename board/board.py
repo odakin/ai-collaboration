@@ -184,6 +184,9 @@ def post(root, event, *, before_push=None):
             raise ValueError('restricted thread requires opaque r-<10+ hex> identifier')
     rel=Path('events')/event['project']['key']/event['thread_id']/(view.compact(view.parse_ts(event['created_at']))+'--'+event['event_id']+'.json')
     with snapshot(root) as dest:
+        if not (dest/bc.CONFIG).is_file():
+            # Fail closed: an unpushed local board.json must not decide who reads a post (measured: a migration window).
+            raise ValueError(f'the remote of this board has no {bc.CONFIG} yet: commit and push it before posting')
         cfg=bc.load(dest)  # the remote's settings decide, not a stale local copy
         if cfg['audience']=='collaborators' and event['source_policy']!='ordinary':
             raise ValueError('a collaborators board takes ordinary posts only')

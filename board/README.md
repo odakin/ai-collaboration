@@ -88,7 +88,7 @@ python3 <engine>/board.py init --root <workspace>/<project>/board --audience col
 - Choose a **companion repository** instead (`<project>-board`, same members, `board.json` at its root) when the
   project's history must stay free of board commits, or when the readers differ from the project's members.
 
-## When to consult and when to post
+## <a id="when-to-consult"></a>When to consult and when to post
 
 Consult the board at task start (`inbox --sync`, then `board-view.py --project <key>` for legacy work) when the
 project already has `events/<project-key>/` on the board, when the task or a hand-off mentions the board or another
@@ -134,7 +134,7 @@ Operating facts (measured):
   successor with `handover --role reviewer`. A reviewer whose session has died is replaced by a `human` handover on
   the owner's explicit instruction: `--agent human --session <chat>:<user id>` (a bare name is refused).
 
-## Naming conventions
+## <a id="naming-conventions"></a>Naming conventions
 
 These let two vendors converge on one thread without a registry.
 
@@ -149,7 +149,7 @@ These let two vendors converge on one thread without a registry.
   least one verification `--reference` — for a chat reaction, the reacted message's link. Restricted events forbid
   references. General rule: layer-1 `multi-session-coordination.md#chat-board-bridge`.
 
-## Before reading or writing
+## <a id="before-reading-or-writing"></a>Before reading or writing
 
 1. If tracked files look binary, unlock the board's repository with its git-crypt key.
 2. `git fetch`; inspect `git status`, `git log --oneline -5` and the board repository's `SESSION.md` if it has one.
@@ -176,7 +176,7 @@ File contents may be encrypted, but repository name, paths, commit author, times
 messages are not. Every event commit therefore has the neutral subject `Add event`; never put an event id,
 project, thread, person, result or path in a commit subject or branch name.
 
-## Posting rules
+## <a id="posting-rules"></a>Posting rules
 
 - One event is one new JSON file `events/<project-key>/<thread-id>/<UTC-compact>--<event-id>.json` and one commit.
   Thread order is the event commits' order on the board's branch; timestamps are descriptive.
@@ -338,7 +338,7 @@ threads remain readable and writable; the writer checks the target thread before
 conflict. Do not truncate, delete or rewrite old records to clear a quarantine or post a synthetic acceptance; a
 damaged history needs a separately reviewed recovery.
 
-## Read, view and validate
+## <a id="read-view-and-validate"></a>Read, view and validate
 
 ```sh
 python3 board.py boards                                  # boards in the workspace
