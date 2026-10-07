@@ -232,6 +232,55 @@ def post(root, event, *, before_push=None):
         raise ValueError('posting failed after three attempts; use retry with the saved --event-id')
 
 
+def _session_model():
+    """Optional companion tool (layer-1 claude-config, cloned next to this engine). Raises when it is absent."""
+    lib=ENGINE.parent.parent/'claude-config'/'scripts'/'lib'/'session_model.py'
+    spec=importlib.util.spec_from_file_location('session_model',lib); sm=importlib.util.module_from_spec(spec); spec.loader.exec_module(sm)
+    return sm
+
+
+def live_address(agent, session, events):
+    """SendMessage address (`uds:<socket>`) of a Claude session that is alive on this machine, or ''.
+
+    Read from the harness's live registry of every config dir (companion `session_model.live_address`): a session
+    started with another config dir (an account-pinned Remote Control server, i.e. a session started from a phone)
+    is often not listed by ListAgents and not reachable by name, but its socket address reaches it across config
+    dirs and accounts on one machine (measured). A role id resolves through the native id prefix that the acting
+    session put in its name when it claimed (worker hand-off text: '<native id, 8 chars> (<model>)').
+    Never raises; '' when unknown, another vendor, or another machine.
+    """
+    if agent!='claude' or not session: return ''
+    sid=session
+    if session.startswith(('role-','resident-')):
+        names=[(e.get('actor') or {}).get('task') or '' for e in events
+               if (e.get('actor') or {}).get('agent')==agent and (e.get('actor') or {}).get('session_id')==session]
+        prefix=next((n[:8] for n in reversed(names) if re.match(r'[0-9a-f]{8}(?![0-9a-z])',n)),None)
+        if not prefix: return ''
+        sid=prefix
+    try:
+        hit=_session_model().live_address(sid)
+    except Exception:
+        return ''
+    return (hit or {}).get('address') or ''
+
+
+def counterpart_note(me, ev, events):
+    """After a post: one line naming the SendMessage address of the session that must act next, when it is alive on
+    this machine (post-then-push, CONTRACT#post-then-push). None otherwise. Never raises."""
+    try:
+        from board_workflow import reduce_workflow
+        same=[e for e in events if e['project']['key']==ev['project']['key'] and e['thread_id']==ev['thread_id']]
+        w=reduce_workflow(same+[ev],view.now_utc()).get('waiting_on')
+        if not w or (w.get('agent'),w.get('session_id'))==me: return None
+        addr=live_address(w.get('agent'),w.get('session_id'),same+[ev])
+        if not addr: return None
+        who=f"{w['agent']}/{w['session_id'] if w['session_id'].startswith(('role-','resident-')) else w['session_id'][:8]}"
+        return (f"→ 次に動く {who} はこの機械で生きている: SendMessage の to = {addr} で thread id と書いた中身を 1 行"
+                " (名前で届かない別の設定フォルダ・別アカウントの session にもこの宛先なら届く)")
+    except Exception:
+        return None
+
+
 def target_model_note(to_session, expect=None):
     """One line about the model the addressed session actually runs on, read before posting (never after).
 
@@ -244,10 +293,8 @@ def target_model_note(to_session, expect=None):
     if not to_session: return None
     if to_session.startswith(('role-','resident-')):
         return f"宛先 {to_session} は役割 id = 開く session の model は成り行き (chip の tag は推奨、 起票元と同じ model が既定)。 仕事の難しさに合う model で開くよう文面に書く。"
-    # Optional companion tool (layer-1 claude-config, cloned next to this engine); absent = the model is unknown.
-    lib=ENGINE.parent.parent/'claude-config'/'scripts'/'lib'/'session_model.py'
     try:
-        spec=importlib.util.spec_from_file_location('session_model',lib); sm=importlib.util.module_from_spec(spec); spec.loader.exec_module(sm)
+        sm=_session_model()
         rows=[sm.describe(s) for s in sm.resolve(to_session)]
     except Exception:
         rows=[]
@@ -652,6 +699,9 @@ def main():
         # A post is a record, not a push: the other side's reply reaches this session only if it reads again.
         print(f"→ 相手の書き込みで起こされるように、 background で見張る (Claude = Bash の run_in_background):"
               f" python3 {Path(__file__).resolve()} watch --root {a.root} --agent {a.agent} --session {a.session} --request {rid}")
+    if a.command in {'request','claim','submit','blocker','revise','update','handover','release','abandoned'}:
+        note=counterpart_note((a.agent,a.session),ev,events)
+        if note: print(note)
 
 if __name__=='__main__':
     try: main()

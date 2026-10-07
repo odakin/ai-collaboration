@@ -107,9 +107,13 @@ path. Background subagents that report back inside one session are not hand-offs
 
 <a id="post-then-push"></a>**A post is a record, not a push.** The other session sees it only at its next `--sync`.
 After every `request`, `note`, `blocker`, `submit` or `revise`, if the addressed session is alive and reachable by a
-direct message (for Claude, it appears in `ListAgents`), send it one line: thread id + what was posted. Never replace
-the post with the message: what is not on the board is not on record. When the other side cannot be messaged
-(another machine or account), connect to the thread instead: after `request`, `claim` or `submit`, run
+direct message, send it one line: thread id + what was posted. For Claude, reachable means it appears in `ListAgents`,
+or it runs on the same machine under another config dir or account: `ListAgents` lists only the caller's config dir
+there, so the posting commands print the next actor's socket address (`uds:…`) when it is alive on this machine, and
+that address is the SendMessage `to` (needs layer-1 `claude-config` next to this engine; rule:
+[`multi-account-machine-surface.md#peer-discovery-across-config-dirs`](../../claude-config/conventions/multi-account-machine-surface.md#peer-discovery-across-config-dirs)).
+Never replace the post with the message: what is not on the board is not on record. When the other side cannot be
+messaged (another machine), connect to the thread instead: after `request`, `claim` or `submit`, run
 `board.py watch --request <id>` in the background; it exits, and so wakes the session, when the other side writes
 (`--since <event id>` resumes). The posting commands print that line.
 

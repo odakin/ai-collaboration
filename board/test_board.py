@@ -64,6 +64,39 @@ class TargetModel(unittest.TestCase):
             td.cleanup()
 
 
+class CounterpartAddress(unittest.TestCase):
+    """After a post, the session that must act next gets a SendMessage address when it is alive on this machine,
+    whatever config dir it registered in (a session started through an account-pinned server is not reachable by name)."""
+    def test_reviewer_and_role_resolve_to_socket_address(self):
+        import os
+        if not (board.ENGINE.parent.parent/'claude-config'/'scripts'/'lib'/'session_model.py').is_file():
+            self.skipTest('layer-1 session_model.py not installed')
+        td=tempfile.TemporaryDirectory(); root=Path(td.name); (root/'sessions').mkdir()
+        pid=os.getpid()
+        (root/'sessions'/'1.json').write_text(json.dumps({'pid':pid,'sessionId':'claude-session-001','cwd':'/w/p','messagingSocketPath':'/tmp/cc-socks/41.sock'}))
+        (root/'sessions'/'2.json').write_text(json.dumps({'pid':pid,'sessionId':'0123abcd-0000-4000-8000-000000000002','cwd':'/w/p','messagingSocketPath':'/tmp/cc-socks/42.sock'}))
+        saved=os.environ.get('CLAUDE_SESSIONS_DIR'); os.environ['CLAUDE_SESSIONS_DIR']=str(root/'sessions')
+        try:
+            r,c,sub=chain()
+            note=board.counterpart_note(('codex','codex-session-001'),sub,[r,c])
+            self.assertIn('uds:/tmp/cc-socks/41.sock',note)                         # submit → the reviewer
+            self.assertIsNone(board.counterpart_note(('claude','claude-session-001'),sub,[r,c]))   # never yourself
+            self.assertIsNone(board.counterpart_note(('claude','claude-session-001'),c,[r]))      # claim waits on the codex claimant
+            # a role id resolves through the native id prefix the acting session named itself with when it claimed
+            r2=event('request',10,thread='2026-09-06-role'); r2['assignee']={'agent':'claude','session_id':'role-example-x'}
+            c2=event('claim',11,agent='claude',thread='2026-09-06-role'); c2['actor']['session_id']='role-example-x'
+            c2['actor']['task']='0123abcd (opus-5-5)'; c2['request_id']=r2['request_id']
+            self.assertEqual(board.live_address('claude','role-example-x',[r2,c2]),'uds:/tmp/cc-socks/42.sock')
+            self.assertEqual(board.live_address('claude','role-example-y',[r2,c2]),'')  # no named claim yet → unknown
+            self.assertEqual(board.live_address('codex','codex-session-001',[]),'')     # another vendor → unknown
+            (root/'sessions'/'1.json').write_text(json.dumps({'pid':2**30,'sessionId':'claude-session-001','messagingSocketPath':'/tmp/cc-socks/41.sock'}))
+            self.assertIsNone(board.counterpart_note(('codex','codex-session-001'),sub,[r,c]))  # not alive → nothing
+        finally:
+            if saved is None: os.environ.pop('CLAUDE_SESSIONS_DIR',None)
+            else: os.environ['CLAUDE_SESSIONS_DIR']=saved
+            td.cleanup()
+
+
 class Workflow(unittest.TestCase):
     def state(self,events,now=None): return reduce_workflow(events,now or NOW+dt.timedelta(seconds=30))
     def test_delivery_receipt_and_revision(self):
