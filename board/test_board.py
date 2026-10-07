@@ -97,6 +97,68 @@ class CounterpartAddress(unittest.TestCase):
             td.cleanup()
 
 
+class CodexCounterpart(unittest.TestCase):
+    """A Codex thread has no SendMessage: after a post the poster gets the `codex queue` command for the Codex thread
+    that must act next (alive = its writer lock is held open), and a Codex poster is not told to SendMessage."""
+    TID='01a00000-0000-7000-8000-0000000000aa'
+    def setUp(self):
+        import os, sqlite3
+        if not (board.ENGINE.parent.parent/'claude-config'/'scripts'/'lib'/'codex_threads.py').is_file():
+            self.skipTest('layer-1 codex_threads.py not installed')
+        self.td=tempfile.TemporaryDirectory(); home=Path(self.td.name)
+        (home/'thread-writer-locks').mkdir(); self.lock=home/'thread-writer-locks'/f'{self.TID}.lock'; self.lock.write_text('')
+        db=sqlite3.connect(home/'state_5.sqlite')
+        db.execute('CREATE TABLE threads (id TEXT, cwd TEXT, title TEXT, model TEXT, reasoning_effort TEXT, source TEXT, updated_at INTEGER, archived INTEGER)')
+        db.execute('INSERT INTO threads VALUES (?,?,?,?,?,?,?,?)',(self.TID,'/w/p','fixture','codex-model-x','high','vscode',1,0)); db.commit(); db.close()
+        exe=home/'codex'; exe.write_text('#!/bin/sh\n'); exe.chmod(0o755)
+        self.saved={k:os.environ.get(k) for k in ('CODEX_HOME','CODEX_CLI_PATH','CLAUDE_SESSIONS_DIR')}
+        os.environ['CODEX_HOME']=str(home); os.environ['CODEX_CLI_PATH']=str(exe)
+        os.environ['CLAUDE_SESSIONS_DIR']=str(home/'no-claude-sessions')
+    def tearDown(self):
+        import os
+        for k,v in self.saved.items():
+            if v is None: os.environ.pop(k,None)
+            else: os.environ[k]=v
+        self.td.cleanup()
+    def request_to(self, session):
+        r=event('request',0); r['assignee']={'agent':'codex','session_id':session}; return r
+    def test_queue_command_for_the_codex_thread(self):
+        r=self.request_to(self.TID)
+        note=board.counterpart_note(('claude','claude-session-001'),r,[])
+        self.assertIn(f'queue --thread {self.TID}',note); self.assertIn('今は開いていない',note)   # lock not held
+        self.assertIn('--sync',note)                                                               # the line says how to read
+        with open(self.lock):                                                                      # a client holds the lock
+            if board._codex_threads().held_lock_ids() is None: self.skipTest('lsof unavailable')
+            self.assertIn('生きている',board.counterpart_note(('claude','claude-session-001'),r,[]))
+    def test_role_resolves_through_the_claimant_name(self):
+        r=self.request_to('role-example-codex'); c=event('claim',1); c['actor']['session_id']='role-example-codex'
+        c['actor']['task']=self.TID[:8]+' (codex-model-x)'; c['request_id']=r['request_id']
+        blk=event('blocker',2,reply=c); blk['actor']['session_id']='role-example-codex'
+        ans=event('update',3,agent='claude',reply=blk)
+        note=board.counterpart_note(('claude','claude-session-001'),ans,[r,c,blk])
+        self.assertIn(f'queue --thread {self.TID}',note); self.assertIn('--session role-example-codex',note)
+    def test_unknown_thread_is_silent(self):
+        r=self.request_to('01a00000-0000-7000-8000-0000000000bb')   # not in this machine's state, no lock
+        self.assertIsNone(board.counterpart_note(('claude','claude-session-001'),r,[]))
+        self.assertIsNone(board.counterpart_note(('claude','claude-session-001'),self.request_to('codex-session-001'),[]))
+    def test_codex_poster_is_not_told_to_sendmessage(self):
+        import os
+        sess=Path(self.td.name)/'claude-sessions'; sess.mkdir()
+        (sess/'1.json').write_text(json.dumps({'pid':os.getpid(),'sessionId':'claude-session-001','cwd':'/w/p','messagingSocketPath':'/tmp/cc-socks/41.sock'}))
+        os.environ['CLAUDE_SESSIONS_DIR']=str(sess)
+        if not (board.ENGINE.parent.parent/'claude-config'/'scripts'/'lib'/'session_model.py').is_file():
+            self.skipTest('layer-1 session_model.py not installed')
+        r,c,sub=chain()
+        note=board.counterpart_note(('codex','codex-session-001'),sub,[r,c])
+        self.assertIn('uds:/tmp/cc-socks/41.sock',note); self.assertIn('SendMessage が無い',note)
+        self.assertNotIn('SendMessage の to',note)
+    def test_target_model_of_a_codex_thread(self):
+        self.assertIn('codex-model-x effort high',board.target_model_note(self.TID,None,'codex'))
+        self.assertIn('codex-model-x',board.target_model_note(self.TID,'model-x','codex'))
+        with self.assertRaises(ValueError): board.target_model_note(self.TID,'fable','codex')
+        self.assertIn('記録に無い',board.target_model_note('01a00000-0000-7000-8000-0000000000bb','fable','codex'))
+
+
 class Workflow(unittest.TestCase):
     def state(self,events,now=None): return reduce_workflow(events,now or NOW+dt.timedelta(seconds=30))
     def test_delivery_receipt_and_revision(self):

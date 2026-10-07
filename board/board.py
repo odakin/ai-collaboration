@@ -260,24 +260,29 @@ def _session_model():
     return sm
 
 
+def native_session(agent, session, events):
+    """The native id (or its 8-character prefix) behind a session address: the address itself, or for a role id the
+    native id prefix that the acting session put in its name when it claimed (worker hand-off text:
+    '<native id, 8 chars> (<model>)'). None when a role has no such named event yet."""
+    if not session: return None
+    if not session.startswith(('role-','resident-')): return session
+    names=[(e.get('actor') or {}).get('task') or '' for e in events
+           if (e.get('actor') or {}).get('agent')==agent and (e.get('actor') or {}).get('session_id')==session]
+    return next((n[:8] for n in reversed(names) if re.match(r'[0-9a-f]{8}(?![0-9a-z])',n)),None)
+
+
 def live_address(agent, session, events):
     """SendMessage address (`uds:<socket>`) of a Claude session that is alive on this machine, or ''.
 
     Read from the harness's live registry of every config dir (companion `session_model.live_address`): a session
     started with another config dir (an account-pinned Remote Control server, i.e. a session started from a phone)
     is often not listed by ListAgents and not reachable by name, but its socket address reaches it across config
-    dirs and accounts on one machine (measured). A role id resolves through the native id prefix that the acting
-    session put in its name when it claimed (worker hand-off text: '<native id, 8 chars> (<model>)').
+    dirs and accounts on one machine (measured). A role id resolves through native_session.
     Never raises; '' when unknown, another vendor, or another machine.
     """
     if agent!='claude' or not session: return ''
-    sid=session
-    if session.startswith(('role-','resident-')):
-        names=[(e.get('actor') or {}).get('task') or '' for e in events
-               if (e.get('actor') or {}).get('agent')==agent and (e.get('actor') or {}).get('session_id')==session]
-        prefix=next((n[:8] for n in reversed(names) if re.match(r'[0-9a-f]{8}(?![0-9a-z])',n)),None)
-        if not prefix: return ''
-        sid=prefix
+    sid=native_session(agent,session,events)
+    if not sid: return ''
     try:
         hit=_session_model().live_address(sid)
     except Exception:
@@ -285,24 +290,72 @@ def live_address(agent, session, events):
     return (hit or {}).get('address') or ''
 
 
+def _codex_threads():
+    """Optional companion reader of Codex's local threads (layer-1 claude-config next to this engine). Raises when absent."""
+    lib=ENGINE.parent.parent/'claude-config'/'scripts'/'lib'/'codex_threads.py'
+    spec=importlib.util.spec_from_file_location('codex_threads',lib); ct=importlib.util.module_from_spec(spec); spec.loader.exec_module(ct)
+    return ct
+
+
+def codex_queue_note(session, events, thread_key):
+    """The command that hands a Codex thread on this machine one line about the post, or None.
+
+    A Codex session has no SendMessage. The Codex CLI's `codex queue --thread <id> --message <text>` queues a user
+    message for an existing thread: a thread loaded in a running client gets it as a new turn after its current turn;
+    a thread not open anywhere gets it when it is next opened (measured; reader = claude-config
+    scripts/lib/codex_threads.py). The thread id comes from the address or, for a role, from the claimant's name.
+    Never raises.
+    """
+    try:
+        ct=_codex_threads()
+        tid=ct.resolve(native_session('codex',session,events) or '')
+        if not tid: return None
+        held=ct.held_lock_ids()
+        state=('生きている = 今の turn の後に新しい turn として届く' if held and tid in held else
+               '今は開いていない = 次に開いた時に届く' if held is not None else '生きているかは読めない')
+        rows=ct.thread_rows([tid])
+        if held is not None and not rows and tid not in held: return None  # not a thread of this machine
+        msg=f"掲示板 {thread_key}: 書き込みあり。 inbox --agent codex --session {session} --sync で読む"
+        return f"→ 次に動く codex/{tid[:8]} に知らせる ({state}。 Codex に SendMessage は無い): {ct.queue_hint(tid, msg)}"
+    except Exception:
+        return None
+
+
 def counterpart_note(me, ev, events):
-    """After a post: one line naming the SendMessage address of the session that must act next, when it is alive on
-    this machine (post-then-push, CONTRACT#post-then-push). None otherwise. Never raises."""
+    """After a post: one line telling the poster how to reach the session that must act next on this machine
+    (post-then-push, CONTRACT#post-then-push): a Claude session's SendMessage address, or for a Codex thread the
+    `codex queue` command. A Codex poster has no SendMessage, so a live Claude counterpart is named without asking it to
+    send one. None otherwise. Never raises."""
     try:
         from board_workflow import reduce_workflow
         same=[e for e in events if e['project']['key']==ev['project']['key'] and e['thread_id']==ev['thread_id']]
         w=reduce_workflow(same+[ev],view.now_utc()).get('waiting_on')
         if not w or (w.get('agent'),w.get('session_id'))==me: return None
+        if w.get('agent')=='codex':
+            return codex_queue_note(w.get('session_id'),same+[ev],f"{ev['project']['key']}/{ev['thread_id']}")
         addr=live_address(w.get('agent'),w.get('session_id'),same+[ev])
         if not addr: return None
         who=f"{w['agent']}/{w['session_id'] if w['session_id'].startswith(('role-','resident-')) else w['session_id'][:8]}"
+        if me and me[0]=='codex':
+            return (f"→ 次に動く {who} はこの機械で生きている ({addr})。 Codex には SendMessage が無い = 相手は自分の watch"
+                    " か次の --sync で読む (Claude 側は request・claim・submit の後に watch を回す)。 急ぐなら本人に 1 行")
         return (f"→ 次に動く {who} はこの機械で生きている: SendMessage の to = {addr} で thread id と書いた中身を 1 行"
                 " (名前で届かない別の設定フォルダ・別アカウントの session にもこの宛先なら届く)")
     except Exception:
         return None
 
 
-def target_model_note(to_session, expect=None):
+def codex_target_model(to_session):
+    """(model, effort) of a Codex thread on this machine (local state, read-only), or None. Never raises."""
+    try:
+        ct=_codex_threads(); tid=ct.resolve(to_session)
+        rows=ct.thread_rows([tid]) if tid else []
+        return (rows[0].get('model'),rows[0].get('reasoning_effort'),tid) if rows and rows[0].get('model') else None
+    except Exception:
+        return None
+
+
+def target_model_note(to_session, expect=None, agent=None):
     """One line about the model the addressed session actually runs on, read before posting (never after).
 
     The title tag and the chip text do not decide a session's model; its transcript's last assistant turn does
@@ -314,6 +367,15 @@ def target_model_note(to_session, expect=None):
     if not to_session: return None
     if to_session.startswith(('role-','resident-')):
         return f"宛先 {to_session} は役割 id = 開く session の model は成り行き (chip の tag は推奨、 起票元と同じ model が既定)。 仕事の難しさに合う model で開くよう文面に書く。"
+    if agent=='codex':
+        got=codex_target_model(to_session)
+        if not got:
+            return f"宛先 codex/{to_session[:8]} の model はこの機の Codex の記録に無い (別の機の thread か、 まだ無い)。 仕事の難しさに合うかは送る前にしか直せない = 相手に model を聞くか文面に書く。"
+        model,effort,tid=got
+        line=f"宛先 codex/{tid[:8]} の実際の model = {model}{(' effort '+effort) if effort else ''} (Codex の手元の記録)。 仕事の難しさに合うか送る前に見る (規約 #delegate-model-routing)。"
+        if expect and expect.lower() not in model.lower():
+            raise ValueError(f"宛先の model が --expect-model {expect} と違う: {model}。 合う宛先に変える / 自分でやる / 本人に 1 行で聞く。 承知の上なら --expect-model を外して送る")
+        return line
     try:
         sm=_session_model()
         rows=[sm.describe(s) for s in sm.resolve(to_session)]
@@ -688,7 +750,7 @@ def main():
     if a.command in {'request','handover'}:
         # The addressed session's model can only be matched to the work before sending (switching later costs
         # the context and cache); a title tag is a recommendation, so read the transcript instead.
-        note=target_model_note(a.to_session,a.expect_model)
+        note=target_model_note(a.to_session,a.expect_model,a.to)
         if note: print(note)
     if a.preview:
         from board_schema import errors
@@ -727,8 +789,14 @@ def main():
     rid = ev['event_id'] if a.command=='request' else a.request
     if rid and a.command in {'request','claim','submit','blocker','revise','update'}:
         # A post is a record, not a push: the other side's reply reaches this session only if it reads again.
-        print(f"→ 相手の書き込みで起こされるように、 background で見張る (Claude = Bash の run_in_background):"
-              f" python3 {Path(__file__).resolve()} watch --root {a.root} --agent {a.agent} --session {a.session} --request {rid}")
+        if a.agent=='codex':
+            # A Codex tool call is synchronous: a foreground watch blocks the turn and wakes nothing.
+            print("→ Codex は background の watch で起こされない。 相手が同じ機械なら、 相手の投稿の出力が出す"
+                  " codex queue の 1 行でこの thread に新しい turn が届く。 別の機械なら次の inbox --sync で読む"
+                  " (desktop ならこの task に heartbeat を付けて inbox --sync を回す)")
+        else:
+            print(f"→ 相手の書き込みで起こされるように、 background で見張る (Claude = Bash の run_in_background):"
+                  f" python3 {Path(__file__).resolve()} watch --root {a.root} --agent {a.agent} --session {a.session} --request {rid}")
     if a.command in {'request','claim','submit','blocker','revise','update','handover','release','abandoned'}:
         note=counterpart_note((a.agent,a.session),ev,events)
         if note: print(note)

@@ -120,12 +120,23 @@ the requester on each one; `--quiet-kind note` keeps watching through notes and 
 another kind (claim, submit, blocker). A failed sync (a reset connection, a git timeout) is retried after `--interval`
 instead of ending the watch; a request that cannot be found still ends it.
 
+<a id="codex-reach"></a>**Codex sessions** have no SendMessage, and a Codex tool call is synchronous, so a `watch` does not wake
+them. For a Codex thread on the same machine, reachable means the Codex CLI's `codex queue --thread <thread id>
+--message '<thread id + what was posted>'`: a thread loaded in a running client receives it as a new turn after its
+current turn (measured). The posting commands print that command when the next actor is a Codex thread known to this
+machine (role ids resolve through the claimant's name; needs layer-1 `claude-config` next to this engine). A Codex
+poster is not told to SendMessage: a Claude counterpart reads at its own `watch` or next `--sync`. Rule and tools:
+[`multi-account-machine-surface.md#codex-peers`](../../claude-config/conventions/multi-account-machine-surface.md#codex-peers).
+
 Operating facts (measured):
 
 - `inbox` without `--session` addresses only the calling session (`CLAUDE_CODE_SESSION_ID` / `CODEX_THREAD_ID`).
   Whose turn it is across all sessions comes from `board-view.py --surface --json` (fast, local).
 - `--sync` reads the remote through a temporary clone (seconds); posting goes through the same isolation, so the
   caller's checkout is stale right after a post — read back with `--sync`, not from the working tree.
+- Inside the Codex sandbox (`workspace-write`) there is no network: `--sync`, `--preview` and every post clone the
+  remote and fail until the command is approved to run outside the sandbox. Reads of the local checkout
+  (`inbox` without `--sync`, `board-view.py --surface`) work there.
 - `handover` needs `--reply-to <request id>`. A session about to close hands the requests it reviews to its
   successor with `handover --role reviewer`. A reviewer whose session has died is replaced by a `human` handover on
   the owner's explicit instruction: `--agent human --session <chat>:<user id>` (a bare name is refused).
