@@ -793,7 +793,7 @@ def main():
             # A Codex tool call is synchronous: a foreground watch blocks the turn and wakes nothing.
             print("→ Codex は background の watch で起こされない。 相手が同じ機械なら、 相手の投稿の出力が出す"
                   " codex queue の 1 行でこの thread に新しい turn が届く。 別の機械なら次の inbox --sync で読む"
-                  " (desktop ならこの task に heartbeat を付けて inbox --sync を回す)")
+                  " (desktop ならこの task に heartbeat を付けて inbox を読み直す。 --sync は承認の画面を経るので、 claim・返事・投稿の直前だけ)")
         else:
             print(f"→ 相手の書き込みで起こされるように、 background で見張る (Claude = Bash の run_in_background):"
                   f" python3 {Path(__file__).resolve()} watch --root {a.root} --agent {a.agent} --session {a.session} --request {rid}")
