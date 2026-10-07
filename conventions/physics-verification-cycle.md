@@ -412,6 +412,13 @@ verify-to-learn ([#verify-to-learn](#verify-to-learn)) が「他人の論文を�
 7. **signature と体積密度を次元ごとに点検する**: mostly-minus の実 coframe では
    (det g=(-1)^{d-1}(det e)^2)。任意次元の式に (sqrt{-g}) を使うなら偶奇を確認し、一般次元では
    (sqrt{|g|}) または向き付き密度として定義する。偶数次元の検査が奇数次元の real branch を保証しない。
+8. **Euler 微分の道具そのものに正の対照を入れる** (受領側の再実装で実測): 場の不変量の対数 (\ln u) や係数関数の
+   微分 (f^{(j)}(\phi)) を形式記号に置いて jet 空間で Euler 微分を取ると、全微分 (D) には chain rule を入れても、
+   Euler--Lagrange の偏微分 (\partial L/\partial q^{(k)}) にその記号の jet 依存を戻し忘れやすい。指紋は「その記号が
+   依る場の方程式だけが落ち、他の場の方程式は通る」。反証を探す検査では偽の不一致が finding に見え、修正候補まで
+   誤りと判定しかねない。規約・曲率の anchor はその記号を通らないので捕まえない。→ 使う形式記号を**すべて**含む
+   (F) で (E_q(DF)=0) (Euler 演算子は全微分を消す) を全場について確かめ、素朴な偏微分では同じ対照が落ちることも
+   確かめる (対照の歯)。不一致を finding にする前に、この対照が通っていることを条件にする。
 
 機械 anchor は [`density_frame_algebra.py`](../scripts/density_frame_algebra.py) (frame・接続・核・制限逆写像・動く像・
 Fierz--Pauli からの自由 propagator) と [`covariant_action_audit.py`](../scripts/covariant_action_audit.py)
