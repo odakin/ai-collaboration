@@ -843,4 +843,28 @@ class CollaboratorBoards(unittest.TestCase):
         with self.assertRaises(ValueError): bc.validate({'board_format':1,'audience':'collaborators','encryption':'none'})
         with self.assertRaises(ValueError): bc.validate({'board_format':1,'audience':'owner','encryption':'none','sources':['x']})
 
+class Watch(unittest.TestCase):
+    """watch wakes on the other side's events; quiet kinds wait for the next waking event; sync failures retry."""
+    def test_quiet_note_waits_for_next_event(self):
+        me={'agent':'claude','session_id':'claude-session-001'}
+        r,c,sub=chain(); note=event('note',3,agent='codex')
+        seen={r['event_id']}; pending=[]
+        self.assertIsNone(board.watch_wake([r,c,note],seen,me,{'note','claim'},pending))
+        self.assertEqual([e['event_id'] for e in pending],[c['event_id'],note['event_id']])
+        seen.update(e['event_id'] for e in (c,note))
+        out=board.watch_wake([r,c,note,sub],seen,me,{'note','claim'},pending)
+        self.assertEqual([e['kind'] for e in out],['claim','note','submit'])
+        self.assertEqual(pending,[])
+    def test_without_quiet_any_event_wakes_and_own_events_do_not(self):
+        me={'agent':'claude','session_id':'claude-session-001'}
+        r,c,_=chain(); note=event('note',3,agent='codex')
+        self.assertIsNone(board.watch_wake([r],set(),me,set(),[]))
+        self.assertEqual([e['kind'] for e in board.watch_wake([r,note],{r['event_id']},me,set(),[])],['note'])
+    def test_only_sync_failures_are_transient(self):
+        self.assertTrue(board.transient_sync_error(ValueError('git clone failed: Connection reset by peer')))
+        self.assertTrue(board.transient_sync_error(subprocess.TimeoutExpired('git',1)))
+        self.assertFalse(board.transient_sync_error(ValueError('request not found or ambiguous: x')))
+        self.assertFalse(board.transient_sync_error(KeyError('event_id')))
+
+
 if __name__=='__main__': unittest.main()

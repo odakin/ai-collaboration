@@ -32,6 +32,27 @@ def run(root, *args, check=True):
     return p
 
 
+def watch_wake(thread, seen, me, quiet, pending):
+    """watch: events to report now, or None to keep watching.
+
+    New events from the other side whose kind is in `quiet` (e.g. status notes) do not end the watch; they are
+    kept in `pending` and reported together with the next event of another kind, so the watcher is woken only
+    when there is something to act on and still sees the progress notes that came before it.
+    """
+    new=[e for e in thread if e['event_id'] not in seen
+         and {'agent':e['actor'].get('agent'),'session_id':e['actor'].get('session_id')}!=me]
+    if not new: return None
+    if all(e.get('kind') in quiet for e in new):
+        pending.extend(new); return None
+    out=pending+new; pending.clear(); return out
+
+
+def transient_sync_error(ex):
+    """watch: a failed sync (network reset, git timeout) is retried; a validation error still ends the watch."""
+    if isinstance(ex,(subprocess.TimeoutExpired,OSError)): return True
+    return isinstance(ex,ValueError) and str(ex).startswith('git ')
+
+
 def source_gate(source, policy):
     # Classification is an explicit decision by the caller after reading source
     # instructions. Detect encryption without opening source content.
@@ -484,6 +505,8 @@ def main():
     ap.add_argument('--interval',type=float,default=120,help='watch: seconds between synced reads')
     ap.add_argument('--max-minutes',type=float,default=240,help='watch: give up after this long (exit 3)')
     ap.add_argument('--since',help='watch: treat events after this event id as new (resume after a restart)')
+    ap.add_argument('--quiet-kind',action='append',default=[],choices=sorted(KINDS),
+                    help='watch: event kind that does not end the watch (repeatable, e.g. note); shown with the next waking event')
     ap.add_argument('--path',action='append',default=[],help='touch / untouch / touching: a file or directory below the workspace (repeatable; relative = from the workspace)')
     ap.add_argument('--hours',type=float,default=12,help='touching: declarations older than this no longer hold a path (a session that died)')
     ap.add_argument('--wait',action='store_true',help='touching --path: return only when no earlier session holds the paths (background)')
@@ -547,21 +570,28 @@ def main():
         # (Claude: Bash run_in_background) so the session is woken when the other side writes to the thread.
         if not a.request: ap.error('watch requires --request')
         me={'agent':a.agent,'session_id':a.session}; deadline=time.time()+a.max_minutes*60; key=None; seen=None
+        quiet=set(a.quiet_kind); pending=[]
         while True:
-            with snapshot(a.root) as root:
-                events=read(root)
-                if key is None:
-                    found=[k for k,t in view.derive(events,view.now_utc()).items()
-                           if (t.get('workflow') or {}).get('request_id')==a.request]
-                    if len(found)!=1: raise ValueError('request not found or ambiguous: '+a.request)
-                    key=found[0]
-                thread=[e for e in events if (e['project']['key'],e['thread_id'])==key]
+            try:
+                with snapshot(a.root) as root:
+                    events=read(root)
+                    if key is None:
+                        found=[k for k,t in view.derive(events,view.now_utc()).items()
+                               if (t.get('workflow') or {}).get('request_id')==a.request]
+                        if len(found)!=1: raise ValueError('request not found or ambiguous: '+a.request)
+                        key=found[0]
+                    thread=[e for e in events if (e['project']['key'],e['thread_id'])==key]
+            except Exception as ex:  # noqa: BLE001  only sync failures are retried, see transient_sync_error
+                if not transient_sync_error(ex): raise
+                print('watch: 同期に失敗 ('+(str(ex).splitlines() or [type(ex).__name__])[0][:200]+')、 '
+                      +str(int(a.interval))+' 秒後にやり直す',file=sys.stderr)
+                if time.time()+a.interval>deadline: print('watch: 新しい書き込みなし (時間切れ)'); sys.exit(3)
+                time.sleep(a.interval); continue
             ids=[e['event_id'] for e in thread]
             if seen is None:
                 if a.since and a.since not in ids: raise ValueError('--since event not in this thread: '+a.since)
                 seen=set(ids[:ids.index(a.since)+1]) if a.since else set(ids)
-            new=[e for e in thread if e['event_id'] not in seen
-                 and {'agent':e['actor'].get('agent'),'session_id':e['actor'].get('session_id')}!=me]
+            new=watch_wake(thread,seen,me,quiet,pending)
             if new:
                 for e in new:
                     act=e['actor']

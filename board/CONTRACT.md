@@ -115,7 +115,10 @@ that address is the SendMessage `to` (needs layer-1 `claude-config` next to this
 Never replace the post with the message: what is not on the board is not on record. When the other side cannot be
 messaged (another machine), connect to the thread instead: after `request`, `claim` or `submit`, run
 `board.py watch --request <id>` in the background; it exits, and so wakes the session, when the other side writes
-(`--since <event id>` resumes). The posting commands print that line.
+(`--since <event id>` resumes). The posting commands print that line. A worker that posts progress notes would wake
+the requester on each one; `--quiet-kind note` keeps watching through notes and prints them with the next event of
+another kind (claim, submit, blocker). A failed sync (a reset connection, a git timeout) is retried after `--interval`
+instead of ending the watch; a request that cannot be found still ends it.
 
 Operating facts (measured):
 
