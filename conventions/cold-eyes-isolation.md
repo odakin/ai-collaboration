@@ -57,6 +57,13 @@ cold-eyes とは「書いた本人と別の目」 で検品させることだが
 - **§2-2 の「`.aux` を同梱」 は、 手書きの label 一覧で代用しない。 版を比べさせるなら両版の `.aux` を渡す** — 第 6 回では生成物でなく手で作った「label → 式番号」 表が入っており、 節・付録の label が落ちていた (reviewer は自分で組み直して補った)。 さらに**比較を課す spec では before/after 両方の `.aux`** が要る: 片方だけでは label→頁 の drift が見えず、 [`#page-count-is-not-pagination`](physics-verification-cycle.md#page-count-is-not-pagination) の検査が spec 側の不足で塞がる。 併せて、 配布 PDF を渡すなら reviewer が自分の build で再現できる材料 (assets・bst・bib) を揃える ([`#reproduce-before-attributing`](physics-verification-cycle.md#reproduce-before-attributing)) — 再現できない reviewer は組版の指摘を出せない。
 - **射程を 1 行で宣言する** — 「変更の外側にある既存の不整合を finding にしてよいか」 を spec が言わないと、 reviewer は推測で padding するか黙るかのどちらかになる。 第 6 回の reviewer は `should-fix (pre-existing)` という severity を自作して逃がした。 spec 側で「変更が触っていない箇所の不整合も報告してよい / 報告不要」 を明示する (rubric 事前登録 = [`#rubric-before-run`](physics-verification-cycle.md#rubric-before-run) の一部)。
 
+**追補 (実測、 導出 note の盲検 3 本の HANDOFF から)**。 いずれも「どこを見るか・何を定義するか」 の側 (= 上表の左列) で、 書かないと reviewer は「unverified」 に落とすか 1 pass を燃やす:
+
+- **指数が何に掛かるかを定義する** (振幅か、 占有数か、 確率か)。 文献ごとに違う規約を reviewer が突き合わせる必要が無くなる。
+- **部分系に分けて集団座標を作るときの規格化を書く** (cell の数に物理量が依らない形)。 書かないと「任意の分割から増幅が出る」 型の疑いに 1 往復使う。
+- **連続体の spectral density・記憶時間・終状態の質量の範囲を与えるか、 射程外と宣言する**。 与えないと reviewer は結論を出せず、 こちらの結論と無関係な「unverified」 が並ぶ。
+- **強い言明の定義を spec に置く** (何を「増幅」「burst」 と呼ぶか)。 reviewer の定義と原稿の定義が違うと、 verdict の 1 行目が定義論になる。
+
 ## <a id="typeset-artifact-variant"></a>4.7 変種: 組版された配布物の盲検は「受け手が見る面」 だけ渡す (2026-09-12)
 
 対象が原稿ではなく**組版されて配られる物** (= 読み手は組版結果しか見ない物) のとき、 sandbox に入れるのは **組版 PDF だけ**にする。 source (tex 等) を渡した時点で盲検は壊れる — source には ①版の変遷 comment (却下した案とその理由) ②検算メモ ③設計意図と流儀の注記 ④コメントアウトした旧版 が同居しており、 reviewer は「作成側がどこを気にしているか」 を先に読んでしまう。 §2-2 の referee copy (= 注を剥がした tex を渡す) は**原稿**の話で、 組版物では**そもそも source を渡さない**方が安くて確実。
@@ -72,7 +79,7 @@ cold-eyes とは「書いた本人と別の目」 で検品させることだが
 - **渡すもの**: 公開されている定義 (論文の arXiv 番号と、 規約つきの定義式) と、 中立な導出課題。 課題は「lab の量で書き直せ」「平均と幅を出せ」「何と何を、 どの frame で比べているかを言え」 のように、 答えの向きを含まない形にする。 同定の候補 (parameter を何で決めるか) は優劣を付けずに列挙し、 「正当なのはどれか、 それが外すものは何か」 を問う。
 - **二段**: Stage 1 = 定義からの導出 (文献を開く前に note を書き、 hash を取り、 書込み権限を外し、 hash と時刻を記録する)。 Stage 2 = 文献値での適用。 起票側は、 結果を開く前に自分の予言を番号つきで repo に commit して固定し、 受領で 1 行ずつ突合する (一致 / 不一致 / 盲検側だけが見つけたもの)。 予言の節は後から書き換えない。 Stage 1 の note には「確かめていない記憶」 を明記させ、 Stage 2 で 1 件ずつ検証か反証に変えさせる。 受領では、 封印の hash が note の実測値と一致することと、 封印を書いた時刻が会話記録の最初の network 利用 (検索・取得・download) より前であることを確かめる ([`scripts/inspect-review-sandbox.py`](../scripts/inspect-review-sandbox.py) `receipt`。 同じ出力に検索語と URL の一覧が出るので、 起票側の原稿や著者名を引いていないかも読む。 封印の file 名を他の file の中で言及しただけの呼び出しは封印に数えない)。
 - **spec に足すと時間を節約できるもの** (reviewer の HANDOFF から): ledger の `tier` と `readings` の意味 / 裾の重い profile で「幅」 が何を指すか (芯の半値幅・分位点・rms、 どの密度か) / 「運動学が許す幅」 のような判断を要する上限を、 誰がどう置くか / 計算の処方 (正則化・打ち切り・平均の取り方) を指定するなら、 操作として一意になるまで書く: どの縮約を何次元で行うか、 scale を持たない積分をどう扱うか、 記号 (log の定義など) は基準になる積分で定義する。 一意に決まらない処方は、 経路を変えると値が変わること自体が所見になるので、 第 2 の経路を課題に入れる / 残差を報告させる量 (恒等式の破れなど) は、 どの基底で何個の構造として書くかを先に言う。
-- **返送**: sandbox の session が sandbox の外へ書く返送 command は、 harness の権限判定に止められることがある (実測: 外部への書込みとして拒否され、 reviewer は回避せず command を `scratch/` に保存して止まった = 正しい挙動)。 完了の合図を marker だけに頼らず、 起票側が sandbox の結果 file の有無を見て `collect` する。
+- **返送**: sandbox の session が sandbox の外へ書く返送 command は、 harness の権限判定に止められることがある (実測: 外部への書込みとして拒否され、 reviewer は回避せず command を `scratch/` に保存して止まった = 正しい挙動)。 完了の合図を marker だけに頼らず、 起票側が sandbox の結果 file の有無を見て `collect` する。 別 vendor の CLI の sandbox では、 返送 command が **exit 0 で終わっても外の記録が残らない**ことがある (実測: reviewer は「成功した」 と報告したが marker は無かった) = 同じ扱い。
 - **受領で repo に入れないもの**: reviewer が download した公刊論文の PDF と e-print source。 `collect` は `scratch/` ごと写すので、 受領側の dir に `.gitignore` を置いてから commit する (`scratch/` ごと。 reviewer の出力や候補を残したいなら、 文献の PDF・source・抽出 text の pattern だけ)。
 - **実測 (1 例目)**: 予言は全項目一致、 汚染 grep は 0、 盲検側だけの所見が複数出た (族の限界の指摘、 裾の重い regime の位置分布、 参照文献の式の符号の指摘)。 前提 1 文の検算には、 原稿つきの盲検より安く、 向きの漏れが少ない。
 - **model の違う 2 体に同じ課題文を渡す**: 2 体どうしの一致が第 2 の突合になり、 実装も別になる (片方の engine の誤りを、 もう片方との不一致でなく各自の校正で見つけさせるために、 校正課題は必須にする)。 同じ vendor の事前知識は共有するので、 §1 の同 vendor の口は閉じない。 receipt にそう書く。
@@ -88,6 +95,8 @@ cold-eyes とは「書いた本人と別の目」 で検品させることだが
 - **封印は git の履歴でなく掲示板で取る**: 第 1 段の file の sha256 を note に載せてから第 2 段の資料を開く。 完了条件に「git の履歴で分かる形」 を書くと、 受け手は log を読み、 件名の結論を見る ((e))。
 - **申告**: 受け手の最初の出力 (claim か第 1 段の file の冒頭) に、 起動時に読んだ file と、 対象に来歴らしきもの (comment・著者注・記録への path・前回の結論) があったかを書かせる。 起票側の検査をすり抜けたとき、 これが残る検出器になる (実測: 受け手の claim の申告で汚染が分かった)。 skeleton = [`template/REVIEW-SPEC-blind-manuscript.md`](../template/REVIEW-SPEC-blind-manuscript.md) §0。
 - **最小形** (repo の外で別 session を起動できないとき): 写しを対象にして repo 内の受け手に読ませ、 起動時読込と commit 件名の残余を receipt に書く。 その pass の finding は盲検の再発見に数えず、 決定的なものは著者側で再導出する ([`physics-verification-cycle.md#external-ai-referee-premise-verification`](physics-verification-cycle.md#external-ai-referee-premise-verification) 5・8)。
+
+<a id="revised-target-second-round"></a>**訂正版の 2 回目は 2 本を並走させる** (実測、 headless の盲検)。 1 本目 = **同じ reviewer の session を再開** (別 vendor の CLI なら `exec resume <session id>`) し、 訂正版の写しを sandbox の下位 dir に置いて「自分の finding を 1 件ずつ fixed / partly / not fixed / 直して新しい問題が出た に分類し、 新しい式・数値・文献は自分の script で再導出」 を頼む。 凍結した第 1 段は触らせず、 報告の冒頭に「盲検の再走ではなく突合」 と書かせる。 2 本目 = **新しい sandbox で最初から盲検** (新しい token、 同じ spec、 結論・訂正の経緯は渡さない)。 1 本目は見落としの残り (「直した」 と「直っていない」 の区別) に強く、 2 本目は訂正そのものが持ち込んだ新しい過大主張に強い (実測: 1 本目の言い直しで入った新しい universal な文を 2 本目と 3 本目だけが拾った)。 受領では 2 本の findings を 1 つの表に並べ、 同じ指摘は 1 件に畳む。
 
 ## <a id="post-check"></a>4. 受領後の汚染 check
 
