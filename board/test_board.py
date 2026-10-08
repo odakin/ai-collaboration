@@ -404,6 +404,35 @@ class Note(unittest.TestCase):
             instance=None,event_id=None,reply_to=None,lease_hours=12,reference=[],deliverable=[],to=None,to_session=None,role=None)
         ev=board.event_from(argparse.Namespace(session_name=None,**base),[]); self.assertEqual(ev['actor']['task'],'workflow')
         ev=board.event_from(argparse.Namespace(session_name='notation audit (codex)',**base),[]); self.assertEqual(ev['actor']['task'],'notation audit (codex)')
+    def test_review_request_needs_a_referee_copy_or_not_blind(self):
+        # A deny list in the spec did not stop a header comment of the target that recorded the previous round's
+        # verdict (measured): a request that reads like a review names a comment-free copy, or says --not-blind.
+        import argparse
+        with tempfile.TemporaryDirectory() as td:
+            raw=Path(td)/'note.tex'; raw.write_text('% Blind review: verdict incorrect; see plans/x-results.md\n\\section{A}\n')
+            clean=Path(td)/'note-referee.tex'; clean.write_text('\\section{A} %\ntext\n')
+            def ns(**kw):
+                base=dict(command='request',policy='ordinary',source=Path('/nonexistent/example'),project='example',
+                    thread='2026-09-06-target',repo='o/example',request=None,summary='査読: note の盲検 (第 1 段は自分の目で)',
+                    acceptance='ok',agent='claude',session='s1',session_name=None,instance=None,event_id=None,reply_to=None,
+                    lease_hours=12,reference=['spec.md'],deliverable=[],to='codex',to_session='x-1',role=None,
+                    review_target=[],not_blind=False)
+                base.update(kw); return argparse.Namespace(**base)
+            with self.assertRaises(ValueError) as cm: board.event_from(ns(),[])
+            self.assertIn('--review-target',str(cm.exception))
+            with self.assertRaises(ValueError) as cm: board.event_from(ns(review_target=[str(raw)]),[])
+            self.assertIn('referee copy',str(cm.exception)); self.assertNotIn('incorrect',str(cm.exception))
+            ev=board.event_from(ns(review_target=[str(clean)]),[])
+            self.assertEqual(ev['references'],['spec.md',str(clean)])
+            self.assertEqual(board.event_from(ns(not_blind=True),[])['references'],['spec.md'])
+            with self.assertRaises(ValueError): board.event_from(ns(summary='Please review the hook'),[])
+            board.event_from(ns(summary='CI を直す'),[])                                    # not a review: no gate
+            board.event_from(ns(agent='human',session='discord:1'),[])                     # a person's chat request
+            board.event_from(ns(policy='encrypted-metadata-only',project=None,thread='r-0123456789ab',repo=None,
+                                summary=None,acceptance=None,reference=[]),[])   # restricted: coarse summary, no gate
+            # Namespaces built before the gate existed (other callers, older tests) still post non-review requests
+            old=argparse.Namespace(**{k:v for k,v in vars(ns(summary='CI を直す')).items() if k not in ('review_target','not_blind')})
+            board.event_from(old,[])
     def test_restricted_note_summary_allowed(self):
         n=event('note',0,agent='codex',thread='r-0123456789ab'); n['request_id']=n['event_id']
         n.update(source_policy='encrypted-metadata-only',summary=COARSE['note'],project={'key':'restricted','repo':None},touches=[],references=[])
@@ -869,6 +898,19 @@ class CollaboratorBoards(unittest.TestCase):
         t=self.cli('touch','--root',b,'--agent','claude','--session','c-1','--thread','2026-10-05-wrap','--path','private-notes/plan.md',check=False)
         self.assertNotEqual(t.returncode,0); self.assertIn('not a source',t.stderr)
 
+    def test_review_target_flags_reach_the_cli(self):
+        b=str(self.proj/'board')
+        (self.proj/'notes/raw.tex').write_text('% previous round: verdict incorrect, see plans/r.md\n\\section{A}\n')
+        (self.proj/'notes/referee.tex').write_text('\\section{A}\ntext\n')
+        board.run(self.proj,'add','notes'); board.run(self.proj,'commit','-q','-m','fixture')
+        base=['request','--root',b,'--agent','claude','--session','c-1','--thread','2026-10-05-target','--to','codex',
+              '--to-session','x-1','--summary','Blind review of notes/referee.tex','--acceptance','ok','--preview']
+        p=self.cli(*base,check=False); self.assertNotEqual(p.returncode,0); self.assertIn('--review-target',p.stderr)
+        p=self.cli(*base,'--review-target',str(self.proj/'notes/raw.tex'),check=False)
+        self.assertNotEqual(p.returncode,0); self.assertIn('referee copy',p.stderr); self.assertNotIn('incorrect',p.stderr)
+        p=self.cli(*base,'--review-target',str(self.proj/'notes/referee.tex'))
+        self.assertIn('notes/referee.tex',p.stdout)
+        self.cli(*base,'--not-blind')
     def test_readable_checkouts_may_be_named_but_not_posted_from_or_touched(self):
         import board_config as bc
         cfg=bc.validate({'board_format':1,'audience':'collaborators','encryption':'none','sources':['proj'],'readable':['private-notes']})
@@ -886,7 +928,7 @@ class CollaboratorBoards(unittest.TestCase):
                    '--thread','2026-10-05-owner','--summary','owner-only note about proj')
         self.assertIn('--board proj',p.stderr)
         self.cli('request','--root',str(self.proj/'board'),'--agent','codex','--session','x-1','--thread','2026-10-05-ask',
-                 '--to','claude','--to-session','c-1','--summary','Please review','--acceptance','Read it')
+                 '--to','claude','--to-session','c-1','--summary','Please review','--acceptance','Read it','--not-blind')
         board.run(self.proj,'pull','-q','origin','main'); board.run(self.owner,'pull','-q','origin','main')
         v=subprocess.run([self.sys.executable,str(board.ENGINE/'board-view.py'),'--all-boards','--json'],capture_output=True,text=True)
         self.assertEqual(v.returncode,0,v.stderr); merged=json.loads(v.stdout)

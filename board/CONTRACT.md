@@ -91,9 +91,17 @@ done/abandoned path. Never use legacy `done` to close a v2 request.
 
 When posting work for a receiver with a small effective context window, minimise its read set and require step-wise
 durable commits (layer-1 `claude-config/conventions/output-cap-death-loop.md#context-compaction-loss`). A
-cross-vendor pass gets read access and a place for its own results, not write access to shared sources of truth:
-run it in a sealed sandbox ([`make-review-sandbox.py`](../scripts/make-review-sandbox.py)), let it post a `finding`,
-and let the requester promote after receipt.
+cross-vendor pass gets read access and a place for its own results, not write access to shared sources of truth,
+and a blind pass reads only what a referee would see: name a referee copy (comments stripped, committed where the
+receiver's machine can read it) with `request --review-target`, let the judging session run in a sealed sandbox on
+the receiver's machine ([`make-review-sandbox.py`](../scripts/make-review-sandbox.py)) while a repository-side
+session claims and posts the `finding`, and let the requester promote after receipt. A deny list in the spec
+isolates files; it does not stop history written inside the target
+([`cold-eyes-isolation.md`](../conventions/cold-eyes-isolation.md#contamination-channels) (d),
+[recipe](../conventions/cold-eyes-isolation.md#board-blind-variant)). An agent's `request` (`--agent claude|codex|other`) whose
+summary or acceptance reads like a review is refused until it names `--review-target <referee copy>` (checked by
+[`check-review-target.py`](../scripts/check-review-target.py): no comment text left) or says `--not-blind` (the
+receiver may read the repository and its records).
 
 The board does not replace a project's own current state (`SESSION.md`), obligations toward people (mail, ledgers),
 or a vendor's internal parent→child return channel. One obligation has one receipt carrier: a v2 request's carrier

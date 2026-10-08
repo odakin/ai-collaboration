@@ -392,6 +392,36 @@ def target_model_note(to_session, expect=None, agent=None):
     return line
 
 
+REVIEW_INTENT=re.compile(r'(?i)盲検|査読|レビュー|blind|cold-?eyes|referee|\breview(?:s|er|ed)?\b')
+REVIEW_TARGET_CHECK=ENGINE.parent/'scripts'/'check-review-target.py'
+
+
+def check_review_target(a):
+    """A blind review is only as blind as its target (conventions/cold-eyes-isolation.md#contamination-channels (d)).
+
+    A request whose summary or acceptance reads like a review names the referee copy the receiver opens
+    (--review-target; scripts/check-review-target.py: no comment text left) or says --not-blind (the receiver may
+    read the repository and its records). Measured: a deny list in the spec did not stop a header comment of the
+    target that recorded the previous round's verdict. A person's request (--agent human, e.g. a chat bridge) is
+    their own words, not an agent's spec, and is not gated."""
+    targets=[str(Path(t).expanduser()) for t in (getattr(a,'review_target',None) or [])]
+    if targets:
+        p=subprocess.run([sys.executable,'-I',str(REVIEW_TARGET_CHECK),*targets],capture_output=True,text=True,timeout=60)
+        if p.returncode==1:
+            raise ValueError('--review-target は referee copy でない (対象 file 自体が来歴を運ぶ):\n'+p.stdout[-2000:])
+        if p.returncode: raise ValueError('check-review-target.py が走らなかった: '+(p.stderr or p.stdout)[-600:])
+        for t in targets:
+            q=subprocess.run(['git','-C',str(Path(t).parent),'ls-files','--error-unmatch',Path(t).name],capture_output=True)
+            if q.returncode:
+                print(f'⚠️ {t} は git に登録されていない = 別の機械の受け手には届かない (commit + push してから投稿する)',file=sys.stderr)
+        a.reference=list(dict.fromkeys([*a.reference,*targets]))
+        return
+    if a.agent=='human' or getattr(a,'not_blind',False): return
+    if REVIEW_INTENT.search(' '.join(x for x in (a.summary,a.acceptance) if x)):
+        raise ValueError('要約が査読に読める: 盲検なら --review-target <comment を剥がした写し>、 受け手に repo と記録を'
+                         '読ませる非盲検の検収なら --not-blind (cold-eyes-isolation.md#contamination-channels (d))')
+
+
 def event_from(a, events):
     restricted=a.policy=='encrypted-metadata-only'
     if a.command=='request' or (a.command=='note' and not a.request):
@@ -400,6 +430,7 @@ def event_from(a, events):
         if a.command=='request':
             if not a.to or not a.to_session: raise ValueError('request needs --to and --to-session')
             if not restricted and not a.acceptance: raise ValueError('request needs --acceptance')
+            if not restricted: check_review_target(a)   # before ev['references']=a.reference below
         pk, tid, repo=a.project or 'restricted',a.thread,a.repo
     else:
         req=next((e for e in events if e['event_id']==a.request and e['kind']=='request'),None)
@@ -559,6 +590,10 @@ def main():
     ap.add_argument('--expect-model',help='request/handover: refuse to post when the addressed session\'s actual model (its transcript) is known and does not match this tier (fable/opus) or model-id substring')
     ap.add_argument('--summary'); ap.add_argument('--acceptance')
     ap.add_argument('--deliverable',action='append',default=[]); ap.add_argument('--reference',action='append',default=[])
+    ap.add_argument('--review-target',action='append',default=[],help='request: a file the receiver reviews blind; refused '
+                    'unless it is a referee copy (no comment text, scripts/check-review-target.py). Added to the references')
+    ap.add_argument('--not-blind',action='store_true',help='request: reads like a review, but the receiver may read the '
+                    'repository and its records (claude-config multi-session-coordination.md#review-handoff)')
     ap.add_argument('--lease-hours',type=float,default=12)
     ap.add_argument('--sync',action='store_true',help='read latest remote inbox in an isolated checkout')
     ap.add_argument('--preview',action='store_true',help='validate and show the proposed event without posting')

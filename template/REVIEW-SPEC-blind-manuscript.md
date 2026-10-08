@@ -14,13 +14,15 @@ You are a referee reading this manuscript for the first time. You do not know th
 
 **Independence**: re-derive equations and recompute numbers yourself; write your own scripts under `./scratch/` (Stage 1) and `./checks/` (Stage 2). Assume no author-side scripts exist.
 
+**Exposure declaration (first output)**: before reading further, write at the top of your first output (the board claim when the request came through a board, otherwise `notes/stage1-blind.md`) which files you read at start-up (instruction files, injected reminders) and whether any input carries history: comments in the `.tex`, notes to authors, paths to review records, a previous verdict. If one does, stop and report it instead of proceeding. The `.tex` files here are meant to be comment-free copies (`make-review-sandbox.py create` strips them; `check-review-target.py` checks them).
+
 **Stop rule**: what you cannot verify you mark "unverified"; do not fill gaps with "looks right".
 
 **Forbidden**: editing the inputs, sending mail, posting anywhere, writing outside this directory.
 
 ## 1. Two stages, in this order
 
-**Stage 1 (blind derivation, before opening the manuscript)**: solve the tasks of §2 from the action and the numbers copied into §2 and from the cited public literature only, and write them to `./notes/stage1-blind.md`. Do not open `manuscript.pdf`, the `*.tex` or the `*.aux` files until this file is complete. Do not edit it afterwards (Stage 2 corrections go to `./notes/stage2-compare.md`).
+**Stage 1 (blind derivation, before opening the manuscript)**: solve the tasks of §2 from the action and the numbers copied into §2 and from the cited public literature only, and write them to `./notes/stage1-blind.md`. Do not open `manuscript.pdf`, the `*.tex` or the `*.aux` files until this file is complete. Do not edit it afterwards (Stage 2 corrections go to `./notes/stage2-compare.md`). When it is complete, record its sha256 (in the results, or as a board note when the request came through a board) before opening any Stage 2 input. Do not use a repository's git history as the seal: reading its log shows commit subjects that may carry earlier conclusions.
 
 **Stage 2 (referee review)**: read the manuscript, review it under §3–§8, and write `./REVIEW-RESULTS.md`. In the tasks marked "compare" confront your Stage 1 results with the manuscript's claims.
 

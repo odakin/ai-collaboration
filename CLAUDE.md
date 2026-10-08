@@ -13,7 +13,7 @@ ai-collaboration/
 │   ├── physics-verification-cycle.md   # 何を検査するか: 4 station / 機械 anchor / foil / tier / 3 状態 / verify-to-learn /
 │   │                                   #   第二の目 / rubric 事前登録 / 止まる規律 / cross-vendor / campaign 運用 A-K
 │   ├── verification-cycle-ops.md       # どう回し続けるか: 6 原則 / 導出 state 機械 / 台帳 3 種 + retro / 無人層 / fresh session の手順
-│   ├── cold-eyes-isolation.md          # 第二の目の隔離: 汚染経路 7 口 / 封じた sandbox / spec に書いてよいこと / 審査文書の変種 / 受領後の汚染 grep
+│   ├── cold-eyes-isolation.md          # 第二の目の隔離: 汚染経路 7 口 / 封じた sandbox / spec に書いてよいこと / 審査文書の変種 / 掲示板・別の機械の受け手の変種 / 受領後の汚染 grep
 │   ├── edit-intent-record.md           # AI による原稿改稿の意図記録: 1 pass 1 sidecar (hunk → finding / decision / 種類 = 実装・裁量・削除) / 裁量枠 / 削除 verbatim + 共著者本文の単独削除禁止 / 量の指示 / commit 前 gate / 依頼 spec の 3 行 /
 │   │                                   #   §7 実装 pass の作業規律 (当てる→組版 gate→記録、 anchor assert、 削除前の blame、 清掃版どうしの diff) / §8 投稿前の清掃
 │   └── delegated-work-packages.md      # 相手側の AI への作業委譲: 判断と実行の分離 / 常設 3 層 (状態・手順・定義、README は入口だけ) + WP 1 本 = 1 セッション / WP の 7 要素 /
@@ -40,6 +40,7 @@ layer 1 (public、全 Claude Code / Codex ユーザー向け)。**依存でき�
 - 規約を読む順: `physics-verification-cycle.md` (§1 サイクルの形 → §15 campaign 運用) → `verification-cycle-ops.md` (§5 fresh session の手順) → 必要なら `cold-eyes-isolation.md`
 - 自分の検証 repo を作る: 必須 4 file + `campaigns/<date>-<slug>/{spec.md, ledger.yaml}`、pre-commit から `ledger-commit-cadence-gate.py --pre-commit --worker-scope-env CAMPAIGN_WORKER_DIR`、完了時 `verification-campaign-report.py <dir> --run --write`、受領後 `--carryover --write` と `--index --write`。schema は `physics-verification-cycle.md#campaign-tooling` A。非有界な moment operator と有限窓を扱う場合は同 doc の [`#unbounded-moment-domain-audit`](conventions/physics-verification-cycle.md#unbounded-moment-domain-audit) を追加で使う
 - 第二の目を別 session に出す: `make-review-sandbox.py create <slug> --spec REVIEW-SPEC.md --include <paper.pdf>` → cwd を sandbox に pin して spawn → `collect`
+- 掲示板で別 vendor・別の機械の session に盲検を頼む: comment を剥がした写しを commit して `board.py request --review-target <写し>` (要約が査読に読める依頼は、 写しか `--not-blind` を求められる)、 判定は受け手の機械の sandbox の新しい session で ([`cold-eyes-isolation.md#board-blind-variant`](conventions/cold-eyes-isolation.md#board-blind-variant))。 写しの検査 = [`check-review-target.py`](scripts/check-review-target.py)
 - 完成稿を別 session に**非盲検で**通読させる (repo を読ませ、報告だけ): [`template/READTHROUGH-SPEC-non-blind.md`](template/READTHROUGH-SPEC-non-blind.md) を原稿 repo に写して埋め、末尾の hand-off prompt を渡す → 受領は同 file の Receipt 節 (finding ごとに現稿で再読・reviewer の検算を再実行・真 / 誤読 / 決定と衝突 の 3 分類)
 - AI に決定 ledger どおりの原稿改稿を実装させる: 依頼 spec に `edit-intent-record.md#requester-spec-line` の 3 行 → 実装側は `check-edit-intent.py --scaffold … --out review/edit-intent-<date>.md` → 種類 / ID / 意図 を埋める → 同 script の検査 ALL PASS → 原稿と同じ pass で commit。 受領は裁量枠から読む / --fill (JSON から 種類・ID・意図 を一括で埋めて検査)
 - 自分が実装側のとき: 当てる → 別 dir で組版 → 記録 → commit の順 ([`#apply-then-record`](conventions/edit-intent-record.md#apply-then-record))。 削除の前に `git blame`。 共著 review 中の原稿の読み合わせは `review-markup-clean.py` を基準版と現在版の両方に当ててから latexdiff ([`#cleaned-base-diff`](conventions/edit-intent-record.md#cleaned-base-diff))、 投稿前清掃も同じ script ([`#submission-cleanup`](conventions/edit-intent-record.md#submission-cleanup))

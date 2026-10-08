@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""封じた review sandbox (~/<sandbox-root>/<slug>/) を機械的に切る: 9 rule の CLAUDE.md (= この dir 以外を読まない / 注入 reminder 無視 / git log 禁止 / 書くのは results と scratch のみ / ledger の形 / HANDOFF / PDF の取り方 / 出口 = 返送後は公開層を触らない) + REVIEW-SPEC.md + 許可 file の copy、受領時は --collect で results + notes/checks/scratch を repo へ copy (conventions/cold-eyes-isolation.md#sealed-sandbox の recipe、--selftest 内蔵)
+"""封じた review sandbox (~/<sandbox-root>/<slug>/) を機械的に切る: 9 rule の CLAUDE.md (= この dir 以外を読まない / 注入 reminder 無視 / git log 禁止 / 書くのは results と scratch のみ / ledger の形 / HANDOFF / PDF の取り方 / 出口 = 返送後は公開層を触らない) + 同文の AGENTS.md (Codex 用) + REVIEW-SPEC.md + 許可 file の copy (.tex は comment を剥がし、 残りを check-review-target.py で 0 確認)、受領時は --collect で results + notes/checks/scratch を repo へ copy (conventions/cold-eyes-isolation.md#sealed-sandbox の recipe、--selftest 内蔵)
 
 Why (2026-09-06): a blind second eye run *inside* a repo checkout is not blind — the
 requester's auto-loaded project list and layer-1 addenda leaked the expected verdict to the
@@ -9,16 +9,25 @@ cheap option is the isolated one.
 
 Usage
   make-review-sandbox.py create <slug> --spec SPEC.md [--include FILE ...] [--root ~/paper-review-sandbox]
-        → <root>/<slug>/{CLAUDE.md, REVIEW-SPEC.md, <included files>, scratch/}
+        → <root>/<slug>/{CLAUDE.md, AGENTS.md, REVIEW-SPEC.md, <included files>, scratch/}
           prints the spawn hint (cwd pin + prompt).  Refuses to create under ~/Claude (ancestor CLAUDE.md).
+          .tex includes are stripped of comments in the sandbox copy (strip-tex-comments.py; the source is
+          untouched), and every include is checked with check-review-target.py: a .tex / .md that still carries
+          comment text is refused.  --keep-comments copies them as they are (a non-blind pass).
   make-review-sandbox.py collect <slug> --into DEST_DIR [--root ...]
         → copies REVIEW-RESULTS.md, STAGE*-RESULTS.md (+ ledger.yaml / notes/ / checks/ if present) into DEST_DIR,
           never the other way.  Prints the contamination-grep reminder.
   make-review-sandbox.py --selftest
 
-Before --include, make the referee copy: review-markup-clean.py (colour / Q&A) and then
-strip-tex-comments.py (commented-out lines carry authorship notes and rejected drafts), rebuild,
-and check the PDF text is unchanged (cold-eyes-isolation.md#referee-copy-strip-comments).
+Before --include, clean the review markup: review-markup-clean.py (colour / Q&A).  create strips the
+comments of .tex includes itself (commented-out lines carry authorship notes, rejected drafts and the
+previous round's verdict); build the included PDF from the same source, and check once that the PDF text
+of the stripped source is unchanged (cold-eyes-isolation.md#referee-copy-strip-comments).
+
+A receiver on another machine cannot reach a sandbox made on this one.  Commit the referee copy to the
+repository (or put it in a synced directory whose ancestors hold no CLAUDE.md / AGENTS.md) and let the
+receiver's side run create there with --root outside its working tree; the judging session starts fresh
+with the sandbox as cwd (cold-eyes-isolation.md#board-blind-variant).
 
 The spec you pass must follow cold-eyes-isolation.md#spec-leakage: statement, allow/deny,
 rubric, output format, stop rules, return command — no expected verdict, no "watch step 2".
@@ -53,7 +62,17 @@ Rules for any assistant working here:
 """
 
 
-def create(root: Path, slug: str, spec: Path, includes: list[Path]) -> Path:
+def _sibling(name: str):
+    """Load a sibling script whose file name has dashes (strip-tex-comments.py, check-review-target.py)."""
+    import importlib.util
+    path = Path(__file__).resolve().parent / name
+    spec_ = importlib.util.spec_from_file_location(name.replace("-", "_").removesuffix(".py"), path)
+    mod = importlib.util.module_from_spec(spec_)
+    spec_.loader.exec_module(mod)
+    return mod
+
+
+def create(root: Path, slug: str, spec: Path, includes: list[Path], keep_comments: bool = False) -> Path:
     if str(root.resolve()).startswith(str((Path.home() / "Claude").resolve())):
         raise SystemExit("✗ refuse: sandbox root is under ~/Claude (ancestor CLAUDE.md would be auto-loaded)")
     sb = root / slug
@@ -61,9 +80,24 @@ def create(root: Path, slug: str, spec: Path, includes: list[Path]) -> Path:
         raise SystemExit(f"✗ refuse: {sb} exists and is not empty (pick another slug or clean it)")
     (sb / "scratch").mkdir(parents=True, exist_ok=True)
     (sb / "CLAUDE.md").write_text(CLAUDE_MD, encoding="utf-8")
+    (sb / "AGENTS.md").write_text(CLAUDE_MD, encoding="utf-8")   # Codex reads AGENTS.md (cold-eyes-isolation.md §1 (a))
     shutil.copy2(spec, sb / "REVIEW-SPEC.md")
+    strip = None if keep_comments else _sibling("strip-tex-comments.py").strip
     for f in includes:
-        shutil.copy2(f, sb / f.name)
+        if strip and f.suffix.lower() == ".tex":
+            src = f.read_text(encoding="utf-8")
+            out = strip(src)
+            (sb / f.name).write_text(out, encoding="utf-8")
+            print(f"  stripped {f.name}: {src.count(chr(10)) - out.count(chr(10))} comment line(s) removed in the sandbox copy "
+                  "(build the included PDF from the same source)")
+        else:
+            shutil.copy2(f, sb / f.name)
+    if not keep_comments:
+        check = _sibling("check-review-target.py")
+        left = [r for r in (check.scan(sb / f.name) for f in includes) if r["hits"]]
+        if left:
+            raise SystemExit("✗ refuse: referee copy still carries comments (cold-eyes-isolation.md#contamination-channels (d)):\n"
+                             + check.report(left))
     return sb
 
 
@@ -120,7 +154,21 @@ def selftest() -> int:
         (Path(td) / "dest" / "REVIEW-RESULTS.md").write_text("annotated\n", encoding="utf-8")
         collect(root, "t1", Path(td) / "dest")
         assert (Path(td) / "dest" / "REVIEW-RESULTS.md").read_text(encoding="utf-8") == "annotated\n"  # second collect must not clobber
-    print("selftest OK (10 checks)")
+        # referee copy: .tex includes are stripped in the sandbox (the source is untouched), AGENTS.md for Codex
+        tex = Path(td) / "note.tex"
+        tex.write_text("% previous round: verdict incorrect, see plans/r.md\n\\section{A} % layout\ntext\n", encoding="utf-8")
+        sb2 = create(root, "t2", spec, [tex, inc])
+        assert "verdict" not in (sb2 / "note.tex").read_text(encoding="utf-8") and "\\section{A} %" in (sb2 / "note.tex").read_text(encoding="utf-8")
+        assert "verdict" in tex.read_text(encoding="utf-8"), "the source file must not be modified"
+        assert (sb2 / "AGENTS.md").read_text(encoding="utf-8") == (sb2 / "CLAUDE.md").read_text(encoding="utf-8")
+        sb3 = create(root, "t3", spec, [tex], keep_comments=True)
+        assert "verdict" in (sb3 / "note.tex").read_text(encoding="utf-8")
+        md = Path(td) / "note.md"; md.write_text("text\n<!-- reviewer verdict: reject -->\n", encoding="utf-8")
+        try:
+            create(root, "t4", spec, [md]); raise AssertionError("should refuse an include that still carries comments")
+        except SystemExit as e:
+            assert "referee copy" in str(e) and "reject" not in str(e)
+    print("selftest OK (16 checks)")
     return 0
 
 
@@ -132,6 +180,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--include", type=Path, nargs="*", default=[])
     ap.add_argument("--into", type=Path)
     ap.add_argument("--root", type=Path, default=DEFAULT_ROOT)
+    ap.add_argument("--keep-comments", action="store_true",
+                    help="create: copy .tex / .md includes as they are (a non-blind pass); the default strips and checks them")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args(argv)
     if a.selftest:
@@ -139,7 +189,7 @@ def main(argv: list[str]) -> int:
     if a.mode == "create":
         if not (a.slug and a.spec):
             ap.error("create needs <slug> --spec SPEC.md")
-        sb = create(a.root, a.slug, a.spec, a.include)
+        sb = create(a.root, a.slug, a.spec, a.include, keep_comments=a.keep_comments)
         print(f"✓ sandbox: {sb}")
         print("spawn hint: cwd を上の dir に pin し、prompt は「REVIEW-SPEC.md を読んで実行。token = <TOKEN>」だけ。")
         print("receipt: make-review-sandbox.py collect", a.slug, "--into <campaign dir>  → 汚染 grep → 独立再実装 → ledger 記入 → HANDOFF.md を読んで hoist station")
