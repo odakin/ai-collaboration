@@ -137,6 +137,13 @@ class CodexCounterpart(unittest.TestCase):
         ans=event('update',3,agent='claude',reply=blk)
         note=board.counterpart_note(('claude','claude-session-001'),ans,[r,c,blk])
         self.assertIn(f'queue --thread {self.TID}',note); self.assertIn('--session role-example-codex',note)
+    def test_note_inside_a_request_reaches_the_other_participant(self):
+        # measured: the requester's note answering a blocker printed no line, and the worker was not told
+        r=self.request_to(self.TID); c=event('claim',1); c['actor']['session_id']=self.TID
+        blk=event('blocker',2,reply=c); blk['actor']['session_id']=self.TID
+        n=event('note',3,agent='claude',reply=blk)
+        note=board.counterpart_note(('claude','claude-session-001'),n,[r,c,blk])
+        self.assertIn(f'queue --thread {self.TID}',note); self.assertIn('相手の',note)
     def test_unknown_thread_is_silent(self):
         r=self.request_to('01a00000-0000-7000-8000-0000000000bb')   # not in this machine's state, no lock
         self.assertIsNone(board.counterpart_note(('claude','claude-session-001'),r,[]))
@@ -188,6 +195,14 @@ class Workflow(unittest.TestCase):
         r,c,_=chain(); b=event('blocker',2); response=event('update',3,agent='claude',reply=b)
         self.assertEqual(self.state([r,c,b])['waiting_on']['agent'],'claude')
         self.assertEqual(self.state([r,c,b,response])['status'],'working')
+
+    def test_answer_to_an_answered_blocker_names_the_open_one(self):
+        # measured: the requester answered the first (already answered) blocker while a second one was open
+        r,c,_=chain(); b1=event('blocker',2,reply=c); a1=event('update',3,agent='claude',reply=b1)
+        b2=event('blocker',4,reply=c); stale=event('update',5,agent='claude',reply=b1)
+        errs=self.state([r,c,b1,a1,b2,stale])['errors']
+        self.assertEqual(len(errs),1); self.assertIn('the open blocker is '+b2['event_id'],errs[0])
+        self.assertIn('update --reply-to '+b2['event_id'],errs[0])
 
     def test_expired_worker_lease_keeps_unanswered_question_with_reviewer(self):
         r,c,_=chain(); q=event('blocker',2)
@@ -898,6 +913,23 @@ class CollaboratorBoards(unittest.TestCase):
         t=self.cli('touch','--root',b,'--agent','claude','--session','c-1','--thread','2026-10-05-wrap','--path','private-notes/plan.md',check=False)
         self.assertNotEqual(t.returncode,0); self.assertIn('not a source',t.stderr)
 
+    def test_blocker_answer_kinds_reach_the_cli(self):
+        # the three slips of a measured run: a note as the answer, a stop posted as a note, an answer to an answered blocker
+        b=str(self.proj/'board'); x=['--agent','codex','--session','x-1']; c=['--agent','claude','--session','c-1']
+        req=self.eid(self.cli('request','--root',b,*c,'--thread','2026-10-05-blk','--to','codex','--to-session','x-1',
+            '--summary','Check notes/a.md','--acceptance','Reproduce it','--reference','notes/a.md').stdout)
+        claim=self.eid(self.cli('claim','--root',b,*x,'--request',req,'--summary','on it').stdout)
+        b1=self.eid(self.cli('blocker','--root',b,*x,'--request',req,'--reply-to',claim,'--summary','which input?').stdout)
+        p=self.cli('note','--root',b,*c,'--request',req,'--reply-to',b1,'--summary','use the new copy')
+        self.assertIn('⚠️ 開いた blocker '+b1,p.stderr); self.assertIn('[相談待ち]',p.stdout)
+        p=self.cli('update','--root',b,*c,'--request',req,'--reply-to',b1,'--summary','use the new copy')
+        self.assertIn('回答済み',p.stdout); self.assertIn('[作業中]',p.stdout)
+        p=self.cli('note','--root',b,*x,'--request',req,'--summary','second run 停止 again; please advise')
+        self.assertIn('blocker で出す',p.stderr)
+        b2=self.eid(self.cli('blocker','--root',b,*x,'--request',req,'--reply-to',claim,'--summary','second stop').stdout)
+        p=self.cli('update','--root',b,*c,'--request',req,'--reply-to',b1,'--summary','answer',check=False)
+        self.assertNotEqual(p.returncode,0); self.assertIn('the open blocker is '+b2,p.stderr)
+        self.assertNotIn('event_id=',p.stdout)                      # refused before an id is printed for retry
     def test_review_target_flags_reach_the_cli(self):
         b=str(self.proj/'board')
         (self.proj/'notes/raw.tex').write_text('% previous round: verdict incorrect, see plans/r.md\n\\section{A}\n')
@@ -911,6 +943,10 @@ class CollaboratorBoards(unittest.TestCase):
         p=self.cli(*base,'--review-target',str(self.proj/'notes/referee.tex'))
         self.assertIn('notes/referee.tex',p.stdout)
         self.cli(*base,'--not-blind')
+        (self.proj/'notes/deixis.tex').write_text('\\section{B}\nThe present version retains form A and has dropped form B.\n')
+        board.run(self.proj,'add','notes'); board.run(self.proj,'commit','-q','-m','fixture 2')
+        p=self.cli(*base,'--review-target',str(self.proj/'notes/deixis.tex'))   # posted (preview), with the warning
+        self.assertIn('not refused',p.stderr); self.assertIn('revision-deixis',p.stderr)
     def test_readable_checkouts_may_be_named_but_not_posted_from_or_touched(self):
         import board_config as bc
         cfg=bc.validate({'board_format':1,'audience':'collaborators','encryption':'none','sources':['proj'],'readable':['private-notes']})
@@ -946,6 +982,56 @@ class CollaboratorBoards(unittest.TestCase):
         self.assertNotEqual(self.cli('init','--root',str(new),'--audience','owner','--encryption','none',check=False).returncode,0)
         with self.assertRaises(ValueError): bc.validate({'board_format':1,'audience':'collaborators','encryption':'none'})
         with self.assertRaises(ValueError): bc.validate({'board_format':1,'audience':'owner','encryption':'none','sources':['x']})
+
+
+class StateAndKindHints(unittest.TestCase):
+    """Posts and watch say the request's state as just read, and warn when a post's kind will not do what its text
+    asks (a note never answers a blocker; a stop posted as a note never reaches the requester as a question)."""
+    REVIEWER=('claude','claude-session-001'); CLAIMANT=('codex','codex-session-001')
+    def flow(self):
+        r,c,_=chain(); b=event('blocker',2,reply=c); a=event('update',3,agent='claude',reply=b)
+        return r,c,b,a
+    def w(self,events): return reduce_workflow(events,NOW+dt.timedelta(seconds=30))
+    def test_state_line(self):
+        r,c,b,a=self.flow()
+        blocked=board.request_state_line(self.w([r,c,b]))
+        self.assertIn('相談待ち',blocked); self.assertIn('開いた blocker = '+b['event_id'],blocked)
+        self.assertIn(f"update --request {r['event_id']} --reply-to {b['event_id']}",blocked)
+        working=board.request_state_line(self.w([r,c,b,a]))
+        self.assertIn('作業中',working); self.assertIn('開いた blocker なし',working)
+        self.assertIn(f"{b['event_id']} は update {a['event_id']} で回答済み",working)
+        self.assertIsNone(board.request_state_line(self.w([event('note',0,agent='claude')])))   # no request: nothing
+    def test_note_from_the_reviewer_on_an_open_blocker_warns(self):
+        r,c,b,a=self.flow(); n=event('note',3,agent='claude',reply=b)
+        h=board.kind_hints(n,self.w([r,c,b]),self.REVIEWER)
+        self.assertEqual(len(h),1); self.assertIn('⚠️',h[0]); self.assertIn('--reply-to '+b['event_id'],h[0])
+        self.assertEqual(board.kind_hints(n,self.w([r,c,b,a]),self.REVIEWER),[])       # nothing open: a note is fine
+    def test_stop_posted_as_a_note_by_the_claimant_gets_a_hint(self):
+        r,c,b,a=self.flow()
+        stop=event('note',4); stop['summary']='Stage 1 停止: input shows history; please advise'
+        self.assertIn('blocker で出す',board.kind_hints(stop,self.w([r,c,b,a]),self.CLAIMANT)[0])
+        progress=event('note',4); progress['summary']='Stage 1 running, 4 checks written'
+        self.assertEqual(board.kind_hints(progress,self.w([r,c,b,a]),self.CLAIMANT),[])
+    def test_update_to_an_answered_blocker_with_nothing_open_says_so(self):
+        r,c,b,a=self.flow(); again=event('update',4,agent='claude',reply=b)
+        self.assertIn('回答済み',board.kind_hints(again,self.w([r,c,b,a]),self.REVIEWER)[0])
+    def test_other_party_of_a_note(self):
+        r,c,b,a=self.flow(); w=self.w([r,c,b,a])
+        self.assertEqual(board.other_party(w,self.REVIEWER),{'agent':'codex','session_id':'codex-session-001'})
+        self.assertEqual(board.other_party(w,self.CLAIMANT),{'agent':'claude','session_id':'claude-session-001'})
+        self.assertEqual(board.other_party(self.w([r]),self.REVIEWER),{'agent':'codex','session_id':'codex-session-001'})
+    def test_watch_report_names_the_answer_and_the_full_resume_command(self):
+        r,c,b,a=self.flow(); me={'agent':'claude','session_id':'claude-session-001'}
+        out='\n'.join(board.watch_report(('example',r['thread_id']),[b],[r,c,b],me,root='/b',agent='claude',
+                                          session='claude-session-001',request=r['event_id'],quiet={'note'}))
+        self.assertIn('この blocker に答える = update --request '+r['event_id']+' --reply-to '+b['event_id'],out)
+        self.assertIn('📋 この依頼の今: [相談待ち]',out)
+        self.assertIn(f"watch --root /b --agent claude --session claude-session-001 --request {r['event_id']} --quiet-kind note --since {b['event_id']}",out)
+        self.assertNotIn('...',out)
+        other='\n'.join(board.watch_report(('example',r['thread_id']),[a],[r,c,b,a],{'agent':'codex','session_id':'codex-session-001'},
+                                            root='/b',agent='codex',session='codex-session-001',request=r['event_id']))
+        self.assertNotIn('この blocker に答える',other); self.assertIn('回答済み',other)
+
 
 class Watch(unittest.TestCase):
     """watch wakes on the other side's events; quiet kinds wait for the next waking event; sync failures retry."""

@@ -13,7 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from board_workflow import KINDS, COARSE
+from board_workflow import KINDS, COARSE, LABELS, reduce_workflow
 import board_config as bc
 
 ENGINE=Path(__file__).resolve().parent
@@ -51,6 +51,98 @@ def transient_sync_error(ex):
     """watch: a failed sync (network reset, git timeout) is retried; a validation error still ends the watch."""
     if isinstance(ex,(subprocess.TimeoutExpired,OSError)): return True
     return isinstance(ex,ValueError) and str(ex).startswith('git ')
+
+
+# A stop or a question reported in a note (heuristic for a hint only; it never decides anything).
+STOP_WORDS=re.compile(r'(?i)停止|止ま|止め|中断|blocker|ブロッカー|判断を|返してほしい|返して欲しい|教えてほしい|確認してほしい|指示を'
+                      r'|please\s+(?:advise|confirm)|\bstopped\b|\bblocked\b|\bwaiting\s+for\s+(?:your|the\s+requester)')
+
+
+def _who(addr):
+    """agent/session for one line: a role id in full, a native id by its first 8 characters."""
+    if not addr: return '—'
+    sid=addr.get('session_id') or ''
+    return f"{addr.get('agent')}/{sid if sid.startswith(('role-','resident-')) else sid[:8]}"
+
+
+def _actor(e):
+    a=(e or {}).get('actor') or {}
+    return {'agent':a.get('agent'),'session_id':a.get('session_id')}
+
+
+def request_state_line(w):
+    """One line: the request's state as the caller just read it, with the open blocker and the command that answers it.
+
+    Measured (a review request answered across two vendors): each side wrote from its last read — a note sent as the
+    answer to a blocker (the request stayed blocked), a note naming an answered blocker as still open, and an answer
+    aimed at that answered blocker while a new one was open. The posting and watch commands hold the remote's latest
+    events, so they print the state instead of leaving it to each side's memory. None outside a request workflow."""
+    if not w or not w.get('request'): return None
+    st=w.get('status'); rid=w['request']['event_id']
+    head=f"📋 この依頼の今: [{LABELS.get(st,st)}] 番 = {_who(w.get('waiting_on')) if w.get('waiting_on') else '— (終了)'}"
+    b=w.get('blocker')
+    if st=='blocked' and b:
+        return (f"{head} / 開いた blocker = {b['event_id']} ({_who(_actor(b))}, {b.get('created_at','')[:16]}Z)"
+                f" → 答えるのは依頼元の update --request {rid} --reply-to {b['event_id']} (note は答えにならない)")
+    q,ans=w.get('question'),w.get('answer')
+    if q and ans:
+        return f"{head} / 開いた blocker なし (最後の blocker {q['event_id']} は update {ans['event_id']} で回答済み)"
+    return f"{head} / 開いた blocker なし"
+
+
+def kind_hints(ev, w, me):
+    """Warnings for a post whose kind will not do what its text asks (printed last, on stderr; the post is not stopped).
+
+    w = the request's state before this post, me = (agent, session). A note never moves a request (CONTRACT.md,
+    request-and-receipt workflow): the reviewer's note does not answer an open blocker, and a claimant's stop posted as
+    a note does not reach the requester as a question."""
+    if not w or not w.get('request'): return []
+    rid=w['request']['event_id']; kind=ev.get('kind'); me_addr={'agent':me[0],'session_id':me[1]}
+    is_reviewer=w.get('reviewer')==me_addr
+    is_claimant=bool(w.get('claim')) and _actor(w['claim'])==me_addr
+    b=w.get('blocker') if w.get('status')=='blocked' else None
+    if kind=='note' and is_reviewer and b:
+        return [f"⚠️ 開いた blocker {b['event_id']} ({_who(_actor(b))}, {b.get('created_at','')[:16]}Z) は未回答のまま。"
+                f" note は依頼を動かさない (blocked のまま = 相手は submit できない)。 答えは update --request {rid} --reply-to {b['event_id']}"]
+    if kind=='note' and is_claimant and not b and STOP_WORDS.search(ev.get('summary') or ''):
+        return ["ℹ️ note は依頼を動かさない。 依頼元の判断を待つ停止・質問なら blocker で出す"
+                " (依頼元の inbox に質問として載り、 依頼元の update で作業中に戻る)"]
+    if kind=='update' and is_reviewer and not b and ev.get('reply_to'):
+        q,ans=w.get('question'),w.get('answer')
+        if q and ans and ev['reply_to']==q['event_id']:
+            return [f"ℹ️ blocker {q['event_id']} は update {ans['event_id']} で回答済みで、 開いた blocker は無い"
+                    " = この update は依頼を動かさない記録として載る"]
+    return []
+
+
+def other_party(w, me):
+    """For a note inside a request, the participant on the other side: the claimant (else the assignee) for the
+    reviewer, the reviewer for anyone else. me = (agent, session)."""
+    me_addr={'agent':me[0],'session_id':me[1]}
+    if w.get('reviewer')==me_addr:
+        return _actor(w['claim']) if w.get('claim') else w.get('assigned_to')
+    return w.get('reviewer')
+
+
+def watch_report(key, new, thread, me, *, root, agent, session, request, quiet=()):
+    """The lines a watch prints when it wakes: each new event; under a blocker that is still open and addressed to this
+    session, the command that answers it; the request's state as just synced (request_state_line); and the full
+    commands to re-read and to resume (no elided arguments, so the next watch is one paste)."""
+    w=reduce_workflow(thread,view.now_utc())
+    open_b=(w.get('blocker') or {}).get('event_id') if w.get('status')=='blocked' else None
+    lines=[]
+    for e in new:
+        act=e['actor']
+        lines.append(f"📮 {key[0]}/{key[1]} {e.get('kind')} {e.get('created_at','')[:16]} from {act.get('agent')}/{act.get('session_id')}: {(e.get('summary') or '')[:600]}")
+        if e.get('kind')=='blocker' and e['event_id']==open_b and w.get('reviewer')==me:
+            lines.append(f"   → この blocker に答える = update --request {request} --reply-to {e['event_id']} (note は答えにならない)")
+    s=request_state_line(w)
+    if s: lines.append(s)
+    eng=Path(__file__).resolve(); q=''.join(f' --quiet-kind {k}' for k in sorted(quiet))
+    lines.append(f"→ 読み直す: python3 {eng} show --root {root} --agent {agent} --session {session} --request {request} --sync")
+    lines.append(f"→ 続きを見張る (background): python3 {eng} watch --root {root} --agent {agent} --session {session}"
+                 f" --request {request}{q} --since {new[-1]['event_id']}")
+    return lines
 
 
 def source_gate(source, policy):
@@ -194,7 +286,8 @@ def touch_verdict(state, me, paths, labels=None):
     return lines, blocked
 
 
-def post(root, event, *, before_push=None):
+def post(root, event, *, before_push=None, landed=None):
+    """Post one event; `landed` (a list), when given, receives the thread's events as they stand after the post."""
     # Caller has completed source_gate (and, on a collaborators board, check_post) before entering a snapshot.
     from board_schema import errors
     schema=json.loads(SCHEMA_PATH.read_text())
@@ -224,12 +317,12 @@ def post(root, event, *, before_push=None):
             events=read(dest)
             view.assert_writable(events, event['project']['key'], event['thread_id'], event['event_id'])
             existing=next((e for e in events if e['event_id']==event['event_id']),None)
+            same=[e for e in events if e['project']['key']==event['project']['key'] and e['thread_id']==event['thread_id']]
             if existing:
                 if {k:v for k,v in existing.items() if not k.startswith('_')} != event:
                     raise ValueError('event_id already exists with different content')
+                if landed is not None: landed[:]=same
                 return event['event_id']
-            same=[e for e in events if e['project']['key']==event['project']['key'] and e['thread_id']==event['thread_id']]
-            from board_workflow import reduce_workflow
             if event['kind']=='submit':
                 current=reduce_workflow(same,view.now_utc())
                 if current['claim'] is None or view.parse_ts(current['claim']['lease_until']) <= view.now_utc():
@@ -245,7 +338,9 @@ def post(root, event, *, before_push=None):
             if cfg['encryption']=='git-crypt' and not blob.startswith(view.GITCRYPT_MAGIC): raise ValueError('refusing to push an unencrypted event')
             if before_push: before_push(attempt)
             pushed=run(dest,'push','origin',f'HEAD:{branch}',check=False)
-            if pushed.returncode==0: return event['event_id']
+            if pushed.returncode==0:
+                if landed is not None: landed[:]=same+[event]
+                return event['event_id']
             run(dest,'fetch','--quiet','origin',branch)
             # Reset only this disposable checkout, then revalidate the transition
             # against the winner. A concurrent claim cannot sneak through rebase.
@@ -297,7 +392,7 @@ def _codex_threads():
     return ct
 
 
-def codex_queue_note(session, events, thread_key):
+def codex_queue_note(session, events, thread_key, lead='次に動く'):
     """The command that hands a Codex thread on this machine one line about the post, or None.
 
     A Codex session has no SendMessage. The Codex CLI's `codex queue --thread <id> --message <text>` queues a user
@@ -316,7 +411,7 @@ def codex_queue_note(session, events, thread_key):
         rows=ct.thread_rows([tid])
         if held is not None and not rows and tid not in held: return None  # not a thread of this machine
         msg=f"掲示板 {thread_key}: 書き込みあり。 inbox --agent codex --session {session} --sync で読む"
-        return f"→ 次に動く codex/{tid[:8]} に知らせる ({state}。 Codex に SendMessage は無い): {ct.queue_hint(tid, msg)}"
+        return f"→ {lead} codex/{tid[:8]} に知らせる ({state}。 Codex に SendMessage は無い): {ct.queue_hint(tid, msg)}"
     except Exception:
         return None
 
@@ -325,21 +420,25 @@ def counterpart_note(me, ev, events):
     """After a post: one line telling the poster how to reach the session that must act next on this machine
     (post-then-push, CONTRACT#post-then-push): a Claude session's SendMessage address, or for a Codex thread the
     `codex queue` command. A Codex poster has no SendMessage, so a live Claude counterpart is named without asking it to
-    send one. None otherwise. Never raises."""
+    send one. A note inside a request reaches the other participant (other_party), whoever's turn it is: measured, a
+    requester's note sent as the answer to a blocker printed no line, the worker was not told, and the request sat
+    until the owner relayed it by hand. None otherwise. Never raises."""
     try:
-        from board_workflow import reduce_workflow
         same=[e for e in events if e['project']['key']==ev['project']['key'] and e['thread_id']==ev['thread_id']]
-        w=reduce_workflow(same+[ev],view.now_utc()).get('waiting_on')
+        wf=reduce_workflow(same+[ev],view.now_utc())
+        note=ev.get('kind')=='note'
+        w=other_party(wf,me) if note else wf.get('waiting_on')
+        lead='相手の' if note else '次に動く'
         if not w or (w.get('agent'),w.get('session_id'))==me: return None
         if w.get('agent')=='codex':
-            return codex_queue_note(w.get('session_id'),same+[ev],f"{ev['project']['key']}/{ev['thread_id']}")
+            return codex_queue_note(w.get('session_id'),same+[ev],f"{ev['project']['key']}/{ev['thread_id']}",lead)
         addr=live_address(w.get('agent'),w.get('session_id'),same+[ev])
         if not addr: return None
         who=f"{w['agent']}/{w['session_id'] if w['session_id'].startswith(('role-','resident-')) else w['session_id'][:8]}"
         if me and me[0]=='codex':
-            return (f"→ 次に動く {who} はこの機械で生きている ({addr})。 Codex には SendMessage が無い = 相手は自分の watch"
+            return (f"→ {lead} {who} はこの機械で生きている ({addr})。 Codex には SendMessage が無い = 相手は自分の watch"
                     " か次の --sync で読む (Claude 側は request・claim・submit の後に watch を回す)。 急ぐなら本人に 1 行")
-        return (f"→ 次に動く {who} はこの機械で生きている: SendMessage の to = {addr} で thread id と書いた中身を 1 行"
+        return (f"→ {lead} {who} はこの機械で生きている: SendMessage の to = {addr} で thread id と書いた中身を 1 行"
                 " (名前で届かない別の設定フォルダ・別アカウントの session にもこの宛先なら届く)")
     except Exception:
         return None
@@ -410,6 +509,8 @@ def check_review_target(a):
         if p.returncode==1:
             raise ValueError('--review-target は referee copy でない (対象 file 自体が来歴を運ぶ):\n'+p.stdout[-2000:])
         if p.returncode: raise ValueError('check-review-target.py が走らなかった: '+(p.stderr or p.stdout)[-600:])
+        if '⚠️' in p.stdout:   # warnings (not refused): a sentence that may read as the target's own revision history
+            print(p.stdout.rstrip()[-2000:],file=sys.stderr)
         for t in targets:
             q=subprocess.run(['git','-C',str(Path(t).parent),'ls-files','--error-unmatch',Path(t).name],capture_output=True)
             if q.returncode:
@@ -690,11 +791,8 @@ def main():
                 seen=set(ids[:ids.index(a.since)+1]) if a.since else set(ids)
             new=watch_wake(thread,seen,me,quiet,pending)
             if new:
-                for e in new:
-                    act=e['actor']
-                    print(f"📮 {key[0]}/{key[1]} {e.get('kind')} {e.get('created_at','')[:16]} from {act.get('agent')}/{act.get('session_id')}: {(e.get('summary') or '')[:600]}")
-                print(f"→ 読み直す: board.py show --root {a.root} --agent {a.agent} --session {a.session} --request {a.request} --sync"
-                      f" / 続きを見張る: board.py watch ... --since {new[-1]['event_id']}")
+                print('\n'.join(watch_report(key,new,thread,me,root=a.root,agent=a.agent,session=a.session,
+                                              request=a.request,quiet=quiet)))
                 return
             seen.update(ids)
             if time.time()+a.interval>deadline: print('watch: 新しい書き込みなし (時間切れ)'); sys.exit(3)
@@ -793,7 +891,6 @@ def main():
     if a.preview:
         from board_schema import errors
         probs=errors(ev,json.loads(SCHEMA_PATH.read_text()))
-        from board_workflow import reduce_workflow
         same=[e for e in events if e['project']['key']==ev['project']['key'] and e['thread_id']==ev['thread_id']]
         probs+=reduce_workflow(same+[ev],view.now_utc())['errors']
         if probs: raise ValueError('; '.join(probs))
@@ -801,13 +898,22 @@ def main():
     from board_schema import errors
     probs=errors(ev,json.loads(SCHEMA_PATH.read_text()))
     if probs: raise ValueError('; '.join(probs))
+    same=[e for e in events if e['project']['key']==ev['project']['key'] and e['thread_id']==ev['thread_id']]
+    w_before=reduce_workflow(same,view.now_utc()) if a.request else None
+    # A transition the reducer refuses now is refused here, before its id is printed and saved for `retry`: it is not
+    # a network outcome (measured: an answer aimed at an already answered blocker printed its event id, then ERROR).
+    bad=[x for x in reduce_workflow(same+[ev],view.now_utc())['errors'] if x.startswith(ev['event_id']+':')]
+    if bad: raise ValueError('; '.join(bad))
     outbox.mkdir(parents=True,exist_ok=True,mode=0o700)
     saved=outbox/(ev['event_id']+'.json')
     with saved.open('x',encoding='utf-8') as f: json.dump(ev,f,ensure_ascii=False,indent=2)
     saved.chmod(0o600)
     print('event_id='+ev['event_id'],flush=True) # retain for ambiguous network outcomes
-    print('posted '+post(a.root,ev))
+    landed=[]
+    print('posted '+post(a.root,ev,landed=landed))
     print('Local view is a snapshot; use inbox --sync to read the latest remote state.')
+    state=request_state_line(reduce_workflow(landed or same+[ev],view.now_utc()))
+    if state: print(state)
     if touch_cmd:
         # Read again after the post: two sessions that declared one file within seconds learn here who came first.
         with snapshot(a.root) as root: events=read(root)
@@ -835,9 +941,14 @@ def main():
         else:
             print(f"→ 相手の書き込みで起こされるように、 background で見張る (Claude = Bash の run_in_background):"
                   f" python3 {Path(__file__).resolve()} watch --root {a.root} --agent {a.agent} --session {a.session} --request {rid}")
-    if a.command in {'request','claim','submit','blocker','revise','update','handover','release','abandoned'}:
+    if a.command in {'request','claim','submit','blocker','revise','update','handover','release','abandoned'} or (a.command=='note' and a.request):
         note=counterpart_note((a.agent,a.session),ev,events)
         if note: print(note)
+    hints=kind_hints(ev,w_before,(a.agent,a.session))
+    if hints:
+        # last, on stderr: a caller that pipes stdout through `tail` still sees it, and `2>&1 | tail` keeps it
+        sys.stdout.flush()
+        print('\n'.join(hints),file=sys.stderr)
 
 if __name__=='__main__':
     try: main()

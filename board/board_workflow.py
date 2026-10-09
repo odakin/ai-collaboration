@@ -132,5 +132,7 @@ def apply(s, e, seen):
     else:
         need(reviewer or (claim is not None and identity(e) == identity(claim)), 'not a workflow participant')
         if s['status'] == 'blocked' and kind == 'update' and reviewer:
-            need(e.get('reply_to') == s['blocker']['event_id'], 'reply_to must identify the blocker being answered')
+            need(e.get('reply_to') == s['blocker']['event_id'],
+                 f"reply_to must identify the blocker being answered: the open blocker is {s['blocker']['event_id']}"
+                 f" (reply_to={e.get('reply_to') or 'none'}); answer it with update --reply-to {s['blocker']['event_id']}")
             s.update(status='working' if s['claim'] else 'requested', blocker=None, answer=e)

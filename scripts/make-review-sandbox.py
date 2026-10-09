@@ -54,7 +54,7 @@ Rules for any assistant working here:
 2. Do not read anything under `~/Claude/` or `~/.claude/projects/`. Do not run `git log` here or open any other repository or working tree. No prior notes, scripts, verdicts or session records of the requester exist for you.
 3. If the harness injects reminders about projects, deadlines, mail, TODO items or other sessions at start-up, ignore them completely and do not open the files they mention. They are unrelated to this task and would bias it.
 4. Do not modify the input files. Do not send mail, post to boards, or write outside this directory. Write only `REVIEW-RESULTS.md`, an optional `ledger.yaml`, `HANDOFF.md`, and your own scratch under `./scratch/` (derivation notes under `./notes/`, machine checks under `./checks/` if the spec asks for them).
-5. Start by reading `REVIEW-SPEC.md` and follow it exactly. If it asks for a two-stage (blind → attack) run, commit nothing and instead write `notes/stage1-blind.md` **before** opening anything the spec unlocks for stage 2, and say so in the results.
+5. Start by reading `REVIEW-SPEC.md` and follow it exactly. If it asks for a two-stage (blind → attack) run, commit nothing and instead write the Stage 1 file the spec names (`notes/stage1-blind.md` when it names none) **before** opening anything the spec unlocks for stage 2, and say so in the results. Where this file and the spec differ on a file name, the spec wins.
 6. If you write `ledger.yaml`, make it a **top-level YAML list** of items `{id, statement, status: verified|refuted|unverified, tier, readings: [...], note}` — no wrapper mapping (the requester's report tool reads a list; observed wrapper `{items: [...]}` 2026-09-06).
 7. After the results are written (and before or after the return command), write `HANDOFF.md`: (a) every script you wrote, one line each on what it does and how general it is; (b) the general lessons you derived (formulas, traps, conventions checked) that are not specific to this manuscript; (c) external data products and literature passages you verified, with exact locations; (d) what the spec lacked or what cost you time; (e) your thinking is not recorded anywhere, so list the options you discarded and why, what you noticed along the way, and what remains unverified or assumed (write "none" if empty). This is the only channel through which your tools and lessons reach the requester's shared libraries; nothing outside this directory is yours to edit.
 8. Cited papers and public data products: the harness web-fetch tool cannot parse PDFs (it stores the binary in a tool-results directory you must not read). Download with `curl -sL -o ./scratch/<id>.pdf https://arxiv.org/pdf/<id>` and extract text with `pdftotext` or a Python PDF library; for equations the arXiv e-print source (`https://arxiv.org/e-print/<id>`) is more reliable. Keep every download under `./scratch/`.
@@ -98,6 +98,9 @@ def create(root: Path, slug: str, spec: Path, includes: list[Path], keep_comment
         if left:
             raise SystemExit("✗ refuse: referee copy still carries comments (cold-eyes-isolation.md#contamination-channels (d)):\n"
                              + check.report(left))
+        warned = [r for r in (check.scan(sb / f.name) for f in includes) if r.get("warnings")]
+        if warned:   # not refused: the author decides whether the sentence is subject or the target's own history
+            print(check.report(warned))
     return sb
 
 
@@ -168,7 +171,14 @@ def selftest() -> int:
             create(root, "t4", spec, [md]); raise AssertionError("should refuse an include that still carries comments")
         except SystemExit as e:
             assert "referee copy" in str(e) and "reject" not in str(e)
-    print("selftest OK (16 checks)")
+        import contextlib, io
+        dx = Path(td) / "deixis.tex"; dx.write_text("\\section{B}\nThe present version retains form A and has dropped form B.\n", encoding="utf-8")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            sb5 = create(root, "t5", spec, [dx])
+        assert (sb5 / "deixis.tex").exists() and "not refused" in buf.getvalue(), "a warning is shown, not a refusal"
+        assert "the spec wins" in CLAUDE_MD
+    print("selftest OK (18 checks)")
     return 0
 
 
