@@ -15,7 +15,7 @@ strip-tex-comments.py, so a stripped copy always passes and a paraphrase does no
   .md   any HTML comment with text
   both  a body sentence that tells the reader the target was reviewed before (a receipt of a blind review and of
         the corrections taken from it, 「盲検」) — kind body-history.  Stripping cannot remove it;
-        the author edits the body (measured 2026-10-09: such a sentence passed the comment check and the blind
+        the author edits the body (measured: such a sentence passed the comment check and the blind
         session stopped on its exposure rule, correctly).  Ordinary uses (a cited review article, "an earlier
         version of this work") do not match.
 Review vocabulary and pointers (plans/, notes/, SESSION.md, DESIGN, request tokens) are reported to say how bad a
@@ -45,7 +45,7 @@ MD_COMMENT = re.compile(r'<!--(.*?)-->', re.S)
 REVIEW_WORDS = re.compile(
     r'(?i)\b(?:blind|review(?:ed|er|s)?|verdict|referee|cold-?eyes|findings?|rebuttal|erratum)\b'
     r'|盲検|査読|指摘|訂正|撤回|受領|判定|レビュー')
-BODY_HISTORY = re.compile(   # typeset text that tells the reader the target was reviewed before (measured 2026-10-09:
+BODY_HISTORY = re.compile(   # typeset text that tells the reader the target was reviewed before (measured:
     # a receipt sentence left in the body passed the comment check and stopped the blind session on arrival)
     r'(?i)\b(?:reviewed\s+blind|blind(?:ly)?\s+review(?:ed)?|independent\s+session|corrections?\s+of\s+(?:that|the|this)\s+review'
     r'|(?:earlier|previous|first|second)\s+(?:review|round\s+of\s+review)|referee\s+reports?|review\s+records?)\b'
