@@ -13,6 +13,11 @@ Target check (exit 0 = referee copy, 1 = refused, 2 = usage).  The predicate is 
 strip-tex-comments.py, so a stripped copy always passes and a paraphrase does not:
   .tex  any comment with non-blank text (a line whose first non-blank char is %, or text after an unescaped %)
   .md   any HTML comment with text
+  both  a body sentence that tells the reader the target was reviewed before (a receipt of a blind review and of
+        the corrections taken from it, 「盲検」) — kind body-history.  Stripping cannot remove it;
+        the author edits the body (measured 2026-10-09: such a sentence passed the comment check and the blind
+        session stopped on its exposure rule, correctly).  Ordinary uses (a cited review article, "an earlier
+        version of this work") do not match.
 Review vocabulary and pointers (plans/, notes/, SESSION.md, DESIGN, request tokens) are reported to say how bad a
 hit is; they are not the predicate.  The comment text itself is never printed.  Other suffixes (pdf, aux, png) are
 listed as not scanned and do not fail: comments do not reach a typeset page.
@@ -40,6 +45,11 @@ MD_COMMENT = re.compile(r'<!--(.*?)-->', re.S)
 REVIEW_WORDS = re.compile(
     r'(?i)\b(?:blind|review(?:ed|er|s)?|verdict|referee|cold-?eyes|findings?|rebuttal|erratum)\b'
     r'|盲検|査読|指摘|訂正|撤回|受領|判定|レビュー')
+BODY_HISTORY = re.compile(   # typeset text that tells the reader the target was reviewed before (measured 2026-10-09:
+    # a receipt sentence left in the body passed the comment check and stopped the blind session on arrival)
+    r'(?i)\b(?:reviewed\s+blind|blind(?:ly)?\s+review(?:ed)?|independent\s+session|corrections?\s+of\s+(?:that|the|this)\s+review'
+    r'|(?:earlier|previous|first|second)\s+(?:review|round\s+of\s+review)|referee\s+reports?|review\s+records?)\b'
+    r'|盲検|査読を受け|査読の指摘|査読で')
 POINTERS = re.compile(
     r'\bplans/|\bnotes/|\breviews?/|\bSESSION\.md\b|\bDESIGN\.md\b|\bDESIGN \(|\b[A-Z][A-Z0-9]{2,}-\d{8}-[A-Z0-9]{6}\b')
 REMEDY = ("→ make the referee copy: strip-tex-comments.py IN.tex OUT.tex (rebuild, compare the PDF text), commit it "
@@ -66,10 +76,20 @@ def scan(path: Path, text: str | None = None) -> dict:
             if m and m.group(1).strip():
                 full = line.lstrip().startswith('%')
                 hits.append({'line': i, 'kind': 'comment-line' if full else 'trailing-comment', **_describe(m.group(1))})
+            body = TEX_COMMENT.sub('%', line)
+            b = BODY_HISTORY.search(body)
+            if b:
+                hits.append({'line': i, 'kind': 'body-history', 'review_words': [b.group(0).lower()], 'pointer': False,
+                             'chars': len(body.strip())})
     else:
         for m in MD_COMMENT.finditer(text):
             if m.group(1).strip():
                 hits.append({'line': text.count('\n', 0, m.start()) + 1, 'kind': 'html-comment', **_describe(m.group(1))})
+        for i, line in enumerate(MD_COMMENT.sub('', text).split('\n'), 1):
+            b = BODY_HISTORY.search(line)
+            if b:
+                hits.append({'line': i, 'kind': 'body-history', 'review_words': [b.group(0).lower()], 'pointer': False,
+                             'chars': len(line.strip())})
     return {'file': str(path), 'scanned': True, 'hits': hits}
 
 
@@ -83,14 +103,19 @@ def report(results: list[dict]) -> str:
             out.append(f"- {r['file']}: referee copy (no comment text)")
             continue
         bad = [h for h in r['hits'] if h['review_words'] or h['pointer']]
-        out.append(f"- {r['file']}: NOT a referee copy: {len(r['hits'])} comment(s) with text, "
-                   f"{len(bad)} with review words or pointers")
+        nbody = sum(1 for h in r['hits'] if h['kind'] == 'body-history')
+        out.append(f"- {r['file']}: NOT a referee copy: {len(r['hits']) - nbody} comment(s) with text, "
+                   f"{len(bad) - nbody} with review words or pointers, {nbody} body sentence(s) telling the reader "
+                   f"the target was reviewed before (stripping cannot remove these: edit the body)")
         for h in (bad or r['hits'])[:12]:
             tag = ', '.join(h['review_words']) or '-'
             out.append(f"    line {h['line']} ({h['kind']}, {h['chars']} chars): review words [{tag}]"
                        f"{', pointer to records' if h['pointer'] else ''}")
     if any(r['hits'] for r in results):
         out.append(REMEDY)
+    if any(h['kind'] == 'body-history' for r in results for h in r['hits']):
+        out.append("→ body-history: a receipt sentence in the typeset text reaches every reader; move it to the results "
+                   "note, rebuild, and re-run this check (strip-tex-comments.py does not touch the body)")
     return '\n'.join(out)
 
 
@@ -159,6 +184,14 @@ def _selftest() -> int:
     assert scan(Path('s.tex'), stripped)['hits'] == [], 'strip-tex-comments output must pass'
     para = '% earlier pass said the peak was wrong; fixed\nx\n'
     assert scan(Path('p.tex'), para)['hits'], 'a paraphrase without review words still fails (predicate = any text)'
+    body = ('\\section{Purpose}\nAn independent session reviewed this draft blind; we took the corrections '
+            'of that review.\nWe take the results from the review article of Smith and Jones.\n')
+    rb = scan(Path('b.tex'), body)
+    assert [h['kind'] for h in rb['hits']] == ['body-history'] and rb['hits'][0]['line'] == 2, rb
+    assert 'body sentence' in report([rb])
+    assert scan(Path('c.tex'), 'from the review article of Smith and Jones~\\cite{x}, and an earlier version of this work')['hits'] == [], \
+        'ordinary uses of "review" and "earlier version" in the text are not history'
+    assert scan(Path('d.md'), 'This draft was reviewed blind by a second session.')['hits'][0]['kind'] == 'body-history'
     md = 'text\n<!-- reviewer 2 verdict: reject -->\nmore'
     assert scan(Path('a.md'), md)['hits'][0]['line'] == 2
     assert scan(Path('b.pdf'), '')['scanned'] is False
@@ -181,7 +214,7 @@ def _selftest() -> int:
         assert [h['line'] for h in got] == [4] and got[0]['pointer'] and 'verdict' in got[0]['review_words'], got
         assert staged_warn(repo) == 0, 'warn only: a finding never blocks'
         assert staged_warn(Path(td) / 'not-a-repo') == 3, 'a check that could not run says so'
-    print('selftest OK (12 checks)')
+    print('selftest OK (16 checks)')
     return 0
 
 
