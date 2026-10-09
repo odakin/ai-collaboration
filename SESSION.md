@@ -21,6 +21,10 @@
 
 owner 専用の掲示板から engine を移し、 共同研究の repo に層2 の掲示板を置けるようにした。 入口 = [board/README.md](board/README.md)、 運用の契約 = [board/CONTRACT.md](board/CONTRACT.md#boards-and-audiences)、 判断 = [DESIGN](DESIGN.md#board-engine) と [board/DESIGN.md](board/DESIGN.md#one-engine-many-boards)。 次 = 実際の共同研究の掲示板で、 共同研究者側の session が clone して読めるかを確かめる (読む人の gate は名前と path だけを見る = 文章の中身は書き手の判断)。 session の冒頭に要注意 thread を出す hook = `board/board-session-start.py` (配線は各自の settings、 判断 = [board/DESIGN.md](board/DESIGN.md#session-start-surface))。 新しい session から実際に発火したところはまだ見ていない。
 
+## 現在地：レビュー成果物の不変性確認
+
+再開前後の比較には [snapshot helper](scripts/review-artifact-snapshot.py) を使える。次の利用時は baseline の対象と writer の停止を確認し、追加物の回収範囲は呼び元で指定する。運用入口は [CLAUDE](CLAUDE.md)。
+
 ## 残タスク
 
 - 状態識別の数式と道具を追加。入口 = [証明と利用範囲](docs/state-discrimination.md)、[library](scripts/state_discrimination.py)、[検証時の certificate](conventions/physics-verification-cycle.md#state-discrimination-certificates)。reporter は未知の foil crash と marker 後の非ゼロ終了を失敗にし、`--run` の失敗を呼び元へ返す。実装判断 = DESIGN.md。

@@ -37,6 +37,7 @@ Each module's first docstring line is the description source of truth. Every scr
 | [`one_loop_vacuum.py`](one_loop_vacuum.py) | Exact radial log integrals, one-loop MSbar vacuum terms and logarithmic stationary points; --selftest. |
 | [`pdf-locator-grep.py`](pdf-locator-grep.py) | Pin page and equation locators: page-numbered regex hits in a PDF text layer (arXiv id or local file); --selftest. |
 | [`povm_moment_variance.py`](povm_moment_variance.py) | Finite-POVM measured moments, first-operator variance and noise; --selftest. |
+| [`review-artifact-snapshot.py`](review-artifact-snapshot.py) | Capture and check immutable review inputs while listing newly added artifacts. |
 | [`review-markup-clean.py`](review-markup-clean.py) | review markup cleaner: 共著 review 用の着色と著者間問答を LaTeX source から外す (投稿前清掃 + 清掃版どうしの diff 用)。 |
 | [`state_discrimination.py`](state_discrimination.py) | Binary discrimination certificates, qubit models and foil helpers (NumPy only). |
 | [`strip-tex-comments.py`](strip-tex-comments.py) | Strip LaTeX comments from a referee copy without changing the typeset output. |
