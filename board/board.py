@@ -743,7 +743,10 @@ def main():
             top=bc.toplevel(a.root); key=a.project or (cfg['sources'][0] if len(cfg['sources'])==1 else None)
             if top and key and top.name==key: a.source=top
     if not a.source and a.project and a.project!='restricted': a.source=ws/a.project  # project key = checkout basename in the workspace
-    if not a.source or not a.policy: ap.error('posting requires --source and --policy')
+    if not a.source or not a.policy:
+        # 足りない方だけを挙げる (= 両方を挙げると、 自動で決まる --source に誤った値を渡して詰まる)
+        missing=[f for f,v in (('--source',a.source),('--policy',a.policy)) if not v]
+        ap.error('posting requires '+' and '.join(missing))
     touch_cmd=a.command if a.command in {'touch','untouch'} else None
     if touch_cmd and (a.policy!='ordinary' or a.request or not a.thread or not a.project):
         ap.error(f'{touch_cmd} needs --policy ordinary, --project and --thread (no --request): paths are metadata, restricted posts carry none')
