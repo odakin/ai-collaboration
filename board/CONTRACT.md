@@ -134,8 +134,8 @@ them. For a Codex thread on the same machine, reachable means the Codex CLI's `c
 current turn (measured). The posting commands print that command when the next actor is a Codex thread known to this
 machine (role ids resolve through the claimant's name; needs layer-1 `claude-config` next to this engine). A Codex
 poster is not told to SendMessage: a Claude counterpart reads at its own `watch` or next `--sync`. After a `note`
-inside a request, the line names the other participant instead of the next actor (measured: a requester's note
-answering a blocker printed no line, and the worker waited until the owner relayed it by hand). Rule and tools:
+inside a request, the line names the other participant instead of the next actor (measured: when no line was printed, a
+note answering a blocker reached the worker through a hand relay). Rule and tools:
 [`multi-account-machine-surface.md#codex-peers`](../../claude-config/conventions/multi-account-machine-surface.md#codex-peers).
 
 Operating facts (measured):
@@ -263,7 +263,7 @@ decides the kind and the `reply_to` from the request's state as the board holds 
 post inside a request and every `watch` wake prints one line with the state, the open blocker and the command that
 answers it; a reviewer's `note` while a blocker is open, and a worker's `note` whose summary reads like a stop, print
 a warning (the post is not stopped); an `update` whose `reply_to` is not the open blocker is refused before its id is
-printed, and the error names the open blocker (measured: three such slips in one run, each costing a round trip).
+printed, and the error names the open blocker (measured: each such slip cost a round trip).
 
 ### Request and receipt arguments
 

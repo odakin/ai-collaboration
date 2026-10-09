@@ -914,7 +914,7 @@ class CollaboratorBoards(unittest.TestCase):
         self.assertNotEqual(t.returncode,0); self.assertIn('not a source',t.stderr)
 
     def test_blocker_answer_kinds_reach_the_cli(self):
-        # the three slips of a measured run: a note as the answer, a stop posted as a note, an answer to an answered blocker
+        # the slips this guards against (measured): a note as the answer, a stop posted as a note, an answer to an answered blocker
         b=str(self.proj/'board'); x=['--agent','codex','--session','x-1']; c=['--agent','claude','--session','c-1']
         req=self.eid(self.cli('request','--root',b,*c,'--thread','2026-10-05-blk','--to','codex','--to-session','x-1',
             '--summary','Check notes/a.md','--acceptance','Reproduce it','--reference','notes/a.md').stdout)

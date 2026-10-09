@@ -420,9 +420,9 @@ def counterpart_note(me, ev, events):
     """After a post: one line telling the poster how to reach the session that must act next on this machine
     (post-then-push, CONTRACT#post-then-push): a Claude session's SendMessage address, or for a Codex thread the
     `codex queue` command. A Codex poster has no SendMessage, so a live Claude counterpart is named without asking it to
-    send one. A note inside a request reaches the other participant (other_party), whoever's turn it is: measured, a
-    requester's note sent as the answer to a blocker printed no line, the worker was not told, and the request sat
-    until the owner relayed it by hand. None otherwise. Never raises."""
+    send one. A note inside a request reaches the other participant (other_party), whoever's turn it is (measured:
+    without the line, a note answering a blocker reached the worker only when someone relayed it by hand). None
+    otherwise. Never raises."""
     try:
         same=[e for e in events if e['project']['key']==ev['project']['key'] and e['thread_id']==ev['thread_id']]
         wf=reduce_workflow(same+[ev],view.now_utc())

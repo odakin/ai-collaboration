@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Refuse a blind-review target that carries its own history (comment text in .tex / .md); warn on self-reference that reads as revision history; --staged-warn flags review history written into tex comments at commit time; --selftest.
+"""Refuse a blind-review target that carries its own history (comment text in .tex / .md, a body sentence saying the document was reviewed or corrected); warn on review vocabulary and self-reference that may read as history; --staged-warn flags review history written into tex comments at commit time; --selftest.
 
 Why: isolation by file lists (a deny list in the spec, a read-order instruction) cannot stop history written inside
 the target itself.  A header comment that records the previous round's verdict, the list of corrections and the path
@@ -9,21 +9,30 @@ history to the reviewer unchanged (measured).  So this checks the artifact, not 
 board/board.py request --review-target and make-review-sandbox.py create call it
 (conventions/cold-eyes-isolation.md#contamination-channels (d)).
 
-Target check (exit 0 = referee copy, 1 = refused, 2 = usage).  The predicate is the output contract of
-strip-tex-comments.py, so a stripped copy always passes and a paraphrase does not:
-  .tex  any comment with non-blank text (a line whose first non-blank char is %, or text after an unescaped %)
-  .md   any HTML comment with text
-  both  a body sentence that tells the reader the target was reviewed before (a receipt of a blind review and of
-        the corrections taken from it, 「盲検」) — kind body-history.  Stripping cannot remove it;
-        the author edits the body (measured: such a sentence passed the comment check and the blind
-        session stopped on its exposure rule, correctly).  Ordinary uses (a cited review article, "an earlier
-        version of this work") do not match.
-Warnings (printed, exit unchanged = the target is not refused; the author disambiguates before the request):
-  revision-deixis  a body sentence that names the document itself ("the present draft", "this version", "the current
-                   draft", "earlier version of this") together with a revision verb ("has removed", "no longer",
-                   "now uses"). It may be the subject (a note about another paper's drafts) or the target's own
-                   history; a judging session that stops on history reads it as the latter (measured: a sentence about
-                   a companion paper's draft, written with a self-naming phrase and a revision verb, stopped a blind run).
+Target check (exit 0 = referee copy, 1 = refused, 2 = usage).  Two predicates refuse:
+  comments  .tex = any comment with non-blank text (a line whose first non-blank char is %, or text after an unescaped
+            %); .md = any HTML comment with text.  This predicate is the output contract of strip-tex-comments.py, so a
+            stripped copy always passes the comment check and a paraphrase in a comment does not.
+  body-history  a body sentence that says this document itself was reviewed or corrected: a passive "this / the
+            <note|paper|manuscript|draft|…> was reviewed blind / by an independent …", an active "… reviewed this
+            manuscript", corrections or comments of a review that "are / have been incorporated", "we incorporated the
+            referee's comments", 「本稿は盲検で査読を受け」「査読の指摘を反映」.  Stripping cannot remove it; the author
+            moves it to the results note (measured: such a sentence passed the comment check and the blind session
+            stopped on its exposure rule, correctly).
+Body text is read by sentence, not by line: the lines are joined and split at sentence ends and blank lines (with
+common abbreviations such as "Sec." or "et al." kept inside), so a sentence wrapped across a line break is matched as
+one, and a finding names the line where its match starts.
+Warnings (printed, exit unchanged = the target is not refused; the author decides before the request, rewriting the
+sentence or naming the work it means in the spec's subject slot, template/REVIEW-SPEC-blind-manuscript.md §0):
+  review-mention   review vocabulary that does not say this document was reviewed ("previous review", "referee
+                   reports", "independent session", 「盲検」「査読」): a cited review article, a study of peer review,
+                   repeated trials and double-blind trials are content.  Needs a look, never a refusal.
+  revision-deixis  a clause whose subject names the document itself ("the present draft", "this version", "the current
+                   draft") with a revision verb ("has removed", "no longer uses", "now contains"), without a relative
+                   clause in between ("the present paper shows that particles no longer diffuse" does not warn).  It may
+                   be the subject (a note about another paper's drafts) or the target's own history; a judging session
+                   that stops on history reads it as the latter (measured: such a sentence about a companion paper's
+                   draft stopped a blind run).
   self-noun        the target calls itself "this note" (or memo / report) and elsewhere "this paper" (or manuscript /
                    article), or the other way round: a reader takes both as the target itself (synonyms within one
                    class do not warn) (measured: in a note, "this paper" meant
@@ -57,18 +66,34 @@ MD_COMMENT = re.compile(r'<!--(.*?)-->', re.S)
 REVIEW_WORDS = re.compile(
     r'(?i)\b(?:blind|review(?:ed|er|s)?|verdict|referee|cold-?eyes|findings?|rebuttal|erratum)\b'
     r'|盲検|査読|指摘|訂正|撤回|受領|判定|レビュー')
-BODY_HISTORY = re.compile(   # typeset text that tells the reader the target was reviewed before (measured:
-    # a receipt sentence left in the body passed the comment check and stopped the blind session on arrival)
+_DOC = r'(?:note|paper|manuscript|draft|version|article|document|text|memo|report)'
+_SELF_DOC = r'(?:this|the\s+present|the\s+current|our|the)\s+' + _DOC
+BODY_HISTORY = re.compile(   # a body sentence saying this document itself was reviewed or corrected (refused)
+    r'(?i)\b' + _SELF_DOC + r'\s+(?:\([^()]{0,80}\)\s+)?(?:\w+\s+){0,2}?(?:was|were|has\s+been|have\s+been|had\s+been|is)\s+(?:\w+\s+){0,2}?'
+    r'(?:blind(?:ly)?\s+)?(?:reviewed|refereed)\s+(?:blind(?:ly)?\b|independently\b|by\s+an?\s+(?:independent|separate|second|blind)\b)'
+    r'|\b(?:reviewed|refereed)\s+(?:this|the\s+present|our)\s+' + _DOC + r'\b'
+    r'|\b(?:corrections?|comments?|suggestions?|findings?)\s+(?:of|from)\s+(?:that|the|this|its|an?)\s+(?:\w+\s+){0,2}?'
+    r'(?:review|referee|reviewer|session)s?\b[\s\S]{0,60}?\b(?:are|were|have\s+been|has\s+been)\s+(?:\w+\s+){0,1}?'
+    r'(?:incorporated|addressed|implemented|adopted|included)\b'
+    r'|\bits\s+(?:corrections?|comments?|findings?)\s+(?:are|were|have\s+been|has\s+been)\s+(?:incorporated|addressed|implemented|adopted)\b'
+    r'|\b(?:we|the\s+authors?)\s+(?:have\s+)?(?:incorporated|addressed|implemented|adopted)\s+(?:all\s+)?(?:the\s+)?'
+    r'(?:\w+\s+)?(?:referee|reviewer|review)(?:\'s|s\'|s)?\s+(?:comments?|corrections?|suggestions?|findings?|reports?)\b'
+    r'|(?:本稿|本ノート|本論文|この(?:ノート|論文|原稿|文書|稿))[^。]{0,40}?(?:盲検|査読|レビュー)[^。]{0,20}?(?:を受け|を経|された|受けた)(?!て?い?な[いく]|ず|ぬ)'
+    r'|(?:盲検|査読|レビュー)(?:の|で受けた|で)(?:指摘|訂正|コメント)[^。]{0,20}?(?:反映|取り込|組み込)')
+REVIEW_MENTION = re.compile(   # review vocabulary that may be content or history (warned, never refused)
     r'(?i)\b(?:reviewed\s+blind|blind(?:ly)?\s+review(?:ed)?|independent\s+session|corrections?\s+of\s+(?:that|the|this)\s+review'
     r'|(?:earlier|previous|first|second)\s+(?:review|round\s+of\s+review)|referee\s+reports?|review\s+records?)\b'
     r'|盲検|査読を受け|査読の指摘|査読で')
-SELF_DEIXIS = re.compile(   # the document naming itself (or its own versions)
-    r'(?i)\b(?:the|this)\s+present\s+(?:draft|version|paper|note|manuscript|article|work)\b'
-    r'|\bthis\s+(?:draft|version|revision)\b|\bthe\s+current\s+(?:draft|version)\b'
-    r'|\b(?:earlier|previous|former|original|first)\s+(?:version|draft)\s+of\s+this\b')
-REVISION_VERB = re.compile(
-    r'(?i)\b(?:has|have|had|was|were|been)\s+(?:now\s+)?(?:removed|dropped|deleted|corrected|revised|replaced|changed'
-    r'|rewritten|withdrawn|retracted)\b|\bno\s+longer\b|\bnow\s+(?:uses|keeps|contains|includes|states|reads|drops)\b')
+_DEIXIS = (r'(?:the|this)\s+present\s+(?:draft|version|paper|note|manuscript|article|work)'
+           r'|this\s+(?:draft|version|revision)|the\s+current\s+(?:draft|version)')
+REVISION_DEIXIS = re.compile(   # the document as subject of a revision verb in the same clause (warned)
+    r'(?i)\b(?P<d>' + _DEIXIS + r')(?:\s+(?!(?:whose|which|that|who|where|when)\b)\S+){0,6}?\s+'
+    r'(?P<v>(?:has|have|had|was|were)\s+(?:now\s+)?(?:been\s+)?(?:removed|dropped|deleted|corrected|revised|replaced|rewritten|withdrawn|retracted)'
+    r'|no\s+longer\s+(?:uses?|keeps?|contains?|includes?|states?|reads?|assumes?|has)'
+    r'|now\s+(?:uses|keeps|contains|includes|states|reads|drops|omits))\b')
+ABBREV = {'al', 'e.g', 'i.e', 'cf', 'vs', 'ref', 'refs', 'eq', 'eqs', 'sec', 'secs', 'fig', 'figs', 'ch', 'app', 'no', 'resp', 'viz',
+          'tab', 'thm', 'prop', 'def', 'dr', 'prof', 'mr', 'ms', 'st', 'approx'}
+SENT_END = re.compile(r'(?<=[.!?])\s+(?=[A-Z\\(\[“"\'])|(?<=。)|\n[ \t]*\n|\n(?=[ \t]*(?:\\(?:section|subsection|subsubsection|paragraph|begin|end|item|caption)\b|#|[-*+] |\|))')
 SELF_NOUN = re.compile(r'(?i)\b(?:this|the\s+present)\s+(note|paper|manuscript|article|report|memo)\b')
 NOUN_CLASS = {'paper': 'paper', 'manuscript': 'paper', 'article': 'paper', 'note': 'note', 'memo': 'note', 'report': 'note'}
 POINTERS = re.compile(
@@ -83,17 +108,55 @@ def _describe(body: str) -> dict:
     return {'review_words': words, 'pointer': bool(POINTERS.search(body)), 'chars': len(body.strip())}
 
 
-def body_warnings(lines: list[tuple[int, str]]) -> list[dict]:
-    """Warnings on body lines [(line number, text without comments)]: revision-deixis and self-noun (see the docstring).
-    Only the matched words are reported, never the sentence."""
-    out = []
+def sentences(lines: list[tuple[int, str]]) -> list[tuple[int, str]]:
+    """Body lines [(line number, text)] -> sentences [(start offset, text)] over the joined body, so a sentence wrapped
+    across a line break is one unit (measured gap: "reviewed" at a line end and "blind" on the next line passed a
+    line-by-line scan).  Splits at sentence ends (not after common abbreviations), blank lines and structural line
+    starts (sectioning, list items, table rows)."""
+    joined = '\n'.join(t for _, t in lines)
+    cuts, start = [], 0
+    for m in SENT_END.finditer(joined):
+        before = joined[max(0, m.start() - 12):m.start()]
+        w = re.search(r'([A-Za-z][A-Za-z.]*)\.$', before)
+        if w and w.group(1).lower() in ABBREV:
+            continue
+        cuts.append((start, joined[start:m.start()]))
+        start = m.end()
+    cuts.append((start, joined[start:]))
+    return [(o, t) for o, t in cuts if t.strip()]
+
+
+def _line_at(lines: list[tuple[int, str]], offset: int) -> int:
+    """Line number of a character offset in the joined body."""
+    pos = 0
+    for n, t in lines:
+        if offset <= pos + len(t):
+            return n
+        pos += len(t) + 1
+    return lines[-1][0] if lines else 1
+
+
+def body_findings(lines: list[tuple[int, str]]) -> tuple[list[dict], list[dict]]:
+    """(hits, warnings) for body lines [(line number, text without comments)], matched per sentence.  Hits = body-history
+    (refused); warnings = review-mention, revision-deixis, self-noun.  Only matched words are reported, never the sentence."""
+    hits, out = [], []
     nouns: dict[str, list[int]] = {}
-    for i, body in lines:
-        d, v = SELF_DEIXIS.search(body), REVISION_VERB.search(body)
-        if d and v:
-            out.append({'line': i, 'kind': 'revision-deixis', 'words': [d.group(0).lower(), v.group(0).lower()]})
-        for m in SELF_NOUN.finditer(body):   # synonyms count as one self-name (a paper says "this paper" and "this manuscript")
-            nouns.setdefault(NOUN_CLASS[m.group(1).lower()], []).append(i)
+    for off, sent in sentences(lines):
+        b = BODY_HISTORY.search(sent)
+        if b:
+            hits.append({'line': _line_at(lines, off + b.start()), 'kind': 'body-history',
+                         'review_words': [' '.join(b.group(0).lower().split())[:60]], 'pointer': False, 'chars': len(sent.strip())})
+        else:
+            r = REVIEW_MENTION.search(sent)
+            if r:
+                out.append({'line': _line_at(lines, off + r.start()), 'kind': 'review-mention',
+                            'words': [' '.join(r.group(0).lower().split()), 'content or this document\'s history? decide']})
+        d = REVISION_DEIXIS.search(sent)
+        if d:
+            out.append({'line': _line_at(lines, off + d.start()), 'kind': 'revision-deixis',
+                        'words': [' '.join(d.group('d').lower().split()), ' '.join(d.group('v').lower().split())]})
+        for m in SELF_NOUN.finditer(sent):   # synonyms count as one self-name (a paper says "this paper" and "this manuscript")
+            nouns.setdefault(NOUN_CLASS[m.group(1).lower()], []).append(_line_at(lines, off + m.start()))
     if len(nouns) > 1:
         ranked = sorted(nouns.items(), key=lambda kv: -len(kv[1]))
         top, n_top = ranked[0][0], len(ranked[0][1])
@@ -102,7 +165,7 @@ def body_warnings(lines: list[tuple[int, str]]) -> list[dict]:
             for i in sorted(set(where)):
                 out.append({'line': i, 'kind': 'self-noun',
                             'words': [f'a "this {noun}"-class self-name', f'elsewhere "this {top}" x{n_top}' if not tie else 'self-nouns tied']})
-    return sorted(out, key=lambda w: w['line'])
+    return hits, sorted(out, key=lambda w: w['line'])
 
 
 def scan(path: Path, text: str | None = None) -> dict:
@@ -120,31 +183,23 @@ def scan(path: Path, text: str | None = None) -> dict:
             if m and m.group(1).strip():
                 full = line.lstrip().startswith('%')
                 hits.append({'line': i, 'kind': 'comment-line' if full else 'trailing-comment', **_describe(m.group(1))})
-            body = TEX_COMMENT.sub('%', line)
-            bodies.append((i, body))
-            b = BODY_HISTORY.search(body)
-            if b:
-                hits.append({'line': i, 'kind': 'body-history', 'review_words': [b.group(0).lower()], 'pointer': False,
-                             'chars': len(body.strip())})
+            bodies.append((i, TEX_COMMENT.sub('', line)))
     else:
         for m in MD_COMMENT.finditer(text):
             if m.group(1).strip():
                 hits.append({'line': text.count('\n', 0, m.start()) + 1, 'kind': 'html-comment', **_describe(m.group(1))})
-        for i, line in enumerate(MD_COMMENT.sub('', text).split('\n'), 1):
-            bodies.append((i, line))
-            b = BODY_HISTORY.search(line)
-            if b:
-                hits.append({'line': i, 'kind': 'body-history', 'review_words': [b.group(0).lower()], 'pointer': False,
-                             'chars': len(line.strip())})
-    return {'file': str(path), 'scanned': True, 'hits': hits, 'warnings': body_warnings(bodies)}
+        kept = MD_COMMENT.sub(lambda m: '\n' * m.group(0).count('\n'), text)   # keep line numbers
+        bodies = list(enumerate(kept.split('\n'), 1))
+    body_hits, warnings = body_findings(bodies)
+    return {'file': str(path), 'scanned': True, 'hits': sorted(hits + body_hits, key=lambda h: h['line']), 'warnings': warnings}
 
 
 def _warning_lines(r: dict) -> list[str]:
     ws = r.get('warnings') or []
     if not ws:
         return []
-    out = [f"  ⚠️ {len(ws)} warning(s), not refused: a sentence that may read as the target's own revision history. "
-           "Name the work it means, or define history and subject in the spec (§0)"]
+    out = [f"  ⚠️ {len(ws)} warning(s), not refused: a sentence that may read as the target's own history. "
+           "Decide whether it is content or history: rewrite it to name the work it means, or name that work in the spec's subject slot (§0)"]
     for w in ws[:12]:
         out.append(f"    line {w['line']} ({w['kind']}): [{'; '.join(w['words'])}]")
     if len(ws) > 12:
@@ -263,6 +318,34 @@ def _selftest() -> int:
     rn = scan(Path('g.tex'), nouns)
     assert rn['hits'] == [] and [(w['line'], w['kind']) for w in rn['warnings']] == [(2, 'self-noun')], rn
     assert scan(Path('h.tex'), 'In this paper we show X.\nThis manuscript is organized as follows.\n')['warnings'] == [], 'synonyms'
+    # pairs (synthetic): each sentence on one line and wrapped across a line break must give the same result
+    def kinds(text, key='hits'):
+        return [h['kind'] for h in scan(Path('x.tex'), text)[key]]
+    receipts = ['This manuscript was reviewed blind and revised accordingly.',
+                'An independent session reviewed this manuscript blind; its corrections have been incorporated.',
+                'The corrections of that review have been incorporated throughout.',
+                '本稿は盲検で査読を受け、その指摘を反映した。']
+    for r in receipts:
+        wrapped = r.replace(' blind', '\nblind', 1) if ' blind' in r else r.replace('盲検で', '盲検で\n', 1).replace(' have been', '\nhave been', 1)
+        assert kinds(r) == ['body-history'] and kinds(wrapped) == ['body-history'], (r, kinds(r), kinds(wrapped))
+    content = ['The previous review by Smith gives an exhaustive account of finite-size corrections.',
+               'We analyze anonymized referee reports to quantify reviewer disagreement.',
+               'We estimate independent session effects in repeated psychometric trials.',
+               '二重盲検試験により治療効果を推定する。',
+               '本稿は査読前の preprint で、独立追試・査読を経ていない。',
+               'The protocol of Ref.~\\cite{x} was reviewed by its own ethics board.']
+    for c in content:
+        assert kinds(c) == [] and kinds(c.replace(' ', '\n', 2)) == [], (c, kinds(c))   # never refused, wrapped or not
+    assert kinds(content[0], 'warnings') == ['review-mention'], 'general review words get a look, not a refusal'
+    deixis_pair = ['The present draft has removed the disputed assumption.', 'The present draft\nhas removed the disputed assumption.']
+    assert all(kinds(t, 'warnings') == ['revision-deixis'] for t in deixis_pair), [kinds(t, 'warnings') for t in deixis_pair]
+    for plain in ['The present paper shows that particles no longer diffuse after freezing.',
+                  'The present work derives a limit in which the medium no longer amplifies fluctuations.',
+                  'The present manuscript models particles whose charge has changed after a collision.']:
+        assert kinds(plain, 'warnings') == [], (plain, kinds(plain, 'warnings'))   # the document is not the subject
+    assert kinds('This note (see Sec. 2 and Ref.~\\cite{y}) was reviewed blind by a second session.') == ['body-history'], \
+        'an abbreviation does not split the sentence'
+    assert scan(Path('w.tex'), 'Intro text.\n\nThis manuscript was reviewed\nblind.')['hits'][0]['line'] == 3, 'line of the match'
     md = 'text\n<!-- reviewer 2 verdict: reject -->\nmore'
     assert scan(Path('a.md'), md)['hits'][0]['line'] == 2
     assert scan(Path('b.pdf'), '')['scanned'] is False
@@ -288,7 +371,7 @@ def _selftest() -> int:
         assert [h['line'] for h in got] == [4] and got[0]['pointer'] and 'verdict' in got[0]['review_words'], got
         assert staged_warn(repo) == 0, 'warn only: a finding never blocks'
         assert staged_warn(Path(td) / 'not-a-repo') == 3, 'a check that could not run says so'
-    print('selftest OK (22 checks)')
+    print('selftest OK (28 checks)')
     return 0
 
 
