@@ -281,14 +281,18 @@ def check_post(cfg, root, *, project, policy, texts=(), refs=(), touches=()):
 
 # ---------------------------------------------------------------- scaffold
 
-def scaffold(root, *, audience, encryption, sources, branch='main', name=None, engine_url=None) -> list[Path]:
-    """Write board.json and a short README for a new board. Commits nothing (the caller adds both files)."""
+def scaffold(root, *, audience, encryption, sources, branch='main', name=None, engine_url=None, readable=None) -> list[Path]:
+    """Write board.json and a short README for a new board. Commits nothing (the caller adds both files).
+
+    A collaborators board lists this engine's own checkout in `readable` by default (its readers need the engine,
+    so naming it leaks nothing); `readable` replaces that list when given."""
     root = Path(root)
     if (root / CONFIG).exists():
         raise ValueError(f'{root / CONFIG} already exists')
     cfg = {'board_format': 1, 'audience': audience, 'encryption': encryption, 'branch': branch}
     if audience == 'collaborators':
         cfg['sources'] = list(sources)
+        cfg['readable'] = list(readable) if readable is not None else [Path(__file__).resolve().parent.parent.name]
     if name:
         cfg['name'] = name
     validate(cfg)

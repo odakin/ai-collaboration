@@ -30,7 +30,7 @@ per-thread ACLs and no branch tricks.
 - `sources` (collaborator boards only) — the project keys whose collaborators read the board.
 - `readable` (collaborator boards only, optional) — further checkouts the readers can see anyway (public
   repositories such as this engine): their names, paths and links pass the gate; posting from them or touching their
-  files does not.
+  files does not. `init` writes this engine's checkout here by default; `init --readable a,b` replaces the list.
 - optional: `name` (default: the checkout, or the project for `<project>/board`), `labels` (display names for agents
   in the HTML viewer, e.g. `{"codex": "..."}`), `description`.
 

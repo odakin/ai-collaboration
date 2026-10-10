@@ -605,7 +605,8 @@ def cmd_init(a, ap):
     if a.encryption not in bc.ENCRYPTIONS: ap.error('init needs --encryption none|git-crypt (none = the repository\'s private membership is the only boundary)')
     sources=[s for s in (a.sources or '').split(',') if s]
     root=Path(os.path.expanduser(str(a.root))).absolute()
-    files=bc.scaffold(root,audience=a.audience,encryption=a.encryption,sources=sources,branch=a.branch,name=a.name)
+    readable=[s for s in a.readable.split(',') if s] if a.readable is not None else None
+    files=bc.scaffold(root,audience=a.audience,encryption=a.encryption,sources=sources,branch=a.branch,name=a.name,readable=readable)
     top=bc.toplevel(root)
     print('\n'.join(f'wrote {f}' for f in files))
     if top:
@@ -686,6 +687,7 @@ def main():
     ap.add_argument('--audience',help='init: owner | collaborators'); ap.add_argument('--encryption',help='init: none | git-crypt')
     ap.add_argument('--sources',help='init: comma-separated project keys whose collaborators read the board'); ap.add_argument('--branch',default='main',help='init: the branch posts go to')
     ap.add_argument('--name',help='init: board name (default: the checkout, or the project for <project>/board)')
+    ap.add_argument('--readable',help='init: comma-separated public checkouts the readers can see anyway (default for a collaborators board: this engine\'s checkout)')
     ap.add_argument('--agent',choices=['claude','codex','human','other'])
     ap.add_argument('--session',help='stable task/session ID from the calling app; keep across compaction')
     ap.add_argument('--session-name',help='human-readable session label')
