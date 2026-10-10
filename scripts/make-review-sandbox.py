@@ -82,11 +82,11 @@ def create(root: Path, slug: str, spec: Path, includes: list[Path], keep_comment
     (sb / "CLAUDE.md").write_text(CLAUDE_MD, encoding="utf-8")
     (sb / "AGENTS.md").write_text(CLAUDE_MD, encoding="utf-8")   # Codex reads AGENTS.md (cold-eyes-isolation.md §1 (a))
     shutil.copy2(spec, sb / "REVIEW-SPEC.md")
-    strip = None if keep_comments else _sibling("strip-tex-comments.py").strip
+    strip = None if keep_comments else _sibling("strip-tex-comments.py").strip_for   # .tex and .bib (cold-eyes (d))
     for f in includes:
-        if strip and f.suffix.lower() == ".tex":
+        if strip and f.suffix.lower() in (".tex", ".bib"):
             src = f.read_text(encoding="utf-8")
-            out = strip(src)
+            out = strip(f.name, src)
             (sb / f.name).write_text(out, encoding="utf-8")
             print(f"  stripped {f.name}: {src.count(chr(10)) - out.count(chr(10))} comment line(s) removed in the sandbox copy "
                   "(build the included PDF from the same source)")
@@ -166,6 +166,11 @@ def selftest() -> int:
         assert (sb2 / "AGENTS.md").read_text(encoding="utf-8") == (sb2 / "CLAUDE.md").read_text(encoding="utf-8")
         sb3 = create(root, "t3", spec, [tex], keep_comments=True)
         assert "verdict" in (sb3 / "note.tex").read_text(encoding="utf-8")
+        bib = Path(td) / "refs.bib"
+        bib.write_text("% added after the referee asked (plans/r.md)\n@article{k,\n  title = \"{A 93\\% result}\",\n}\n", encoding="utf-8")
+        sb3b = create(root, "t3b", spec, [bib])
+        got_bib = (sb3b / "refs.bib").read_text(encoding="utf-8")
+        assert "referee" not in got_bib and "93\\% result" in got_bib, "the .bib comment lines are stripped, entries kept"
         md = Path(td) / "note.md"; md.write_text("text\n<!-- reviewer verdict: reject -->\n", encoding="utf-8")
         try:
             create(root, "t4", spec, [md]); raise AssertionError("should refuse an include that still carries comments")
@@ -178,7 +183,7 @@ def selftest() -> int:
             sb5 = create(root, "t5", spec, [dx])
         assert (sb5 / "deixis.tex").exists() and "not refused" in buf.getvalue(), "a warning is shown, not a refusal"
         assert "the spec wins" in CLAUDE_MD
-    print("selftest OK (18 checks)")
+    print("selftest OK (19 checks)")
     return 0
 
 

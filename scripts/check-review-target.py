@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Refuse a blind-review target that carries its own history (comment text in .tex / .md, a body sentence saying the document was reviewed or corrected); warn on review vocabulary and self-reference that may read as history; --staged-warn flags review history written into tex comments at commit time; --selftest.
+"""Refuse a blind-review target that carries its own history (comment text in .tex / .md / .bib, a body sentence saying the document was reviewed or corrected); warn on review vocabulary and self-reference that may read as history; --staged-warn flags review history written into tex comments at commit time; --selftest.
 
 Why: isolation by file lists (a deny list in the spec, a read-order instruction) cannot stop history written inside
 the target itself.  A header comment that records the previous round's verdict, the list of corrections and the path
@@ -171,12 +171,21 @@ def body_findings(lines: list[tuple[int, str]]) -> tuple[list[dict], list[dict]]
 def scan(path: Path, text: str | None = None) -> dict:
     """{'file', 'scanned', 'hits': [{'line', 'kind', 'review_words', 'pointer', 'chars'}], 'warnings': [{'line', 'kind', 'words'}]}"""
     suffix = path.suffix.lower()
-    if suffix not in ('.tex', '.md'):
+    if suffix not in ('.tex', '.md', '.bib'):
         return {'file': str(path), 'scanned': False, 'hits': [], 'warnings': []}
     if text is None:
         text = path.read_text(encoding='utf-8', errors='replace')
     hits = []
     bodies: list[tuple[int, str]] = []
+    if suffix == '.bib':
+        # comment lines between entries and @comment entries carry the author's reasons for a reference (which
+        # round asked for it, where the source note is); inside an entry % is a literal, so only whole lines count
+        for i, line in enumerate(text.split('\n'), 1):
+            if line.lstrip().startswith('%') and line.lstrip('% \t'):
+                hits.append({'line': i, 'kind': 'comment-line', **_describe(line.lstrip().lstrip('%'))})
+            elif re.match(r'^\s*@comment\b', line, re.IGNORECASE):
+                hits.append({'line': i, 'kind': 'comment-entry', **_describe(line)})
+        return {'file': str(path), 'scanned': True, 'hits': hits, 'warnings': []}   # no body prose in a .bib
     if suffix == '.tex':
         for i, line in enumerate(text.split('\n'), 1):
             m = TEX_COMMENT.search(line)
@@ -308,6 +317,11 @@ def _selftest() -> int:
     assert scan(Path('c.tex'), 'from the review article of Smith and Jones~\\cite{x}, and an earlier version of this work')['hits'] == [], \
         'ordinary uses of "review" and "earlier version" in the text are not history'
     assert scan(Path('d.md'), 'This draft was reviewed blind by a second session.')['hits'][0]['kind'] == 'body-history'
+    bib = '% added after round 2 asked for it (plans/x.md)\n@article{k,\n  title = "{A}",\n  note = "{p.3 % literal}",\n}\n'
+    rbib = scan(Path('r.bib'), bib)
+    assert [h['kind'] for h in rbib['hits']] == ['comment-line'] and rbib['hits'][0]['line'] == 1, rbib
+    assert scan(Path('c.bib'), bib.split('\n', 1)[1])['hits'] == [], 'a % inside a field value is not a comment'
+    assert scan(Path('e.bib'), '@Comment{see the referee report}\n')['hits'][0]['kind'] == 'comment-entry'
     deixis = '\\section{B}\nThe present version retains form A and has dropped form B.\n'
     rd = scan(Path('e.tex'), deixis)
     assert rd['hits'] == [] and [w['kind'] for w in rd['warnings']] == ['revision-deixis'], rd
