@@ -2,6 +2,12 @@
 
 > 📌 SESSION.md = 案件ごとの現在地 + 正本への link (進んだら置き換える、 日付を見出しにした節・commit hash・messageId を置かない = 層1 claude-config/CONVENTIONS.md#session-no-durable-record)。 日付つきの節は SESSION-archive.md へ verbatim MOVE 済 (2026-09-28)。
 
+## 現在地：Lindblad 観測量の検査
+
+再利用 API と合成 selftest を整備した。次の利用では、
+[作用空間とチャネルの境界](docs/lindblad-observables.md)を確認してから、
+[生成索引](scripts/README.md)の module を使う。独立検査の原本は呼び元で保持する。
+
 ## 現在地：有限積分・外積・式の転記
 
 共通道具を追加した。再利用時は [実装の分担](DESIGN.md#finite-vacuum-and-transcription-tools) と

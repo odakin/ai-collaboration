@@ -15,6 +15,17 @@
 凍結された独立検査の原本は保持し、再利用用 library との一致を別の integration check で検査する。
 原本二つを同じ実装への alias に変えて、独立した二経路と数え続けない。
 
+## <a id="lindblad-observable-checks"></a>Lindblad 観測量の有限行列検査
+
+`scripts/lindblad_observables.py` が随伴生成子、単一チャネルの強度微分、
+密度行列との trace pairing、計算後の部分空間への制限を担当する。
+率・状態・観測量・環境近似は呼び元が指定し、公開側に個別模型の入力や判定を置かない。
+方法と作用空間の境界は [利用説明](docs/lindblad-observables.md) から辿る。
+
+独立検査の原本を置き換える方式は採らず、別の照合で再利用 API との一致を確認する。
+Floquet 検査は既存の `floquet-monodromy.py` が担当する。有限次元の生成子検査と、
+周期的な mode equation の検査を一つの solver へ混ぜない。
+
 ## claude-config から分離した理由と、何を持ってきたか (2026-09-06)
 
 **判断**: 検証サイクルの platform (規約 3 本 + script 4 本) を新 repo `ai-collaboration` (layer 1、public) に移す。`claude-config` は Claude Code の harness (setup / hooks / gitignore / domain 規約 / 生成 tool) として残す。
