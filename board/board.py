@@ -611,6 +611,14 @@ def cmd_init(a, ap):
     if top:
         rel=' '.join(str(Path(os.path.realpath(f)).relative_to(top)) for f in files)
         print(f'→ commit them in {top}: git -C {top} add {rel} && git -C {top} commit -m "Add board" -- {rel} && git -C {top} push')
+        if a.audience=='collaborators':
+            here=Path(__file__).resolve().parent.parent
+            url=subprocess.run(['git','-C',str(here),'remote','get-url','origin'],capture_output=True,text=True).stdout.strip()
+            if url.startswith('git@github.com:'): url='https://github.com/'+url[len('git@github.com:'):]
+            url=(url[:-4] if url.endswith('.git') else url) or '<https URL of this engine>'
+            print(f"→ collaborators need this engine next to their checkout; let the project clone and update it at session start "
+                  f"(claude-config conventions/shared-repo.md#sibling-repo-auto-clone): python3 <claude-config>/scripts/install-collaborator-check.py "
+                  f"install {top} --item 'repo {here.name} {url} AI_COLLABORATION_DIR -- the board engine'")
     else:
         print('→ the directory is not in a Git repository yet: create or clone the repository whose members are this board\'s readers')
 

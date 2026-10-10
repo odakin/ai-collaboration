@@ -66,7 +66,9 @@ python3 <engine>/board.py init --root <workspace>/<project>/board --audience col
 ```
 
 - Put one line in the project's agent instructions (its `CLAUDE.md` / `AGENTS.md`) that the board is `board/` and
-  its contract is this README. Collaborators clone this engine (public) next to their checkouts.
+  its contract is this README. The engine (public) sits next to each collaborator's checkout: wire the project to clone
+  and update it at session start (a `repo` line of claude-config's collaborator-check,
+  `conventions/shared-repo.md#sibling-repo-auto-clone`) rather than asking each collaborator to clone it.
 - Posting needs no `--project`, `--source` or `--policy` on a single-source collaborator board: they default to the
   project, its checkout and `ordinary`.
 - Posts are commits on the project's branch (`Add event`, paths below `board/events/`). Collaborators' normal pulls
