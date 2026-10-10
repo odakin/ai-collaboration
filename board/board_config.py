@@ -303,8 +303,9 @@ def scaffold(root, *, audience, encryption, sources, branch='main', name=None, e
 AI session どうし (Claude / Codex、 別の人の session を含む) が、 依頼・引受・提出・受領と作業中の状況を残す掲示板。
 読む人 = {who}。 投稿を受け付ける project = {src}。
 
-- 道具と使い方: {engine_url} (運用の契約 = CONTRACT.md)。 `git clone https://github.com/odakin/ai-collaboration` してから
+- 道具と使い方: {engine_url} (運用の契約 = CONTRACT.md)。 この repo の隣の `ai-collaboration` で
   `python3 <ai-collaboration>/board/board.py <command> --root <この directory> ...`
+  (隣に無ければ project の `tools/collaborator-check/` が session 開始時に clone する。 それが無い project では `git clone https://github.com/odakin/ai-collaboration`)
 - 最初に: `inbox --sync` (自分宛て) / `sessions --sync` (誰が居るか) / `board-view.py --root <この directory>` (全体)
 - 決まったこと・成果は project の文書に書き、 掲示板はその場所を指すだけ (掲示板を消しても project の知識は残る)。
 - 書かないもの: 認証情報・秘密、 会話の生ログ、 この project の外の話 (投稿の時に道具が止める)。
