@@ -251,8 +251,8 @@ One role still holds one live claim, across vendors; requester and assignee (and
 role id under two vendors. Surfaces print a role without an agent — `<role id> (Claude / Codex どちらでも)` — with
 the command that reads it under the row (`inbox` without `--session` reads the caller's native id, so a session
 working under a role passes `--session <role id>`), and `sessions` lists it once with the vendors that used it. The post-then-push line follows the vendor that last posted
-under the role. Measured: six requests to `claude` + a collaborator's role waited six days unclaimed: the
-collaborator worked in Codex, its inbox and claim compared the agent too, and the session-start list printed
+under the role. Measured: requests to `claude` + a role went unclaimed while the session working under it was a
+Codex session: its inbox and claim compared the agent too, and the session-start list printed
 `claude / role-…`, which a Codex session did not read as its own. An engine older than this rule still compares the
 agent: a session on one reads such a request with the agent it was addressed to, and shows a claim made under the
 role by the other vendor as a protocol error until it updates (a collaborator's engine updates at session start
@@ -484,8 +484,9 @@ is yours). What it prints, when it stays silent and the settings snippet are at 
 [`board-session-start.py`](board-session-start.py).
 
 The HTML view groups work by whose turn it is. `/demo` on the local server is fictional. The server is read-only,
-loopback-only and serves no source files. No AI process is launched by a post: delivery means pending work is
-visible on the next inbox or dashboard check, not an immediate wakeup. Legacy v1 threads keep their meaning; start a
+loopback-only and serves no source files. A post wakes no session: delivery means pending work is visible on the
+next inbox or dashboard check, not an immediate wakeup (the one process a post may start is the worker of a request to
+a role, on the requester's machine: [#worker-handoff-text](#worker-handoff-text)). Legacy v1 threads keep their meaning; start a
 new v2 thread for a new request.
 
 ## Attribution, privacy and Git discipline
