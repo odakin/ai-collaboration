@@ -1021,6 +1021,23 @@ class CollaboratorBoards(unittest.TestCase):
         w=json.loads(self.cli('show','--root',b,'--agent','claude','--session',review,'--request',req,'--json','--sync').stdout)
         self.assertEqual(w['status'],'accepted')
 
+    def test_handover_by_request_alone_and_a_wrong_reply_to(self):
+        # `handover --request <request>` without --reply-to names the request (measured: refused as "missing reply_to");
+        # a submission id in --reply-to is refused with what to pass (measured: "handover must name the request" only)
+        b=str(self.proj/'board'); role='role-proj-partner'; review='role-proj-owner-review'
+        req=self.eid(self.cli('request','--root',b,'--agent','claude','--session','c-1','--thread','2026-10-16-handover-request',
+            '--to','claude','--to-session',role,'--summary','Check notes/a.md','--acceptance','Reproduce it','--no-launch').stdout)
+        claim=self.eid(self.cli('claim','--root',b,'--agent','codex','--session',role,'--request',req,'--summary','on it').stdout)
+        sub=self.eid(self.cli('submit','--root',b,'--agent','codex','--session',role,'--request',req,'--reply-to',claim,
+            '--summary','done','--deliverable','notes/a.md').stdout)
+        move=['handover','--root',b,'--agent','human','--session','desktop:owner','--request',req,'--role','reviewer',
+              '--to','claude','--to-session',review,'--summary','the reviewer session is gone']
+        bad=self.cli(*move,'--reply-to',sub,check=False)
+        self.assertNotEqual(bad.returncode,0); self.assertIn('--reply-to must be the request id',bad.stderr)
+        self.cli(*move)
+        w=json.loads(self.cli('show','--root',b,'--agent','claude','--session',review,'--request',req,'--json','--sync').stdout)
+        self.assertEqual(w['reviewer']['session_id'],review); self.assertEqual(w['status'],'submitted')
+
     def test_reader_gate_refuses_what_collaborators_must_not_see(self):
         b=str(self.proj/'board')
         base=['request','--root',b,'--agent','claude','--session','c-1','--thread','2026-10-05-gate','--to','codex','--to-session','x-1',

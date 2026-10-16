@@ -168,7 +168,7 @@ Operating facts (measured):
 - Inside the Codex sandbox (`workspace-write`) there is no network: `--sync`, `--preview` and every post fetch or push
   and fail until the command is approved to run outside the sandbox. Reads of the local checkout
   (`inbox` without `--sync`, `board-view.py --surface`) work there.
-- `handover` needs `--reply-to <request id>` (that id is also the request; `--request` may be left out). A session about to close hands the requests it reviews to its
+- `handover` replies to the request itself: name it with `--request` or `--reply-to` (either one is enough; a submission or other event id in `--reply-to` is refused). A session about to close hands the requests it reviews to its
   successor with `handover --role reviewer`. A reviewer whose session has died is replaced by a `human` handover on
   the owner's explicit instruction: `--agent human --session <chat>:<user id>` (a bare name is refused).
 
