@@ -1082,6 +1082,10 @@ def main():
         missing=[f for f,v in (('--source',a.source),('--policy',a.policy)) if not v]
         ap.error('posting requires '+' and '.join(missing))
     touch_cmd=a.command if a.command in {'touch','untouch'} else None
+    if a.command=='handover' and not a.request and a.reply_to:
+        # CONTRACT: a handover replies to the request itself, so --reply-to names it (measured: --reply-to alone was refused
+        # with "--request must identify an existing request", and the reviewer had to guess the second flag)
+        a.request=a.reply_to
     if touch_cmd and (a.policy!='ordinary' or a.request or not a.thread or not a.project):
         ap.error(f'{touch_cmd} needs --policy ordinary, --project and --thread (no --request): paths are metadata, restricted posts carry none')
     if a.command=='touch' and not a.path: ap.error('touch needs --path')

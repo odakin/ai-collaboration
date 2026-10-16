@@ -1004,6 +1004,23 @@ class CollaboratorBoards(unittest.TestCase):
         self.assertEqual(sum(1 for l in sessions.splitlines() if f'/ {role} ' in l),1,sessions)
         self.assertIn(f'claude|codex / {role}  [role]',sessions)
 
+    def test_handover_names_its_request_by_reply_to_alone(self):
+        # the requesting session died; the owner moves the review to a standing role with `handover --reply-to <request>`
+        b=str(self.proj/'board'); role='role-proj-partner'; review='role-proj-owner-review'
+        req=self.eid(self.cli('request','--root',b,'--agent','claude','--session','c-1','--thread','2026-10-16-handover',
+            '--to','claude','--to-session',role,'--summary','Check notes/a.md','--acceptance','Reproduce it','--no-launch').stdout)
+        claim=self.eid(self.cli('claim','--root',b,'--agent','codex','--session',role,'--request',req,'--summary','on it').stdout)
+        sub=self.eid(self.cli('submit','--root',b,'--agent','codex','--session',role,'--request',req,'--reply-to',claim,
+            '--summary','done','--deliverable','notes/a.md').stdout)
+        self.cli('handover','--root',b,'--agent','human','--session','desktop:owner','--reply-to',req,'--role','reviewer',
+            '--to','claude','--to-session',review,'--summary','the reviewer session is gone')
+        w=json.loads(self.cli('show','--root',b,'--agent','claude','--session',review,'--request',req,'--json','--sync').stdout)
+        self.assertEqual(w['reviewer']['session_id'],review); self.assertEqual(w['status'],'submitted')
+        self.cli('accept','--root',b,'--agent','claude','--session',review,'--request',req,'--reply-to',sub,
+            '--summary','checked','--reference','proj@'+board.run(self.proj,'rev-parse','HEAD').stdout.decode().strip()[:10])
+        w=json.loads(self.cli('show','--root',b,'--agent','claude','--session',review,'--request',req,'--json','--sync').stdout)
+        self.assertEqual(w['status'],'accepted')
+
     def test_reader_gate_refuses_what_collaborators_must_not_see(self):
         b=str(self.proj/'board')
         base=['request','--root',b,'--agent','claude','--session','c-1','--thread','2026-10-05-gate','--to','codex','--to-session','x-1',
