@@ -175,13 +175,16 @@ sidecar は「何を書くか」 の規約。 ここは「どの順で手を動�
 
 ## <a id="submission-cleanup"></a>8. 投稿前の清掃 (review markup)
 
-共著 review が終わったら、 着色と問答を落とす。 `scripts/review-markup-clean.py` が 3 つだけする:
-着色の解除 (中身は保持) / 問答ブロックの削除 (`--qa-prefix` で指定した著者イニシャル等で始まるもの) / 自動日付の非表示 (`--suppress-date`)。
-コメント行の中は触らない。
+共著 review が終わったら、 着色と問答を落とす。 `scripts/review-markup-clean.py` がする事:
+着色の解除 (中身は保持。 `--macro` は繰り返し可、 `{\color{名前}…}` の群は `--color`) / 問答ブロックの削除 (`--qa-prefix` で指定した著者イニシャル等で始まるもの。 `--qa-to-comment` なら消さずに % コメント行にする) / 印字しない注記 macro の comment 化 (`--comment-macro`) / 自動日付の非表示 (`--suppress-date`)。
+コメント行の中は触らない。 文中の注記を comment にするときは、 その注記だけを自分の行に出す。 `--from-line` / `--to-line` で範囲を限れる (範囲の中で開いて外で閉じる wrapper があれば止まる)。
 
 ```bash
 python3 scripts/review-markup-clean.py paper.tex clean.tex \
     --macro red --qa-prefix '\bf [XX]' --qa-prefix '[YY:' --suppress-date
+# AI の色を、 著者が裁定した範囲だけ地の文に戻す (規則 9)
+python3 scripts/review-markup-clean.py paper.tex paper.tex \
+    --macro cl --color Orange --comment-macro CL --from-line 120 --to-line 860
 ```
 
 - **削除した問答は sidecar の 削除 節に verbatim で残す** (§2 規則 4)。 返答の中身が本文・脚注に反映済みであることを確認してから消す。
