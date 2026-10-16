@@ -242,6 +242,21 @@ needs none, and the completion conditions in `--acceptance` must then be self-co
 receives under the role has no memory of the request's conversation. Vendor and host are not addresses;
 `--instance` is metadata.
 
+<a id="role-any-agent"></a>**A role id is matched by the id alone.** A native id is one vendor's session, so both
+parts of `(agent, session_id)` must match. A role id names whichever session the owner opens under it, Claude or
+Codex, so the agent part is ignored: a request to `--to claude --to-session role-…` (or `--to codex`) appears in
+`inbox --session <role id>` of either vendor, and that session may claim, submit, block, answer and review under the
+role. `--to` on a role is metadata: it only picks the worker launch line ([#worker-handoff-text](#worker-handoff-text)).
+One role still holds one live claim, across vendors; requester and assignee (and worker and reviewer) may not be one
+role id under two vendors. Surfaces print a role without an agent — `<role id> (Claude / Codex どちらでも)` — and
+`sessions` lists it once with the vendors that used it. The post-then-push line follows the vendor that last posted
+under the role. Measured: six requests to `claude` + a collaborator's role waited six days unclaimed: the
+collaborator worked in Codex, its inbox and claim compared the agent too, and the session-start list printed
+`claude / role-…`, which a Codex session did not read as its own. An engine older than this rule still compares the
+agent: a session on one reads such a request with the agent it was addressed to, and shows a claim made under the
+role by the other vendor as a protocol error until it updates (a collaborator's engine updates at session start
+when the project wires it: [#boards-and-audiences](#boards-and-audiences)).
+
 | Command | Who | Result |
 |---|---|---|
 | `request` | requester | assignee + completion conditions; waits in their inbox |
@@ -390,8 +405,9 @@ python3 board_items.py list    --root <board>
 - **Native ids are per session**: Claude Code = `CLAUDE_CODE_SESSION_ID`, Codex = `CODEX_THREAD_ID` (used when
   `--session` is omitted). Several sessions of one vendor are distinct addresses.
 - **Role identities** for standing windows: when a function outlives a session, the owner assigns a stable id such
-  as `role-<project>-<function>` or `resident-<host>-<agent>`; the acting session passes it as `--session` and keeps
-  its native id in `--session-name`. Moving a role is an explicit handover. <a id="address-a-session-not-yet-started"></a>**Addressing a
+  as `role-<project>-<function>` or `resident-<host>-<agent>`; the acting session passes it as `--session` (with its
+  own `--agent`, whichever vendor it is: [#role-any-agent](#role-any-agent)) and keeps its native id in
+  `--session-name`. Moving a role is an explicit handover. <a id="address-a-session-not-yet-started"></a>**Addressing a
   session that does not exist yet**: mint `role-<project>-<function>`, put it in the hand-off text, and have the
   receiver read `inbox --session <role id> --sync` and `claim` under it. Do not guess a native id.
 - <a id="rulings-role"></a>**A request that needs the human owner's answer**: address it to `role-<project>-<owner>-rulings`

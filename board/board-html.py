@@ -440,19 +440,21 @@ const threads = DATA.threads.map(t => ({...t, key: t.project + '/' + t.thread_id
 const byKey = Object.fromEntries(threads.map(t => [t.key, t]));
 const allProjects = [...new Set(threads.map(t => t.project))].sort();
 const GENERIC = new Set(['', 'workflow', 'restricted-task']);
+// one address = (agent, native id), or a role id alone whichever vendor acts under it (CONTRACT.md#role-any-agent)
+const isRole = sid => /^(role|resident)-/.test(sid || '');
+const sessionKey = a => a ? (isRole(a.session_id) ? 'role' : a.agent) + ':' + a.session_id : '';
 const NAMES = new Map();
 for (const t of threads) for (const e of t.events) {
   const a = e.actor || {}; if (!a.session_id || GENERIC.has(a.task || '')) continue;
-  const k = a.agent + ':' + a.session_id, p = NAMES.get(k);
+  const k = sessionKey(a), p = NAMES.get(k);
   if (!p || (e.created_at || '') >= p.at) NAMES.set(k, {name: a.task, at: e.created_at || ''});
 }
-const isRole = sid => /^(role|resident)-/.test(sid || '');
 const shortId = sid => !sid ? '' : /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(sid) ? sid.slice(0, 8) : sid.length > 28 ? sid.slice(0, 27) + '…' : sid;
-const sessionKey = a => a ? a.agent + ':' + a.session_id : '';
 function who(a){
   if (!a) return null;
   const role = isRole(a.session_id), n = NAMES.get(sessionKey(a))?.name || '';
-  return {agent: a.agent, ag: AG[a.agent] || a.agent, name: role ? a.session_id : (n || shortId(a.session_id)), id: a.session_id || '', role};
+  // a role id names whichever session opens under it, Claude or Codex (CONTRACT.md#role-any-agent)
+  return {agent: role ? 'other' : a.agent, ag: role ? 'Claude / Codex' : AG[a.agent] || a.agent, name: role ? a.session_id : (n || shortId(a.session_id)), id: a.session_id || '', role};
 }
 const whoText = a => { const w = who(a); return w ? w.ag + (w.name ? ' · ' + w.name : '') : '—'; };
 const avatar = agent => `<span class="av ${esc(agent)}" aria-hidden="true">${esc((AG[agent] || agent || '?')[0])}</span>`;

@@ -128,7 +128,7 @@ def _selftest() -> int:
 
     # 2. 数え方: 1 thread の 2 行は 1、 別 thread は別、 日付で始まらない thread id も 1、 thread でない行は 0
     sample = ("📋 demo — 要注意 thread:\n"
-              "📨 codex / role-demo-x 対応待ち [作業中] demo/2026-01-02-alpha — 成果物を作り、提出する\n"
+              "📨 role-demo-x (Claude / Codex どちらでも) 対応待ち [作業中] demo/2026-01-02-alpha — 成果物を作り、提出する\n"
               "    詳細\n"
               "🟢 claim  demo/2026-01-02-alpha — codex@host lease→2026-01-03T00:00:00Z\n"
               "🟢 claim  demo/2026-01-05-beta.v2 — claude@host lease→2026-01-06T00:00:00Z\n"

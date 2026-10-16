@@ -138,6 +138,14 @@ class CodexCounterpart(unittest.TestCase):
         ans=event('update',3,agent='claude',reply=blk)
         note=board.counterpart_note(('claude','claude-session-001'),ans,[r,c,blk])
         self.assertIn(f'queue --thread {self.TID}',note); self.assertIn('--session role-example-codex',note)
+    def test_role_addressed_to_claude_but_claimed_by_codex_reaches_the_codex_thread(self):
+        # a role is not one vendor (CONTRACT#role-any-agent): the line follows the vendor that acts under it
+        r=event('request',0); r['assignee']={'agent':'claude','session_id':'role-example-partner'}
+        c=event('claim',1); c['actor']['session_id']='role-example-partner'; c['actor']['task']=self.TID[:8]+' (codex-model-x)'
+        blk=event('blocker',2,reply=c); blk['actor']['session_id']='role-example-partner'
+        ans=event('update',3,agent='claude',reply=blk)
+        note=board.counterpart_note(('claude','claude-session-001'),ans,[r,c,blk])
+        self.assertIn(f'queue --thread {self.TID}',note); self.assertIn('--session role-example-partner',note)
     def test_note_inside_a_request_reaches_the_other_participant(self):
         # measured: the requester's note answering a blocker printed no line, and the worker was not told
         r=self.request_to(self.TID); c=event('claim',1); c['actor']['session_id']=self.TID
@@ -351,6 +359,31 @@ class Workflow(unittest.TestCase):
         transfer.update(handover_role='assignee',target={'agent':'codex','session_id':'codex-replacement'})
         self.assertEqual(self.state([r,c,transfer])['waiting_on']['session_id'],'codex-replacement')
         self.assertTrue(self.state([r,c,transfer,sub])['errors'])
+
+    def test_role_address_is_not_one_vendor(self):
+        # measured: requests to `claude` + a collaborator's role waited six days because the collaborator worked in
+        # Codex, whose inbox and claim also compared the agent. A role id names whichever session opens under it.
+        r=event('request',0); r['assignee']={'agent':'claude','session_id':'role-example-partner'}
+        c=event('claim',1); c['actor']['session_id']='role-example-partner'
+        sub=event('submit',2,reply=c); sub['actor']['session_id']='role-example-partner'
+        s=self.state([r,c,sub]); self.assertFalse(s['errors']); self.assertEqual(s['status'],'submitted')
+        self.assertEqual(self.state([r,c,sub,event('accept',3,reply=sub)])['status'],'accepted')
+        # one role, one claim: a Claude session under the same role cannot take over a live Codex claim
+        other=event('claim',2,agent='claude'); other['actor']['session_id']='role-example-partner'
+        self.assertTrue(self.state([r,c,other])['errors'])
+        # a reviewer role answers from either vendor
+        rv=copy.deepcopy(r); rv['assignee']={'agent':'codex','session_id':'codex-session-001'}
+        hand=event('handover',1,agent='claude',reply=rv); hand.update(handover_role='reviewer',target={'agent':'claude','session_id':'role-example-review'})
+        c2=event('claim',2); sub2=event('submit',3,reply=c2)
+        acc=event('accept',4,agent='codex',reply=sub2); acc['actor']['session_id']='role-example-review'
+        self.assertEqual(self.state([rv,hand,c2,sub2,acc])['status'],'accepted')
+        # a native id still names one vendor's session
+        n=copy.deepcopy(r); n['assignee']={'agent':'claude','session_id':'shared-native-id'}
+        nc=event('claim',1); nc['actor']['session_id']='shared-native-id'
+        self.assertTrue(self.state([n,nc])['errors'])
+        # requester and assignee cannot be one role across vendors
+        selfreq=copy.deepcopy(r); selfreq['actor'].update(agent='codex',session_id='role-example-partner')
+        self.assertTrue(self.state([selfreq])['errors'])
 
     def test_schema_privacy_and_required_fields(self):
         check_schema(SCHEMA)
@@ -945,6 +978,30 @@ class CollaboratorBoards(unittest.TestCase):
         board.run(self.proj,'pull','-q','origin','main')
         out=self.cli('show','--root',b,'--agent','claude','--session','c-1','--request',req,'--json').stdout
         self.assertEqual(json.loads(out)['status'],'accepted')
+
+    def test_role_request_reaches_the_other_vendor(self):
+        # the collaborator works in Codex; the request names `claude` + the collaborator's role (CONTRACT#role-any-agent)
+        b=str(self.proj/'board'); role='role-proj-partner'
+        req=self.eid(self.cli('request','--root',b,'--agent','claude','--session','c-1','--thread','2026-10-16-role',
+            '--to','claude','--to-session',role,'--summary','Check notes/a.md','--acceptance','Reproduce it','--no-launch').stdout)
+        inbox=self.cli('inbox','--root',b,'--agent','codex','--session',role,'--sync').stdout
+        self.assertIn('対応待ち',inbox); self.assertIn(f'{role} (Claude / Codex どちらでも)',inbox); self.assertNotIn('claude / '+role,inbox)
+        row,=json.loads(self.cli('inbox','--root',b,'--agent','codex','--session',role,'--sync','--json').stdout)
+        self.assertTrue(row['actionable'])
+        claim=self.eid(self.cli('claim','--root',b,'--agent','codex','--session',role,'--request',req,
+            '--session-name','01a00000 (codex)','--summary','on it').stdout)
+        sub=self.eid(self.cli('submit','--root',b,'--agent','codex','--session',role,'--request',req,'--reply-to',claim,
+            '--summary','done','--deliverable','notes/a.md').stdout)
+        self.assertIn('確認待ち',self.cli('inbox','--root',b,'--agent','claude','--session','c-1','--sync').stdout)
+        self.assertIn('対応待ちはありません',self.cli('inbox','--root',b,'--agent','codex','--session',role,'--sync').stdout)
+        self.cli('accept','--root',b,'--agent','claude','--session','c-1','--request',req,'--reply-to',sub,
+            '--summary','checked','--reference','proj@'+board.run(self.proj,'rev-parse','HEAD').stdout.decode().strip()[:10])
+        out=self.cli('show','--root',b,'--agent','codex','--session',role,'--request',req,'--json','--sync').stdout
+        self.assertEqual(json.loads(out)['status'],'accepted')
+        # the directory lists the role once, with both vendors that used it
+        sessions=self.cli('sessions','--root',b,'--agent','claude','--session','c-1','--sync').stdout
+        self.assertEqual(sum(1 for l in sessions.splitlines() if f'/ {role} ' in l),1,sessions)
+        self.assertIn(f'claude|codex / {role}  [role]',sessions)
 
     def test_reader_gate_refuses_what_collaborators_must_not_see(self):
         b=str(self.proj/'board')

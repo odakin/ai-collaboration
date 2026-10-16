@@ -14,7 +14,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from board_workflow import KINDS, COARSE, LABELS, reduce_workflow
+from board_workflow import KINDS, COARSE, LABELS, reduce_workflow, same_session, is_role, address_label
 import board_config as bc
 import board_transport as bt
 
@@ -49,7 +49,7 @@ def watch_wake(thread, seen, me, quiet, pending):
     when there is something to act on and still sees the progress notes that came before it.
     """
     new=[e for e in thread if e['event_id'] not in seen
-         and {'agent':e['actor'].get('agent'),'session_id':e['actor'].get('session_id')}!=me]
+         and not same_session(_actor(e),me)]
     if not new: return None
     if all(e.get('kind') in quiet for e in new):
         pending.extend(new); return None
@@ -68,10 +68,11 @@ STOP_WORDS=re.compile(r'(?i)停止|止ま|止め|中断|blocker|ブロッカー|
 
 
 def _who(addr):
-    """agent/session for one line: a role id in full, a native id by its first 8 characters."""
+    """agent/session for one line: a role id alone and in full (either vendor acts under it), a native id with its agent
+    by its first 8 characters."""
     if not addr: return '—'
     sid=addr.get('session_id') or ''
-    return f"{addr.get('agent')}/{sid if sid.startswith(('role-','resident-')) else sid[:8]}"
+    return sid if is_role(sid) else f"{addr.get('agent')}/{sid[:8]}"
 
 
 def _actor(e):
@@ -106,9 +107,9 @@ def kind_hints(ev, w, me):
     request-and-receipt workflow): the reviewer's note does not answer an open blocker, and a claimant's stop posted as
     a note does not reach the requester as a question."""
     if not w or not w.get('request'): return []
-    rid=w['request']['event_id']; kind=ev.get('kind'); me_addr={'agent':me[0],'session_id':me[1]}
-    is_reviewer=w.get('reviewer')==me_addr
-    is_claimant=bool(w.get('claim')) and _actor(w['claim'])==me_addr
+    rid=w['request']['event_id']; kind=ev.get('kind')
+    is_reviewer=same_session(w.get('reviewer'),me)
+    is_claimant=bool(w.get('claim')) and same_session(_actor(w['claim']),me)
     b=w.get('blocker') if w.get('status')=='blocked' else None
     if kind=='note' and is_reviewer and b:
         return [f"⚠️ 開いた blocker {b['event_id']} ({_who(_actor(b))}, {b.get('created_at','')[:16]}Z) は未回答のまま。"
@@ -127,8 +128,7 @@ def kind_hints(ev, w, me):
 def other_party(w, me):
     """For a note inside a request, the participant on the other side: the claimant (else the assignee) for the
     reviewer, the reviewer for anyone else. me = (agent, session)."""
-    me_addr={'agent':me[0],'session_id':me[1]}
-    if w.get('reviewer')==me_addr:
+    if same_session(w.get('reviewer'),me):
         return _actor(w['claim']) if w.get('claim') else w.get('assigned_to')
     return w.get('reviewer')
 
@@ -143,7 +143,7 @@ def watch_report(key, new, thread, me, *, root, agent, session, request, quiet=(
     for e in new:
         act=e['actor']
         lines.append(f"📮 {key[0]}/{key[1]} {e.get('kind')} {e.get('created_at','')[:16]} from {act.get('agent')}/{act.get('session_id')}: {(e.get('summary') or '')[:600]}")
-        if e.get('kind')=='blocker' and e['event_id']==open_b and w.get('reviewer')==me:
+        if e.get('kind')=='blocker' and e['event_id']==open_b and same_session(w.get('reviewer'),me):
             lines.append(f"   → この blocker に答える = update --request {request} --reply-to {e['event_id']} (note は答えにならない)")
     s=request_state_line(w)
     if s: lines.append(s)
@@ -518,6 +518,16 @@ def codex_queue_note(session, events, thread_key, lead='次に動く'):
         return None
 
 
+def role_agent(addr, events):
+    """The vendor that acts under an address: for a role id, the agent of the latest event posted under it (a role is
+    not one vendor: CONTRACT.md#role-any-agent; a request to `claude` + a role may be claimed by a Codex thread), else
+    the address's own agent."""
+    sid=(addr or {}).get('session_id')
+    if not is_role(sid): return (addr or {}).get('agent')
+    acted=[(e.get('actor') or {}).get('agent') for e in sorted(events,key=lambda e:e.get('created_at','')) if (e.get('actor') or {}).get('session_id')==sid]
+    return acted[-1] if acted else addr.get('agent')
+
+
 def counterpart_note(me, ev, events):
     """After a post: one line telling the poster how to reach the session that must act next on this machine
     (post-then-push, CONTRACT#post-then-push): a Claude session's SendMessage address, or for a Codex thread the
@@ -531,12 +541,13 @@ def counterpart_note(me, ev, events):
         note=ev.get('kind')=='note'
         w=other_party(wf,me) if note else wf.get('waiting_on')
         lead='相手の' if note else '次に動く'
-        if not w or (w.get('agent'),w.get('session_id'))==me: return None
+        if not w or same_session(w,me): return None
+        w=dict(w,agent=role_agent(w,same+[ev]))
         if w.get('agent')=='codex':
             return codex_queue_note(w.get('session_id'),same+[ev],f"{ev['project']['key']}/{ev['thread_id']}",lead)
         addr=live_address(w.get('agent'),w.get('session_id'),same+[ev])
         if not addr: return None
-        who=f"{w['agent']}/{w['session_id'] if w['session_id'].startswith(('role-','resident-')) else w['session_id'][:8]}"
+        who=_who(w)
         if me and me[0]=='codex':
             return (f"→ {lead} {who} はこの機械で生きている ({addr})。 Codex には SendMessage が無い = 相手は自分の watch"
                     " か次の --sync で読む (Claude 側は request・claim・submit の後に watch を回す)。 急ぐなら本人に 1 行")
@@ -811,7 +822,7 @@ def inbox_show(a, root, *, board_name=None, collect=None):
         if any(issue.unscoped for issue in events.invalid):
             raise ValueError('unscoped invalid history: inbox/request state cannot be determined')
         me={'agent':a.agent,'session_id':a.session}
-        threads={k:v for k,v in all_threads.items() if (v.get('workflow') or {}).get('waiting_on')==me or (v.get('workflow') or {}).get('errors')
+        threads={k:v for k,v in all_threads.items() if same_session((v.get('workflow') or {}).get('waiting_on'),me) or (v.get('workflow') or {}).get('errors')
                  or (a.include_closed and v['closed'] and v.get('workflow') and view.participated(v,me))}
         for p, why in view.history_warnings(events):
             print(f'ℹ️ history {p.name}: {why}', file=sys.stderr if a.json else sys.stdout)
@@ -850,10 +861,9 @@ def inbox_show(a, root, *, board_name=None, collect=None):
         mine=[]
         for (pk,tid),t in sorted(all_threads.items()):
             w=t.get('workflow') or {}
-            if not w or w.get('waiting_on')==me or w.get('status') in {'accepted','abandoned'}: continue
-            if w.get('requester')==me or w.get('assignee')==me or w.get('reviewer')==me:
-                who=w.get('waiting_on') or {}
-                mine.append(f"⏳ {pk}/{tid} [{w.get('label')}] waiting on {who.get('agent')} / {who.get('session_id')} — {w.get('title') or ''}")
+            if not w or same_session(w.get('waiting_on'),me) or w.get('status') in {'accepted','abandoned'}: continue
+            if any(same_session(w.get(k),me) for k in ('requester','assignee','reviewer')):
+                mine.append(f"⏳ {pk}/{tid} [{w.get('label')}] waiting on {address_label(w.get('waiting_on'))} — {w.get('title') or ''}")
         if mine: print('自分が関与する進行中 (対応は相手側):'); print('\n'.join(mine))
 
 
@@ -1015,24 +1025,29 @@ def main():
             # Directory derived from history: who posted as whom, what they called themselves, where they were
             # last seen, and what is waiting on them. Roles (resident-*/role-*) are stable addresses a human
             # assigns to a session; native ids are ephemeral per session. Never a liveness registry.
-            seen={}
+            # A role id is one address whichever vendor acts under it (CONTRACT.md#role-any-agent): one row, its agents joined.
+            seen={}; agents={}
+            def key(agent, sid):
+                if is_role(sid): agents.setdefault(sid,set()).add(agent); return ('*',sid)
+                return (agent,sid)
             for e in events:
                 act=e.get('actor',{})
                 if act.get('session_id'):
-                    k=(act['agent'],act['session_id']); r=seen.setdefault(k,{'name':None,'instance':None,'last':None,'n':0,'projects':set()})
+                    k=key(act['agent'],act['session_id']); r=seen.setdefault(k,{'name':None,'instance':None,'last':None,'n':0,'projects':set()})
                     r['n']+=1; r['last']=max(r['last'] or '',e.get('created_at','')); r['projects'].add((e.get('project') or {}).get('key'))
                     if act.get('task') and act.get('task')!='workflow' and len(act['task'])<=80: r['name']=act['task']  # early writers stored the summary here
                     if act.get('instance'): r['instance']=act['instance']
                 for x in [e.get('assignee',{}),e.get('target',{})]:
-                    if isinstance(x,dict) and x.get('session_id'): seen.setdefault((x['agent'],x['session_id']),{'name':None,'instance':None,'last':None,'n':0,'projects':set()})
+                    if isinstance(x,dict) and x.get('session_id'): seen.setdefault(key(x['agent'],x['session_id']),{'name':None,'instance':None,'last':None,'n':0,'projects':set()})
             threads=view.derive(events,view.now_utc()); waiting={}
             for (pk,tid),t in threads.items():
                 w=(t.get('workflow') or {}).get('waiting_on')
-                if w: waiting.setdefault((w['agent'],w['session_id']),[]).append(f'{pk}/{tid}')
-            for (agent,sid),r in sorted(seen.items()):
-                kind='role' if sid.startswith(('resident-','role-')) else 'native'
-                print(f"{agent} / {sid}  [{kind}] name={r['name'] or '—'} instance={r['instance'] or '—'} last={(r['last'] or '—')[:16]} events={r['n']} projects={','.join(sorted(p for p in r['projects'] if p)) or '—'} waiting_on={len(waiting.get((agent,sid),[]))}")
-                for th in waiting.get((agent,sid),[]): print(f'    ↳ waiting: {th}')
+                if w: waiting.setdefault(key(w['agent'],w['session_id']),[]).append(f'{pk}/{tid}')
+            for k,r in sorted(seen.items()):
+                agent,sid=k; kind='role' if is_role(sid) else 'native'
+                if agent=='*': agent='|'.join(sorted(a for a in agents.get(sid,()) if a))
+                print(f"{agent} / {sid}  [{kind}] name={r['name'] or '—'} instance={r['instance'] or '—'} last={(r['last'] or '—')[:16]} events={r['n']} projects={','.join(sorted(p for p in r['projects'] if p)) or '—'} waiting_on={len(waiting.get(k,[]))}")
+                for th in waiting.get(k,[]): print(f'    ↳ waiting: {th}')
             print('Known session addresses from history; not a live-process registry. A session is reachable only if its id is known here or handed to you by the owner.')
         return
     if a.command in {'inbox', 'show'}:

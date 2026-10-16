@@ -2,6 +2,13 @@
 
 > 📌 SESSION.md = 案件ごとの現在地 + 正本への link (進んだら置き換える、 日付を見出しにした節・commit hash・messageId を置かない = 層1 claude-config/CONVENTIONS.md#session-no-durable-record)。 日付つきの節は SESSION-archive.md へ verbatim MOVE 済 (2026-09-28)。
 
+## 現在地：役割 id 宛ての依頼と vendor
+
+役割 id (`role-…` / `resident-…`) 宛ての依頼は、 依頼に書いた agent に依らず、 その役割で開いた Claude・Codex
+どちらの session の inbox にも出て、 claim・submit・受領ができる ([規則](board/CONTRACT.md#role-any-agent)、
+`--to any` を採らなかった理由 = [DESIGN](board/DESIGN.md#rejected-alternatives))。 既存の依頼は付け替え不要。
+次 = 共同研究者側の session (engine 更新後) で、 既存の役割宛ての依頼が受信箱に出て引き受けられるかを見る。
+
 ## 現在地：並列 session の用事の claim
 
 `board/board_items.py` を足した (掲示板の checkout の手元の台帳、 `board.py` は不変更)。 使い方は

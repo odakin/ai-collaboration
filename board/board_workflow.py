@@ -22,6 +22,35 @@ def address(actor):
 def participant_identity(actor):
     return actor.get('agent'), actor.get('session_id')
 
+ROLE_PREFIXES = ('role-', 'resident-')
+
+def is_role(session_id):
+    """A role id (`role-<project>-<function>`, `resident-<host>-<agent>`): an address the owner mints, not one session."""
+    return isinstance(session_id, str) and session_id.startswith(ROLE_PREFIXES)
+
+def _pair(x):
+    if x is None: return None
+    if isinstance(x, dict): return x.get('agent'), x.get('session_id')
+    return tuple(x)
+
+def same_session(a, b):
+    """Whether two addresses ((agent, session_id) pairs or {'agent', 'session_id'} dicts) name the same participant.
+
+    A native id is one vendor's session, so agent and id must both match. A role id names whichever session the owner
+    opens under it, of either vendor, so the id alone decides (CONTRACT.md#role-any-agent). Measured: requests to
+    `claude` + a collaborator's role waited six days unseen because that collaborator worked in Codex, whose inbox and
+    claim compared the agent too."""
+    a, b = _pair(a), _pair(b)
+    if a is None or b is None or a[1] != b[1]: return False
+    return a[0] == b[0] or is_role(a[1])
+
+def address_label(addr, sep=' / '):
+    """One address for people and agents to read: a role id alone (either vendor may act under it), a native id with
+    its agent."""
+    if not addr: return '—'
+    sid = addr.get('session_id') or ''
+    return f"{sid} (Claude / Codex どちらでも)" if is_role(sid) else f"{addr.get('agent')}{sep}{sid}"
+
 def reduce_workflow(events, now):
     state = {'status':'invalid', 'request':None, 'claim':None, 'submission':None,
              'blocker':None, 'question':None, 'answer':None, 'review':None,
@@ -75,7 +104,7 @@ def apply(s, e, seen):
     if kind == 'request':
         need(req is None, 'one request per thread')
         need(e['request_id'] == eid, 'request_id must equal request event_id')
-        need(participant_identity(e['assignee']) != identity(e), 'requester and assignee sessions must differ')
+        need(not same_session(e['assignee'], identity(e)), 'requester and assignee sessions must differ')
         need(bool(e['acceptance'].strip()), 'completion conditions required')
         s.update(request=e, status='requested', assigned_to=e['assignee'], reviewer=address(e['actor']))
         return
@@ -84,15 +113,15 @@ def apply(s, e, seen):
     need(e['project'] == req['project'] and e['source_policy'] == req['source_policy'], 'request scope changed')
     need(s['status'] not in {'accepted','abandoned'}, 'request already closed; create a new request')
     actor = e['actor']['agent']
-    reviewer = identity(e) == participant_identity(s['reviewer'])
-    worker = identity(e) == participant_identity(s['assigned_to'])
+    reviewer = same_session(identity(e), s['reviewer'])
+    worker = same_session(identity(e), s['assigned_to'])
     claim = s['claim']
     if kind == 'handover':
         need(reviewer or actor == 'human', 'only current reviewer or owner can hand over a request')
         need(e.get('reply_to') == req['event_id'], 'handover must name the request')
         target=e['target']; role=e['handover_role']
         other=s['reviewer'] if role=='assignee' else s['assigned_to']
-        need(participant_identity(target) != participant_identity(other), 'worker and reviewer sessions must differ')
+        need(not same_session(target, other), 'worker and reviewer sessions must differ')
         if role=='assignee':
             need(s['status'] != 'submitted', 'review or return the current submission before handing over work')
             s.update(assigned_to=target, claim=None, status='blocked' if s['blocker'] else 'requested')
@@ -109,7 +138,7 @@ def apply(s, e, seen):
         need(claim is None or timestamp(claim['lease_until']) <= at, 'another live claim exists; release it first')
         s.update(claim=e, status='blocked' if s['blocker'] else 'working')
     elif kind in {'submit','release'}:
-        need(claim is not None and identity(e) == identity(claim), 'only current claimant can submit/release')
+        need(claim is not None and same_session(identity(e), identity(claim)), 'only current claimant can submit/release')
         need(e.get('reply_to') == claim['event_id'], 'reply_to must identify current claim')
         if kind == 'release':
             need(s['status'] != 'submitted', 'cannot release a submitted result')
@@ -126,11 +155,11 @@ def apply(s, e, seen):
         need(e.get('reply_to') == s['submission']['event_id'], 'reply_to must identify latest submission')
         s.update(status='accepted' if kind == 'accept' else 'revision', blocker=None, review=e)
     elif kind == 'blocker':
-        need(claim is not None and identity(e) == identity(claim), 'only current claimant can raise a blocker')
+        need(claim is not None and same_session(identity(e), identity(claim)), 'only current claimant can raise a blocker')
         need(s['status'] in {'working','revision','blocked'}, 'cannot block at this stage')
         s.update(status='blocked', blocker=e, question=e, answer=None)
     else:
-        need(reviewer or (claim is not None and identity(e) == identity(claim)),
+        need(reviewer or (claim is not None and same_session(identity(e), identity(claim))),
              f"not a workflow participant: post with --session {s['reviewer']['session_id']} (the reviewer side)"
              + (f" or --session {claim['actor']['session_id']} (the current claimant)" if claim is not None else ''))
         if s['status'] == 'blocked' and kind == 'update' and reviewer:

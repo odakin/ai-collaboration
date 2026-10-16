@@ -52,7 +52,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from board_workflow import reduce_workflow, LABELS
+from board_workflow import reduce_workflow, LABELS, same_session, address_label
 from board_schema import check_schema, errors as schema_errors, history_errors
 import board_config as bc
 import board_transport as bt
@@ -306,7 +306,7 @@ def workflow_row(project, thread, state, *, reader=None):
         'request_id', 'reply_to', 'title', 'acceptance', 'requester', 'reviewer', 'assignee',
         'submission', 'question', 'answer', 'review', 'claim_expired', 'lease_until')}
     row.update(project=project, thread=thread,
-        actionable=bool(reader and w.get('waiting_on') == reader and not w.get('errors')),
+        actionable=bool(reader and same_session(w.get('waiting_on'), reader) and not w.get('errors')),
         deliverables=w.get('deliverables') or [],
         references=(w.get('request') or {}).get('references') or [],
         errors=w.get('errors') or [])
@@ -314,11 +314,10 @@ def workflow_row(project, thread, state, *, reader=None):
 
 
 def participated(state, reader):
-    """Exact session participation, including previous handover owners."""
+    """Session participation (a role id of either vendor counts as one), including previous handover owners."""
     for event in state['events']:
         for role in ('actor', 'assignee', 'target'):
-            value = event.get(role) or {}
-            if {key: value.get(key) for key in ('agent', 'session_id')} == reader:
+            if same_session(event.get(role) or {}, reader):
                 return True
     return False
 
@@ -365,7 +364,7 @@ def stats_text(events, now: dt.datetime, name: str = "") -> str:
         if w.get("status") not in ("accepted", "abandoned"):
             who = w.get("waiting_on") or {}
             age = (now - parse_ts(th[-1]["created_at"])).total_seconds() / 86400
-            open_rows.append((age, f"{key[0]}/{key[1]}", LABELS.get(w.get("status"), w.get("status")), f"{who.get('agent')}/{who.get('session_id')}"))
+            open_rows.append((age, f"{key[0]}/{key[1]}", LABELS.get(w.get("status"), w.get("status")), address_label(who, "/")))
     out = [f"📊 {name or 'board'}: 依頼 {sum(1 for th in threads.values() if any(e.get('kind') == 'request' for e in th))} 件 (閉じた {len(spans['request→closed'])} / 開いている {len(open_rows)})"]
     out.append("  区間            n   中央値    p90     最大  (時間)")
     for k, vals in spans.items():
@@ -523,7 +522,7 @@ def render(threads: dict, invalid, *, surface: bool, project: str | None,
                 for err in w["errors"]:
                     lines.append(f"🔴 protocol {tag}: {err}")
                 if w["waiting_on"]:
-                    lines.append(f"📨 {w['waiting_on']['agent']} / {w['waiting_on']['session_id']} 対応待ち [{w['label']}] {tag} — {w['next_action']}")
+                    lines.append(f"📨 {address_label(w['waiting_on'])} 対応待ち [{w['label']}] {tag} — {w['next_action']}")
                     lines.append(f"    {w['title']} / request={w['request_id']} / reply_to={w['reply_to']}")
                     lines.extend(handoff_lines(w))
             for ev in t["active_claims"]:
@@ -642,7 +641,7 @@ def _stats_selftest():
     assert "依頼 2 件 (閉じた 1 / 開いている 1)" in text, text
     lines = {l.split()[0]: l.split()[1:] for l in text.splitlines() if l.strip().startswith(("request→", "claim→", "submit→"))}
     assert lines["request→claim"] == ["1", "1.0", "1.0", "1.0"] and lines["claim→submit"][:2] == ["1", "2.0"] and lines["submit→accept"][:2] == ["1", "1.0"], lines
-    assert "[引受待ち] p/b → claude/role-p-x" in text and "⏳   0.3 日" in text, text
+    assert "[引受待ち] p/b → role-p-x (Claude / Codex どちらでも)" in text and "⏳   0.3 日" in text, text
 
 
 def _selftest() -> int:

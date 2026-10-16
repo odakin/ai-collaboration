@@ -187,6 +187,10 @@ Collaborators need only the project repository; deleting a board must not destro
 - **A shared mutable `BOARD.md`**: a merge hotspot that invites accidental overwrite.
 - **One repository with branch/thread permissions**: hosting permissions are repository-wide.
 - **A separate hosting account per session**: authentication identity is not session identity.
+- **An agent-neutral assignee (`--to any`) for role requests**: a schema change that old readers would not match, and
+  every request already addressed to a role would need a handover. A role id already means "whichever session opens
+  under it", so the reducer and every reader compare a role by its id alone (one predicate, `same_session` in
+  `board_workflow.py`; rule = CONTRACT.md#role-any-agent).
 - **Pushing every heartbeat**: noisy, costly, not useful for decisions.
 - **Copying the engine into each board**: copies drift; each board holds only `board.json` and a pointer here.
 
