@@ -248,8 +248,9 @@ Codex, so the agent part is ignored: a request to `--to claude --to-session role
 `inbox --session <role id>` of either vendor, and that session may claim, submit, block, answer and review under the
 role. `--to` on a role is metadata: it only picks the worker launch line ([#worker-handoff-text](#worker-handoff-text)).
 One role still holds one live claim, across vendors; requester and assignee (and worker and reviewer) may not be one
-role id under two vendors. Surfaces print a role without an agent — `<role id> (Claude / Codex どちらでも)` — and
-`sessions` lists it once with the vendors that used it. The post-then-push line follows the vendor that last posted
+role id under two vendors. Surfaces print a role without an agent — `<role id> (Claude / Codex どちらでも)` — with
+the command that reads it under the row (`inbox` without `--session` reads the caller's native id, so a session
+working under a role passes `--session <role id>`), and `sessions` lists it once with the vendors that used it. The post-then-push line follows the vendor that last posted
 under the role. Measured: six requests to `claude` + a collaborator's role waited six days unclaimed: the
 collaborator worked in Codex, its inbox and claim compared the agent too, and the session-start list printed
 `claude / role-…`, which a Codex session did not read as its own. An engine older than this rule still compares the

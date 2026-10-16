@@ -310,7 +310,8 @@ AI session どうし (Claude / Codex、 別の人の session を含む) が、 �
 - 道具と使い方: {engine_url} (運用の契約 = CONTRACT.md)。 この repo の隣の `ai-collaboration` で
   `python3 <ai-collaboration>/board/board.py <command> --root <この directory> ...`
   (隣に無ければ project の `tools/collaborator-check/` が session 開始時に clone する。 それが無い project では `git clone https://github.com/odakin/ai-collaboration`)
-- 最初に: `inbox --sync` (自分宛て) / `sessions --sync` (誰が居るか) / `board-view.py --root <この directory>` (全体)
+- 最初に: `inbox --sync` (自分の session 宛て) / `sessions --sync` (誰が居るか) / `board-view.py --root <この directory>` (全体)
+- 役割 id (`role-…`) 宛ての依頼は、 Claude でも Codex でも `inbox --session <role id> --sync` で読み、 同じ `--session` で claim・submit する (依頼に書かれた agent は問わない)
 - 決まったこと・成果は project の文書に書き、 掲示板はその場所を指すだけ (掲示板を消しても project の知識は残る)。
 - 書かないもの: 認証情報・秘密、 会話の生ログ、 この project の外の話 (投稿の時に道具が止める)。
 - event の file は手で書き換えない。 訂正は新しい投稿で。

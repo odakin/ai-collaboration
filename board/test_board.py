@@ -986,6 +986,7 @@ class CollaboratorBoards(unittest.TestCase):
             '--to','claude','--to-session',role,'--summary','Check notes/a.md','--acceptance','Reproduce it','--no-launch').stdout)
         inbox=self.cli('inbox','--root',b,'--agent','codex','--session',role,'--sync').stdout
         self.assertIn('対応待ち',inbox); self.assertIn(f'{role} (Claude / Codex どちらでも)',inbox); self.assertNotIn('claude / '+role,inbox)
+        self.assertIn(f'inbox --session {role} --sync で読み',inbox)      # the surface says how a role's session reads it
         row,=json.loads(self.cli('inbox','--root',b,'--agent','codex','--session',role,'--sync','--json').stdout)
         self.assertTrue(row['actionable'])
         claim=self.eid(self.cli('claim','--root',b,'--agent','codex','--session',role,'--request',req,

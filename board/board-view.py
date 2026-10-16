@@ -52,7 +52,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from board_workflow import reduce_workflow, LABELS, same_session, address_label
+from board_workflow import reduce_workflow, LABELS, same_session, address_label, is_role
 from board_schema import check_schema, errors as schema_errors, history_errors
 import board_config as bc
 import board_transport as bt
@@ -523,6 +523,10 @@ def render(threads: dict, invalid, *, surface: bool, project: str | None,
                     lines.append(f"🔴 protocol {tag}: {err}")
                 if w["waiting_on"]:
                     lines.append(f"📨 {address_label(w['waiting_on'])} 対応待ち [{w['label']}] {tag} — {w['next_action']}")
+                    if is_role(w['waiting_on'].get('session_id')):
+                        # `inbox` without --session reads the caller's native id, so a role's requests stay unseen
+                        # unless the line says how to read them (CONTRACT.md#role-any-agent).
+                        lines.append(f"    → この役割の session (Claude / Codex) は inbox --session {w['waiting_on']['session_id']} --sync で読み、 同じ --session で claim する")
                     lines.append(f"    {w['title']} / request={w['request_id']} / reply_to={w['reply_to']}")
                     lines.extend(handoff_lines(w))
             for ev in t["active_claims"]:
