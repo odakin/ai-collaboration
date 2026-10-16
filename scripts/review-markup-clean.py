@@ -7,6 +7,8 @@
 両側に同じ清掃を当ててから diff を取ると実質の変更だけが見える。
 AI の文を色で区別していた原稿を地の文に戻す (章ごとに著者が裁定する) ときも同じ道具で、範囲を限って外す。
 正本 = conventions/edit-intent-record.md#implementation-pass-discipline / #submission-cleanup。
+呼び元 = claude-config の scripts/latexdiff-review-snapshot.sh (--strip-cmd → --macro / --strip-color → --color。
+引数の対応はあちらの --selftest が見る = ここの CLI を変えたらあちらの selftest も回す)。
 
 する事 (中身の文は書き換えない):
   1. 問答ブロックの削除    --qa-prefix で始まる \\<macro>{...} を丸ごと消す (削除前の全文は stdout に出さない = 呼び元が diff で持つ)。
