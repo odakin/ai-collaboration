@@ -423,8 +423,11 @@ python3 board_items.py list    --root <board>
   writes the hand-off text to the outbox (`<request id>.handoff.txt`) and prints one shell line that opens the worker
   as a background CLI session with its model, reasoning effort and config dir pinned —
   `CLAUDE_CONFIG_DIR=<dir> claude --bg --model <m> --effort <e> "$(cat <file>)"` — and `--launch` runs it at once
-  (with `AGENT_BOARD_LAUNCH_DEFAULT=1` in the owner's wiring every such request runs it, `--no-launch` keeps it to
-  the printed line; `--preview` never runs it). The worker starts in the workspace directory.
+  (with `AGENT_BOARD_LAUNCH_DEFAULT=1` in the owner's wiring every such request on an owner board runs it,
+  `--no-launch` keeps it to the printed line; `--preview` never runs it). On a collaborator board that default does
+  not apply and only `--launch` runs it: a role there may be a collaborator's, opened in the collaborator's own
+  environment, and a worker started on the requester's machine would claim under it ([#role-any-agent](#role-any-agent)),
+  so the requester launches only a role on its own side. The worker starts in the workspace directory.
   Model = `--expect-model`, else `AGENT_BOARD_LAUNCH_MODEL`, else the requester's own model; effort =
   `AGENT_BOARD_LAUNCH_EFFORT`, else the requester's `CLAUDE_EFFORT`; config dir = `AGENT_BOARD_LAUNCH_CONFIG_DIR`
   (the owner's wiring names a logged-in account: measured, a machine's default config dir was not logged in and the

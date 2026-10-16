@@ -31,7 +31,7 @@ LAUNCH_CONFIG_DIR_ENV='AGENT_BOARD_LAUNCH_CONFIG_DIR'  # request to a role: the 
 LAUNCH_MODEL_ENV='AGENT_BOARD_LAUNCH_MODEL'            # request to a role: default --model (else --expect-model, else the requester's own model)
 LAUNCH_EFFORT_ENV='AGENT_BOARD_LAUNCH_EFFORT'          # request to a role: default --effort (else the requester's CLAUDE_EFFORT)
 LAUNCH_CLI_ENV='AGENT_BOARD_LAUNCH_CLI'                # the CLI executable (default `claude`; tests point it at a stub)
-LAUNCH_DEFAULT_ENV='AGENT_BOARD_LAUNCH_DEFAULT'        # `1` = a request to a role starts the worker at once unless --no-launch (owner wiring)
+LAUNCH_DEFAULT_ENV='AGENT_BOARD_LAUNCH_DEFAULT'        # `1` = on an owner board, a request to a role starts the worker at once unless --no-launch (owner wiring)
 
 
 def run(root, *args, check=True):
@@ -736,16 +736,29 @@ def launch_plan(root, role, request_id, spec, expect, session):
     return argv,env,line,path
 
 
-def announce_launch(a, ev):
+def announce_launch(a, ev, audience):
     """For a request addressed to a Claude role: write the hand-off file, print the launch line, return (argv, env);
     None otherwise. Printed on --preview too (the command is part of what the requester reviews before posting)."""
     if a.command!='request' or a.to!='claude' or not (a.to_session or '').startswith('role-'): return None
     # A role names a window nobody has opened: print the command that opens it with model, effort and account
     # pinned (measured: the chip opens on the parent's model, and a pasted hand-off ran on whatever the window had).
     argv,env,line,hpath=launch_plan(a.root,a.to_session,ev['event_id'],(a.reference or [None])[0],a.expect_model,a.session)
-    print(f'→ 受け手を起こす (model・effort・account を固定、 貼り付け不要。 依頼元の shell でそのまま):\n  {line}')
+    if audience=='owner':
+        print(f'→ 受け手を起こす (model・effort・account を固定、 貼り付け不要。 依頼元の shell でそのまま):\n  {line}')
+    else:
+        # The board cannot tell whose side a role is on; a collaborator opens theirs in their own environment.
+        print(f'→ 受け手を起こす 1 行 (共同研究者も読む掲示板: 役割が依頼元の側のときだけ依頼元の shell で。'
+              f' 相手の側の役割は相手が自分の環境で開く):\n  {line}')
     print(f'  (hand-off 文 = {hpath}。 desktop の窓で steer したいときだけ chip、 その文面もこの file)')
     return argv,env
+
+
+def launch_now(a, audience):
+    """Whether a request's worker starts now (CONTRACT.md#worker-handoff-text): --launch always (the requester says
+    the role is its own to open); the owner's wiring default only on an owner board, since a role on a collaborator
+    board may be a collaborator's and a worker started here would claim under it."""
+    if a.launch: return True
+    return audience=='owner' and os.environ.get(LAUNCH_DEFAULT_ENV,'').strip()=='1' and not a.no_launch
 
 
 def launch(argv, env, cwd=None):
@@ -902,7 +915,7 @@ def main():
     ap.add_argument('--include-closed',action='store_true',help='inbox: also show completed requests involving this exact session (not actionable)')
     ap.add_argument('--interval',type=float,default=30,help='watch: seconds between remote checks (default transport: one ls-remote round trip, a read only when the branch moved; clone transport: a full read)')
     ap.add_argument('--launch',action='store_true',help='request to a role: start the worker now with the printed CLI command (background session; the id is printed)')
-    ap.add_argument('--no-launch',action='store_true',help=f'request to a role: only print the command even when {LAUNCH_DEFAULT_ENV}=1')
+    ap.add_argument('--no-launch',action='store_true',help=f'request to a role: only print the command even when {LAUNCH_DEFAULT_ENV}=1 (that default applies to owner boards only)')
     ap.add_argument('--reviewer',help='request: the session that receives the submission (default: the requester; env '
                     f'{DEFAULT_REVIEWER_ENV} with <project> on an owner board). A role id outlives this session; posted as a reviewer handover right after the request')
     ap.add_argument('--max-minutes',type=float,default=240,help='watch: give up after this long (exit 3)')
@@ -1126,7 +1139,7 @@ def main():
         probs+=reduce_workflow(same+[ev],view.now_utc())['errors']
         if probs: raise ValueError('; '.join(probs))
         print(json.dumps(ev,ensure_ascii=False,indent=2))
-        announce_launch(a,ev)   # shown, not run: the requester sees the command it will get
+        announce_launch(a,ev,cfg['audience'])   # shown, not run: the requester sees the command it will get
         return
     from board_schema import errors
     probs=errors(ev,json.loads(SCHEMA_PATH.read_text()))
@@ -1178,9 +1191,12 @@ def main():
             probs=errors(hev,json.loads(SCHEMA_PATH.read_text()))+[x for x in reduce_workflow(same+[ev,hev],view.now_utc())['errors'] if x.startswith(hev['event_id']+':')]
             if probs: raise ValueError('reviewer handover: '+'; '.join(probs))
             print('posted '+post(a.root,hev)+f' (検収役 = {a.agent}/{reviewer}: 提出は inbox --session {reviewer} に載る。 受領は --session {reviewer} --session-name \'<native id 8 chars> (<model>)\' で accept / revise)')
-        plan=announce_launch(a,ev)
-        if plan and (a.launch or (os.environ.get(LAUNCH_DEFAULT_ENV,'').strip()=='1' and not a.no_launch)):
+        plan=announce_launch(a,ev,cfg['audience'])
+        if plan and launch_now(a,cfg['audience']):
             print('→ 起動した: '+launch(*plan,cwd=bc.workspace(a.root)).replace('\n','\n  '))
+        elif plan and cfg['audience']!='owner' and os.environ.get(LAUNCH_DEFAULT_ENV,'').strip()=='1' and not a.no_launch:
+            print(f'→ 起動していない: 共同研究者も読む掲示板では {LAUNCH_DEFAULT_ENV}=1 は効かない。'
+                  ' 役割が依頼元の側なら上の 1 行を実行する (次からは --launch)')
     if rid and a.command in {'request','claim','submit','blocker','revise','update'}:
         # A post is a record, not a push: the other side's reply reaches this session only if it reads again.
         if a.agent=='codex':

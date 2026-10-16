@@ -7,6 +7,8 @@
 役割 id (`role-…` / `resident-…`) 宛ての依頼は、 依頼に書いた agent に依らず、 その役割で開いた Claude・Codex
 どちらの session の inbox にも出て、 claim・submit・受領ができる ([規則](board/CONTRACT.md#role-any-agent)、
 `--to any` を採らなかった理由 = [DESIGN](board/DESIGN.md#rejected-alternatives))。 既存の依頼は付け替え不要。
+共同研究者の掲示板では、 owner の配線の `AGENT_BOARD_LAUNCH_DEFAULT=1` で役割の worker を起動しない (役割が相手の側
+でありうる)。 起動は `--launch` だけ ([規則](board/CONTRACT.md#worker-handoff-text))。
 次 = 共同研究者側の session (engine 更新後) で、 既存の役割宛ての依頼が受信箱に出て引き受けられるかを見る。
 
 ## 現在地：並列 session の用事の claim

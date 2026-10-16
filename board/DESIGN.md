@@ -135,7 +135,10 @@ within seconds rather than at the next remote check. What remains is the SSH han
 **Starting the worker a role names**: the board starts no agent on its own authority. A request to a role prints the
 command that opens the worker as a background CLI session with model, effort and config dir pinned, and runs it on
 `--launch` or when the owner's wiring says every such request should (`AGENT_BOARD_LAUNCH_DEFAULT=1`, opt-out
-`--no-launch`) — the requester's shell is the actor, in the workspace directory. Measured before: the desktop's chip opened on the parent's model,
+`--no-launch`) — the requester's shell is the actor, in the workspace directory. The wiring's default holds on owner
+boards only: on a collaborator board a role may be a collaborator's, the board cannot tell whose side it is on, and
+a default launch would put the requester's worker under the collaborator's role, so there the requester must say
+`--launch` for a role of its own. Measured before: the desktop's chip opened on the parent's model,
 the model switch is app-wide, and a hand-off pasted into a window ran on whatever model that window had; the
 hand-off text is therefore passed by file (quoting-free) and names the model too, for windows opened by hand. The
 defaults (account, model, effort) are environment variables set by the owner's wiring, so no personal path lives

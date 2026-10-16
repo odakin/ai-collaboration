@@ -1095,6 +1095,34 @@ class CollaboratorBoards(unittest.TestCase):
         with self.assertRaises(ValueError): bc.validate({'board_format':1,'audience':'collaborators','encryption':'none'})
         with self.assertRaises(ValueError): bc.validate({'board_format':1,'audience':'owner','encryption':'none','sources':['x']})
 
+    def test_launch_default_applies_to_owner_boards_only(self):
+        # The owner's wiring (AGENT_BOARD_LAUNCH_DEFAULT=1) starts a role's worker on an owner board; on a collaborator
+        # board the role may be a collaborator's, so only an explicit --launch runs the CLI (CONTRACT.md#worker-handoff-text).
+        import os
+        base=Path(self.tmp.name); mark=base/'launched.txt'
+        stub=base/'claude-stub'; stub.write_text(f'#!/bin/sh\necho ran >> {mark}\necho backgrounded deadbeef\n'); stub.chmod(0o755)
+        keys=('AGENT_BOARD_LAUNCH_DEFAULT','AGENT_BOARD_LAUNCH_CLI','AGENT_BOARD_LAUNCH_MODEL','AGENT_BOARD_LAUNCH_CONFIG_DIR')
+        saved={k:os.environ.get(k) for k in keys}
+        os.environ.update({'AGENT_BOARD_LAUNCH_DEFAULT':'1','AGENT_BOARD_LAUNCH_CLI':str(stub),'AGENT_BOARD_LAUNCH_MODEL':'claude-model-z'})
+        os.environ.pop('AGENT_BOARD_LAUNCH_CONFIG_DIR',None)
+        def runs(): return len(mark.read_text().splitlines()) if mark.exists() else 0
+        try:
+            b=str(self.proj/'board')
+            req=['request','--root',b,'--agent','claude','--session','c-1','--to','claude','--to-session','role-proj-partner',
+                 '--summary','s','--acceptance','a']
+            out=self.cli(*req,'--thread','2026-10-16-collab-role').stdout
+            self.assertIn('受け手を起こす 1 行',out); self.assertIn('相手の側の役割は相手が自分の環境で開く',out)
+            self.assertNotIn('起動した',out); self.assertIn('起動していない',out); self.assertEqual(runs(),0)
+            out=self.cli(*req,'--thread','2026-10-16-collab-own','--launch').stdout   # the requester's own side: explicit
+            self.assertIn('起動した: backgrounded deadbeef',out); self.assertEqual(runs(),1)
+            out=self.cli('request','--root',str(self.owner),'--agent','claude','--session','c-1','--project','proj','--policy','ordinary',
+                         '--thread','2026-10-16-owner-role','--to','claude','--to-session','role-proj-work','--summary','s','--acceptance','a').stdout
+            self.assertIn('受け手を起こす (model',out); self.assertIn('起動した: backgrounded deadbeef',out); self.assertEqual(runs(),2)
+        finally:
+            for k,v in saved.items():
+                if v is None: os.environ.pop(k,None)
+                else: os.environ[k]=v
+
 
 class StateAndKindHints(unittest.TestCase):
     """Posts and watch say the request's state as just read, and warn when a post's kind will not do what its text
