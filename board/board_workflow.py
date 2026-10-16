@@ -38,8 +38,8 @@ def same_session(a, b):
 
     A native id is one vendor's session, so agent and id must both match. A role id names whichever session the owner
     opens under it, of either vendor, so the id alone decides (CONTRACT.md#role-any-agent). Measured: requests to
-    `claude` + a collaborator's role waited six days unseen because that collaborator worked in Codex, whose inbox and
-    claim compared the agent too."""
+    `claude` + a role went unseen while the session working under it was a Codex session, whose inbox and claim
+    compared the agent too."""
     a, b = _pair(a), _pair(b)
     if a is None or b is None or a[1] != b[1]: return False
     return a[0] == b[0] or is_role(a[1])

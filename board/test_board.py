@@ -361,8 +361,8 @@ class Workflow(unittest.TestCase):
         self.assertTrue(self.state([r,c,transfer,sub])['errors'])
 
     def test_role_address_is_not_one_vendor(self):
-        # measured: requests to `claude` + a collaborator's role waited six days because the collaborator worked in
-        # Codex, whose inbox and claim also compared the agent. A role id names whichever session opens under it.
+        # measured: requests to `claude` + a role went unclaimed while the session working under it was a Codex
+        # session, whose inbox and claim also compared the agent. A role id names whichever session opens under it.
         r=event('request',0); r['assignee']={'agent':'claude','session_id':'role-example-partner'}
         c=event('claim',1); c['actor']['session_id']='role-example-partner'
         sub=event('submit',2,reply=c); sub['actor']['session_id']='role-example-partner'
