@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""2 版の LaTeX build を機械比較する組版 gate: log から error / 未定義参照 / overfull を折返し復元して数え、.aux の label→頁 写像の drift を出し (= 総頁数が同じでも中の頁割りは動く)、配布 PDF を自分の build が再現するかを pdftotext で証明する。--selftest 内蔵、規律 = conventions/edit-intent-record.md#build-gate
+"""2 版の LaTeX build を機械比較する組版 gate: log から error / 未定義参照 / overfull を折返し復元して数え、.aux の label→頁 写像の drift を出し (= 総頁数が同じでも中の頁割りは動く)、配布 PDF を自分の build が再現するかを pdftotext で証明し、 build の道具を入れ替えた前後で頁画像が 1 画素も違わないかを確かめる。--selftest 内蔵、規律 = conventions/edit-intent-record.md#build-gate
 
-4 つの独立した機能。 どれも他版・他者の成果物を読む前に回す。
+5 つの独立した機能。 どれも他版・他者の成果物を読む前に回す。
 
 1. **log 比較** (`--before-log / --after-log`): error 数・未定義参照・未定義引用・多重定義・頁数・
    overfull/underfull を両版で出し、 **後版で新たに出たものだけ**を名指しする。 改稿で増えた組版警告と
@@ -23,12 +23,20 @@
    行末の hyphenation は除く)。 記号を飾るだけの pass (hat・太字の macro) なら 0 になる = 飾り以外の
    文字が 1 つも変わっていない証拠。 改名する pass (文字が変わる) には使えない。
 
+5. **頁画像の一致** (`--pixels before.pdf after.pdf [--dpi N]`): 2 つの PDF を頁ごとに画像にして
+   (PyMuPDF) 画素を比べ、 違う頁を名指しする。 原稿は同じで、 前処理・build の道具の方を入れ替えた
+   (実装を 1 本に寄せた・script を書き直した) 前後で、 出る PDF の見た目が変わっていないことの証拠。
+   PDF の byte は作成日時と ID で毎回変わるので比べられない。 文字の比較 (3・4) は色・位置・図を見ない
+   (色だけの差は文字の比較を通る = selftest の foil)。 頁数が違えば FAIL。 dpi を下げると細かい差が
+   潰れうるので、 一致を書くときは使った dpi も書く。
+
 使い方:
 
     python3 compare-tex-builds.py --before-log before/main.log --after-log after/main.log \
         --before-aux before/main.aux --after-aux after/main.aux
     python3 compare-tex-builds.py --reproduce distributed.pdf --built mybuild/main.pdf
     python3 compare-tex-builds.py --chars before/main.pdf after/main.pdf
+    python3 compare-tex-builds.py --pixels before/main.pdf after/main.pdf --dpi 72
     python3 compare-tex-builds.py --build-cmd 'pdflatex -interaction=nonstopmode main'   # 参考出力のみ
 
 `--strict` で、 後版にだけ在る error / 未定義参照 / 多重定義があれば exit 1 (overfull は既定で
@@ -149,6 +157,23 @@ def char_multiset_diff(a: list[str], b: list[str]) -> dict[str, int]:
                        and ch not in ACCENT_GLYPHS)
     ca, cb = chars(a), chars(b)
     return {k: cb.get(k, 0) - ca.get(k, 0) for k in set(ca) | set(cb) if ca.get(k, 0) != cb.get(k, 0)}
+
+
+def page_image_diff(a: Path, b: Path, dpi: int = 60) -> dict:
+    """{'pages': (pages in a, pages in b), 'differ': [1-based pages whose rendered pixels differ]}.
+    Pages beyond the shorter PDF are not rendered; the page counts say that part."""
+    try:
+        import fitz  # PyMuPDF
+    except ImportError:
+        raise RuntimeError("PyMuPDF (fitz) not found; cannot render pages (pip install pymupdf)")
+    da, db = fitz.open(str(a)), fitz.open(str(b))
+    differ = []
+    for i in range(min(len(da), len(db))):
+        pa = da[i].get_pixmap(dpi=dpi, alpha=False)
+        pb = db[i].get_pixmap(dpi=dpi, alpha=False)
+        if (pa.width, pa.height) != (pb.width, pb.height) or pa.samples != pb.samples:
+            differ.append(i + 1)
+    return {"pages": (len(da), len(db)), "differ": differ}
 
 
 # ---------------------------------------------------------------- build
@@ -411,6 +436,35 @@ def selftest() -> int:
     check("char multiset: a changed letter is a difference  [foil]",
           char_multiset_diff(base, ["The field f and the connection word", "appear."]) == {"e": -1, "f": 1})
 
+    # page images: a colour-only change passes the text comparisons but not the pixels
+    try:
+        import fitz
+    except ImportError:
+        fitz = None
+        print("[SKIP] page images: PyMuPDF (fitz) not installed")
+    if fitz is not None:
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            def make(name: str, color: tuple, pages: int = 1) -> Path:
+                doc = fitz.open()
+                for _ in range(pages):
+                    doc.new_page(width=200, height=100).insert_text((20, 50), "Same words",
+                                                                    fontsize=14, color=color)
+                out = Path(td) / name
+                doc.save(str(out))
+                return out
+            black, black2 = make("a.pdf", (0, 0, 0)), make("b.pdf", (0, 0, 0))
+            orange, two = make("c.pdf", (1, 0.5, 0)), make("d.pdf", (0, 0, 0), pages=2)
+            check("page images: two PDFs of the same page are equal",
+                  page_image_diff(black, black2) == {"pages": (1, 1), "differ": []})
+            check("page images: a colour-only change is a difference  [foil]",
+                  page_image_diff(black, orange)["differ"] == [1])
+            if shutil.which("pdftotext"):
+                check("...which the text comparison does not see (why --pixels exists)",
+                      text_diff_count(pdf_text(black), pdf_text(orange)) == 0)
+            check("page images: a page-count change is reported",
+                  page_image_diff(black, two)["pages"] == (1, 2))
+
     print("\nALL PASS" if ok else "\nFAILED")
     return 0 if ok else 1
 
@@ -427,6 +481,10 @@ def main() -> int:
     p.add_argument("--chars", nargs=2, type=Path, metavar=("BEFORE_PDF", "AFTER_PDF"),
                    help="compare the letters of two PDFs as a multiset, ignoring accents, spaces and "
                         "line-end hyphenation (a decoration-only pass must give 0)")
+    p.add_argument("--pixels", nargs=2, type=Path, metavar=("BEFORE_PDF", "AFTER_PDF"),
+                   help="render both PDFs page by page and compare the pixels (swapping a build tool "
+                        "for an equivalent one must give 0 differing pages)")
+    p.add_argument("--dpi", type=int, default=60, help="resolution for --pixels (default: 60)")
     p.add_argument("--build", metavar="SPEC",
                    help="typeset SPEC and report its log/aux. SPEC = path to a .tex, or "
                         "REV:file.tex to take the whole revision via `git archive` "
@@ -471,6 +529,16 @@ def main() -> int:
             print(f"   {k!r}: {v:+d}")
         return 0 if tot == 0 else 1
 
+    if a.pixels:
+        r = page_image_diff(a.pixels[0], a.pixels[1], a.dpi)
+        (na, nb), differ = r["pages"], r["differ"]
+        bad = na != nb or bool(differ)
+        print(f"[{'FAIL' if bad else 'PASS'}] pages {na} / {nb}, page images differing at {a.dpi} dpi: "
+              f"{len(differ)}")
+        if differ:
+            print("   pages: " + ", ".join(map(str, differ[:40])) + (" …" if len(differ) > 40 else ""))
+        return 1 if bad else 0
+
     if a.reproduce and a.built:
         n = text_diff_count(pdf_text(a.reproduce), pdf_text(a.built))
         print(f"[{'PASS' if n == 0 else 'FAIL'}] pdftotext differing lines: {n}")
@@ -489,7 +557,8 @@ def main() -> int:
         drift = aux_drift(parse_aux(a.before_aux.read_text(encoding="latin-1")),
                           parse_aux(a.after_aux.read_text(encoding="latin-1")))
     if not (bl or drift):
-        p.error("give --before-log/--after-log, --before-aux/--after-aux, or --reproduce/--built")
+        p.error("give --before-log/--after-log, --before-aux/--after-aux, --reproduce/--built, --chars, "
+                "--pixels or --build")
     return report(bl, al, drift, a.strict, a.strict_overfull)
 
 
