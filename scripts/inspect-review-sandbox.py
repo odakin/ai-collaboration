@@ -12,7 +12,9 @@ requester should not read its messages while it runs.  Two things were being don
            (2) the seal was written before the first network use (search / fetch / download) in the transcript,
            i.e. the blind stage really preceded the literature; (3) the list of web searches and URLs (check that the
            reviewer did not look up the requester or the manuscript); (4) counts of contamination terms in the result
-           files and in the transcript (cold-eyes-isolation.md#post-check).  Prints lines ready to paste into a receipt.
+           files and in the transcript (cold-eyes-isolation.md#post-check), each hit with its first places and the text
+           around them (--context N, default 2), so the receipt can say why a transcript hit is benign.  Prints lines
+           ready to paste into a receipt; save the output next to the receipt.
 
 The transcript is found from the sandbox path: <config dir>/projects/<sandbox path with non-alphanumerics -> "-">/*.jsonl,
 over $CLAUDE_CONFIG_DIR, ~/.claude and every ~/.claude-* (or --config-dir).  Several transcripts in that directory are
@@ -20,7 +22,7 @@ several launches (attempts); each is reported.
 
 Usage
   inspect-review-sandbox.py status  SANDBOX_DIR [--config-dir DIR ...]
-  inspect-review-sandbox.py receipt SANDBOX_DIR [--results DIR] [--term T ...] [--terms-file FILE]
+  inspect-review-sandbox.py receipt SANDBOX_DIR [--results DIR] [--term T ...] [--terms-file FILE] [--context N]
                                     [--seal notes/stage1-seal.txt] [--sealed notes/stage1-blind.md] [--config-dir DIR ...]
   inspect-review-sandbox.py --selftest
 
@@ -190,7 +192,21 @@ def count_term(term: str, text: str) -> int:
     return len(re.findall(re.escape(term), text, flags=re.I))
 
 
-def cmd_receipt(sandbox: Path, results: Path, config_dirs: list[Path], seal: str, sealed: str, terms: list[str]) -> int:
+def term_contexts(term: str, text: str, k: int, width: int = 70) -> list[str]:
+    """The first k places where term occurs, with width characters on each side (newlines and JSON escapes flattened).
+    The receipt records why a transcript hit is benign (a model name in the harness prompt, a substring of another word);
+    a count alone does not let the requester write that down (measured)."""
+    out = []
+    for m in re.finditer(re.escape(term), text, flags=re.I):
+        snippet = text[max(0, m.start() - width): m.end() + width]
+        out.append(re.sub(r"\\[nt]|\s+", " ", snippet).strip())
+        if len(out) >= k:
+            break
+    return out
+
+
+def cmd_receipt(sandbox: Path, results: Path, config_dirs: list[Path], seal: str, sealed: str, terms: list[str],
+                context: int = 2) -> int:
     status = 0
     seal_file, sealed_file = results / seal, results / sealed
     if seal_file.exists() and sealed_file.exists():
@@ -235,6 +251,10 @@ def cmd_receipt(sandbox: Path, results: Path, config_dirs: list[Path], seal: str
         for term in terms:
             r, tr = count_term(term, joined), count_term(term, transcript_text)
             print(f"  {term!r}: {r} / {tr}")
+            for where, n, text in (("result", r, joined), ("transcript", tr, transcript_text)):
+                if n and context > 0:
+                    for snip in term_contexts(term, text, context):
+                        print(f"      {where}: …{snip}…")
             if r:
                 status = max(status, 2)
     return status
@@ -282,6 +302,14 @@ def selftest() -> int:
         assert cmd_status(sandbox, [cfg], "stage1-seal") == 0
         assert cmd_receipt(sandbox, sandbox, [cfg], "notes/stage1-seal.txt", "notes/stage1-blind.md", []) == 0
         assert cmd_receipt(sandbox, sandbox, [cfg], "notes/stage1-seal.txt", "notes/stage1-blind.md", ["secrettitle"]) == 2
+        # a transcript hit is shown with its surroundings (the receipt says why it is benign); a result hit too
+        import contextlib, io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc_ctx = cmd_receipt(sandbox, sandbox, [cfg], "notes/stage1-seal.txt", "notes/stage1-blind.md", ["kernel", "SecretTitle"])
+        assert rc_ctx == 2 and "transcript: …" in buf.getvalue() and "heat kernel review" in buf.getvalue(), buf.getvalue()
+        assert "result: …result mentions SecretTitle once" in buf.getvalue(), buf.getvalue()
+        assert term_contexts("a", "xaxbxa", 1) == ["xaxbxa"] and term_contexts("zz", "abc", 2) == []
         # network use before the seal is flagged
         bad = (assistant("T01", [{"type": "tool_use", "name": "WebFetch", "input": {"url": "https://example.org/x"}}])
                + assistant("T02", [{"type": "tool_use", "name": "Write", "input": {"file_path": "notes/stage1-seal.txt", "content": digest}}]))
@@ -312,6 +340,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--sealed", default="notes/stage1-blind.md")
     ap.add_argument("--term", action="append", default=[])
     ap.add_argument("--terms-file", type=Path, default=None)
+    ap.add_argument("--context", type=int, default=2,
+                    help="receipt: show the first N places of each hit with surrounding text, so the receipt can say why a hit is benign (0 = counts only)")
     args = ap.parse_args(argv)
     sandbox = args.sandbox.expanduser().resolve()
     if not sandbox.is_dir():
@@ -324,7 +354,7 @@ def main(argv: list[str]) -> int:
     if args.terms_file:
         terms += [t.strip() for t in args.terms_file.read_text(encoding="utf-8").splitlines() if t.strip() and not t.startswith("#")]
     results = (args.results or sandbox).expanduser().resolve()
-    return cmd_receipt(sandbox, results, config_dirs, args.seal, args.sealed, terms)
+    return cmd_receipt(sandbox, results, config_dirs, args.seal, args.sealed, terms, context=args.context)
 
 
 if __name__ == "__main__":
