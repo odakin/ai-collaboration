@@ -120,7 +120,7 @@ cold-eyes とは「書いた本人と別の目」 で検品させることだが
 (2) **汚染の確認の根拠** — 使った語の一覧と `inspect-review-sandbox.py receipt --terms-file …` の出力 (hit ごとの前後の文が出る = 会話記録の hit がなぜ無害かを書ける)。
 (3) **不一致の数値を守っている著者側の照合** — 判定 session が食い違いと言った数値ごとに、 著者側の数値照合 (照合 script・assert・data の json) をその数値で grep し、 同じ誤りのまま PASS していないかを見る。 PASS していれば、 本文と一緒に照合も直す旨を受領の記録に書く (一般形 = claude-config `paper-audit.md#checker-reads-what-the-text-states`)。
 (4) **判定できなかった項目の引き直し** — 判定 session は写ししか読めないので、 規約の違い (強度か振幅か・近似の式で合わせた値か) で決まらなかった項目が残る。 受け取る側は著者側の記録 (検算 script・note) を 1 回引き、 決まったものは判定できた側に移して出所を書く。 決まらなければ「判定できない」 のまま理由を書く。
-受け取りの検算を会話の中だけで回したら、 出た数値を記録に書く前に締めない (締めの道具 claude-config `session-scripts-report.py` が、 記録に無い数値を 🔢 で出す)。
+受け取りの検算を会話の中だけで回したら、 出た数値を記録に書く前に締めない。Claude / Codex の締めの道具が出す 🔢 を使う ([扱い方](../../claude-config/conventions/closing-sweep.md#numbers-not-recorded)、照合規則の正本 = [`output_numbers.py`](../../claude-config/scripts/lib/output_numbers.py) 冒頭)。
 
 **受領後の reviewer session (2026-09 追補)**: 隔離は review 中だけの規律。 受領・突合が済んだ後に owner が reviewer session 自身へ「知見を上層へ、 script も残す」 と指示すれば、 その session が scratch を一般化した道具 (層1 `scripts/`) と引用文献の verdict (refs の notes) を hoist できる ([`physics-verification-cycle.md#referee-side-kernels`](physics-verification-cycle.md#referee-side-kernels))。 順序が要: 受領側の DESIGN / 規約追補を**先に読んで**重複しない項目だけ上げる (受領側と reviewer 側が同じ file を取り合う = pvc C′ の時間順)。 sandbox は review 後も再計算環境 (venv・公開 chain・文献 text) を保つので、 その path は machine-local の memory に pointer として置く。 ⚠️ **その memory は sandbox の project に紐づく** ので、 書いてよいのは**その sandbox を二度と reviewer に使わせない**と決めたときだけ (= §8 (b) と同じ理由で、 次に同じ dir で起動した reviewer に §1 (a) の口から auto-load される)。 二段 spec の sandbox は stage 間で再起動するので**特に書かない** — stage 1 の結論が stage 2 に流れ込む。 pointer の行き先は受領側 repo (git 同期される側) にする。
 
