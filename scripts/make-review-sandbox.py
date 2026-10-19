@@ -17,6 +17,8 @@ Usage
   make-review-sandbox.py collect <slug> --into DEST_DIR [--root ...] [--include-literature]
         → copies REVIEW-RESULTS.md, STAGE*-RESULTS.md (+ ledger.yaml / HANDOFF.md / notes/ / checks/ / scratch/ if present)
           into DEST_DIR, never the other way.  Prints the contamination-grep reminder.  Pass the same --root as create.
+          When DEST_DIR is inside a git work tree, it warns about collected files the repository ignores (a LaTeX `*.out`
+          rule drops checker outputs and `git add <dir>` skips them silently; add them with `git add -f`).
           The literature the reviewer downloaded into scratch/ (PDF, e-print archives, and the text extracted from them =
           a file with the same name stem) is not copied: it is someone else's copyrighted work and DEST_DIR is often a
           repository or a synced folder shared with collaborators (measured).  The originals stay in the sandbox; --include-literature copies them anyway.
@@ -148,7 +150,30 @@ def collect(root: Path, slug: str, into: Path, include_literature: bool = False)
     if skipped:
         print(f"  ↷ not copied: {len(skipped)} literature file(s) in scratch/ (PDF / e-print / their text extracts;"
               f" the originals stay in {sb / 'scratch'}). --include-literature copies them")
+    ignored = git_ignored(into, copied)
+    if ignored:
+        names = ", ".join(sorted({p.suffix or p.name for p in ignored}))
+        print(f"  ⚠️ {len(ignored)} collected file(s) are ignored by the destination repository ({names}): `git add` of the"
+              f" directory skips them without a message. Add them by name with `git add -f` if the receipt cites them,"
+              f" e.g. {ignored[0]}")
     return copied
+
+
+def git_ignored(into: Path, copied: list[Path]) -> list[Path]:
+    """Files under the copied paths that git would not add (measured: a LaTeX `*.out` rule dropped the outputs of the
+    reviewer's checks).  Empty when DEST is not in a git work tree or git is missing."""
+    files = [f for p in copied for f in ([p] if p.is_file() else sorted(q for q in p.rglob("*") if q.is_file()))]
+    if not files:
+        return []
+    import subprocess
+    try:
+        r = subprocess.run(["git", "-C", str(into), "check-ignore", "--stdin"], input="\n".join(str(f) for f in files),
+                           capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if r.returncode not in (0, 1):   # 128 = not a work tree
+        return []
+    return [Path(line) for line in r.stdout.splitlines() if line.strip()]
 
 
 def selftest() -> int:
@@ -195,6 +220,23 @@ def selftest() -> int:
             collect(Path(td) / "elsewhere", "t1", Path(td) / "dest-x"); raise AssertionError("should refuse a missing sandbox")
         except SystemExit as e:
             assert "--root" in str(e)
+        # a destination repository whose .gitignore drops checker outputs (LaTeX `*.out`) gets a warning, not a silent loss
+        import shutil as _sh, subprocess as _sp
+        if _sh.which("git"):
+            repo = Path(td) / "repo"; repo.mkdir()
+            _sp.run(["git", "init", "-q", str(repo)], check=True)
+            (repo / ".gitignore").write_text("*.out\n", encoding="utf-8")
+            (sb / "checks").mkdir(exist_ok=True); (sb / "checks" / "c01.py").write_text("print(1)\n", encoding="utf-8")
+            (sb / "checks" / "c01.out").write_text("1\n", encoding="utf-8")
+            buf_g = io.StringIO()
+            with contextlib.redirect_stdout(buf_g):
+                got_g = collect(root, "t1", repo / "receipt")
+            assert "ignored by the destination repository" in buf_g.getvalue() and ".out" in buf_g.getvalue(), buf_g.getvalue()
+            assert [p.name for p in git_ignored(repo / "receipt", got_g)] == ["c01.out"]
+            buf_n = io.StringIO()
+            with contextlib.redirect_stdout(buf_n):
+                collect(root, "t1", Path(td) / "dest-nogit")
+            assert "ignored by the destination" not in buf_n.getvalue(), "no warning outside a work tree"
         # referee copy: .tex includes are stripped in the sandbox (the source is untouched), AGENTS.md for Codex
         tex = Path(td) / "note.tex"
         tex.write_text("% previous round: verdict incorrect, see plans/r.md\n\\section{A} % layout\ntext\n", encoding="utf-8")
@@ -220,7 +262,7 @@ def selftest() -> int:
             sb5 = create(root, "t5", spec, [dx])
         assert (sb5 / "deixis.tex").exists() and "not refused" in buf.getvalue(), "a warning is shown, not a refusal"
         assert "the spec wins" in CLAUDE_MD
-    print("selftest OK (22 checks)")
+    print("selftest OK (25 checks)")
     return 0
 
 
