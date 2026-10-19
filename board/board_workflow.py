@@ -139,7 +139,7 @@ def apply(s, e, seen):
         s.update(claim=e, status='blocked' if s['blocker'] else 'working')
     elif kind in {'submit','release'}:
         need(claim is not None and same_session(identity(e), identity(claim)), 'only current claimant can submit/release')
-        need(e.get('reply_to') == claim['event_id'], 'reply_to must identify current claim')
+        need(e.get('reply_to') == claim['event_id'], f"reply_to must identify current claim: {claim['event_id']}")
         if kind == 'release':
             need(s['status'] != 'submitted', 'cannot release a submitted result')
             s.update(claim=None, status='blocked' if s['blocker'] else 'requested')

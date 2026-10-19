@@ -657,6 +657,11 @@ def event_from(a, events):
             subs=[e for e in events if e.get('request_id')==a.request and e['kind']=='submit']
             latest=max(subs,key=lambda e:e['created_at'])['event_id'] if subs else None
             raise ValueError(f'{a.command} needs --reply-to <the submission you checked>'+(f': the latest submission is {latest}' if latest else ': no submission yet'))
+        if a.command in ('submit','release') and not a.reply_to:
+            # Same for the worker side (measured: "$: missing reply_to" alone, then the request id was tried and refused).
+            claims=[e for e in events if e.get('request_id')==a.request and e['kind']=='claim']
+            cur=max(claims,key=lambda e:e['created_at'])['event_id'] if claims else None
+            raise ValueError(f'{a.command} needs --reply-to <your current claim, not the request>'+(f': the latest claim is {cur}' if cur else ': no claim yet'))
     kind=a.command
     # Existing template supplies metadata; workflow fields are added below.
     ev,path=view.build_template(kind='update',project=pk,thread=tid,task=a.session_name or 'workflow',agent=a.agent,

@@ -457,6 +457,18 @@ class Note(unittest.TestCase):
         self.assertIn(f"the latest submission is {sub['event_id']}",str(cm.exception))
         a.reply_to=sub['event_id']
         self.assertEqual(board.event_from(a,[r,c,sub])['reply_to'],sub['event_id'])
+    def test_submit_without_reply_to_names_the_current_claim(self):
+        # The worker side of the test above: a bare "$: missing reply_to", then the request id was tried and refused (measured).
+        import argparse
+        r,c,sub=chain()
+        a=argparse.Namespace(command='submit',policy='ordinary',source=Path('/nonexistent/example'),project=None,thread=None,repo=None,
+            request=r['event_id'],summary='done',acceptance=None,agent='codex',session='codex-session-001',session_name=None,instance=None,
+            event_id=None,reply_to=None,lease_hours=12,reference=[],deliverable=['results/check.md'],to=None,to_session=None,role=None)
+        with self.assertRaises(ValueError) as cm: board.event_from(a,[r,c])
+        self.assertIn(f"the latest claim is {c['event_id']}",str(cm.exception))
+        self.assertIn('not the request',str(cm.exception))
+        a.reply_to=c['event_id']
+        self.assertEqual(board.event_from(a,[r,c])['reply_to'],c['event_id'])
     def test_non_participant_update_names_the_sessions_to_post_as(self):
         # The bare "not a workflow participant" did not say which --session to use (measured: the requester's own id was refused).
         r,c,sub=chain()
