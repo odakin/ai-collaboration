@@ -704,27 +704,31 @@ def event_from(a, events):
     return ev
 
 
-def handoff_text(root, role, request_id, spec, model, effort, surface='background'):
+def handoff_text(root, role, request_id, spec, model, effort, surface='background', project=None, policy=None):
     """What a worker window starts from (CONTRACT.md#worker-handoff-text): role, request, spec, the model and effort it
     must run on, and the first two steps. Written to a file and passed to the CLI whole, so quoting never bites.
     A desktop window gets a step 0: the app starts it on the requester's model when the asked one is higher, and on
-    another effort (measured), so the worker reads the app's record first and stops when it differs."""
+    another effort (measured), so the worker reads the app's record first and stops when it differs. Step 0 holds back
+    the request and its materials only; a session's own start-up reads are not the task. The claim and submit steps
+    carry the whole command: a worker told only to `claim` with a session name found --root, --request, --project and
+    --policy by refused posts (measured)."""
     run=(f" This window must run on {model}"+(f" at {effort} effort" if effort else '')+'.') if model else ''
     eng=Path(__file__).resolve()
     hold=''
     if surface=='desktop' and model:
         sm_cli=ENGINE.parent.parent/'claude-config'/'scripts'/'session-model.py'
         hold=(f"0. First run `python3 {sm_cli} self`: if the app's record (`app の記録`) is not {model}"+(f" with effort {effort}" if effort else '')
-              +", stop at once without reading anything else and say so in one line; the requester switches you and sends `go`.\n")
+              +", stop at once without reading the request or its materials and say so in one line; the requester switches you and sends `go`.\n")
     # A desktop window is the owner's own window: an approval asked there and relayed by the requester reached the owner
     # twice (measured), so the worker asks in its window only.
     ask=(" Ask the owner for any approval or OK in this window, where the owner reads it; do not ask the requester to relay it."
          if surface=='desktop' else '')
+    scope=(f" --project {project}" if project else '')+(f" --policy {policy}" if policy else '')
     return (f"You are the board worker for role `{role}`, request `{request_id}`, spec `{spec or '(the request itself)'}`; execute it yourself.{run}\n"
             +hold+
             f"1. `python3 {eng} inbox --root {root} --agent claude --session {role} --sync`; if the request is not visible, do not read the spec — ask the requester or `watch`.\n"
-            f"2. `claim` with `--session-name '<your native session id, 8 chars> ({model or '<model>'})'`; if refused with *another live claim exists*, stop and say so in one line.\n"
-            f"3. Do the work the spec asks for; when done, `submit` with the deliverable paths.{ask}\n")
+            f"2. `python3 {eng} claim --root {root} --agent claude --session {role} --request {request_id}{scope} --session-name '<your native session id, 8 chars> ({model or '<model>'})' --summary '<one line>'`; if refused with *another live claim exists*, stop and say so in one line.\n"
+            f"3. Do the work the spec asks for; when done, `submit` with the same --root, --session, --request{scope}, plus `--reply-to <your claim's event id>` and `--deliverable <path>` for each deliverable.{ask}\n")
 
 
 def own_model(session):
@@ -766,7 +770,7 @@ def model_label(model, effort):
     return (name+(' '+effort if effort else '')).strip()
 
 
-def desktop_plan(root, role, request_id, spec, expect, session, title=None, project=None, summary=None, nested=False):
+def desktop_plan(root, role, request_id, spec, expect, session, title=None, project=None, summary=None, nested=False, policy=None):
     """The desktop app's start_session arguments for a role's worker (the worker is listed in the app, unlike a
     background CLI session). The board cannot call the app: the requesting Claude session calls start_session with
     these arguments. Returns (arguments, file). Title = the task first and the model last (measured: a title that
@@ -775,7 +779,7 @@ def desktop_plan(root, role, request_id, spec, expect, session, title=None, proj
     which relayed the child's questions to the owner a second time (measured); the board's watch carries submit and
     blocker instead."""
     model,effort=launch_settings(expect,session)
-    text=handoff_text(root,role,request_id,spec,model,effort,surface='desktop')
+    text=handoff_text(root,role,request_id,spec,model,effort,surface='desktop',project=project,policy=policy)
     write_outbox(root,request_id+'.handoff.txt',text)
     name=role[len('role-'):] if role.startswith('role-') else role
     if project and name.startswith(project+'-'): name=name[len(project)+1:]
@@ -835,7 +839,7 @@ def claim_model_check(a):
                          ' model is fine, claim again with --model-ok')
 
 
-def launch_plan(root, role, request_id, spec, expect, session):
+def launch_plan(root, role, request_id, spec, expect, session, project=None, policy=None):
     """The command that starts the addressed worker as a background CLI session with model, effort and config dir pinned.
 
     Returns (argv, env, shell line, hand-off file). Model = --expect-model, else the owner's default, else the
@@ -847,7 +851,7 @@ def launch_plan(root, role, request_id, spec, expect, session):
     --launch is given: the requester's shell does, with the hand-off text read from the file."""
     model,effort=launch_settings(expect,session)
     cfg=os.path.expanduser((os.environ.get(LAUNCH_CONFIG_DIR_ENV) or '').strip())
-    text=handoff_text(root,role,request_id,spec,model,effort)
+    text=handoff_text(root,role,request_id,spec,model,effort,project=project,policy=policy)
     path=write_outbox(root,request_id+'.handoff.txt',text)
     write_launch_record(root,request_id,role=role,spec=spec,model=model,effort=effort,surface='background',requester=session)
     cli=os.environ.get(LAUNCH_CLI_ENV) or 'claude'
@@ -876,7 +880,7 @@ def announce_launch(a, ev, audience):
         # Work the owner does not watch, run as the requester's own subagent: no window to open, so only the record
         # (the claim check compares the subagent's model with it) and the hand-off text the Agent tool's prompt carries.
         model,effort=launch_settings(a.expect_model,a.session)
-        text=handoff_text(a.root,a.to_session,ev['event_id'],(a.reference or [None])[0],model,effort)
+        text=handoff_text(a.root,a.to_session,ev['event_id'],(a.reference or [None])[0],model,effort,project=a.project,policy=a.policy)
         hpath=write_outbox(a.root,ev['event_id']+'.handoff.txt',text)
         write_launch_record(a.root,ev['event_id'],role=a.to_session,model=model,effort=effort,surface='agent',requester=a.session)
         print(f'→ 受け手は依頼元の Agent tool (subagent) で起こす = app の一覧に出ない (本人が見ない手元の仕事だけ)。'
@@ -888,7 +892,7 @@ def announce_launch(a, ev, audience):
         # Remote Control off is listed nowhere, and with it on it sits on the shelf shared with other machines = measured).
         nested=bool(getattr(a,'nested',False))
         args,spath=desktop_plan(a.root,a.to_session,ev['event_id'],(a.reference or [None])[0],a.expect_model,a.session,
-                                title=getattr(a,'title',None),project=a.project,summary=ev.get('summary'),nested=nested)
+                                title=getattr(a,'title',None),project=a.project,summary=ev.get('summary'),nested=nested,policy=a.policy)
         sm_cli=ENGINE.parent.parent/'claude-config'/'scripts'/'session-model.py'
         want=' / '.join(x for x in (args.get('model'),('effort '+args['effort']) if args.get('effort') else '') if x)
         print(f'→ 受け手を desktop app の session として起こす (本人の左の一覧に出る)。 起こすのは依頼元の Claude の start_session'
@@ -902,7 +906,7 @@ def announce_launch(a, ev, audience):
         return None
     # A role names a window nobody has opened: print the command that opens it with model, effort and account
     # pinned (measured: the chip opens on the parent's model, and a pasted hand-off ran on whatever the window had).
-    argv,env,line,hpath=launch_plan(a.root,a.to_session,ev['event_id'],(a.reference or [None])[0],a.expect_model,a.session)
+    argv,env,line,hpath=launch_plan(a.root,a.to_session,ev['event_id'],(a.reference or [None])[0],a.expect_model,a.session,project=a.project,policy=a.policy)
     if audience=='owner':
         print(f'→ 受け手を起こす (model・effort・account を固定、 貼り付け不要。 依頼元の shell でそのまま):\n  {line}')
     else:

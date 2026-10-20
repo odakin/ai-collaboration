@@ -448,7 +448,9 @@ python3 board_items.py list    --root <board>
   other requesters default to the shell line) prints, instead of the shell line, the desktop app's `start_session` arguments (also written as `<request id>.start_session.json`): the same model
   and effort, a title with the task first and the model last (the app's list cuts titles from the left, measured), and
   the hand-off text with a step 0 = read the app's record of this window (`session-model.py self`) and stop in one
-  line when its model or effort differ. The board cannot open a desktop window; the requesting Claude session calls
+  line when its model or effort differ, before reading the request or its materials (a session's own start-up reads
+  are not held back). Every hand-off text spells out the whole `claim` and `submit` commands, with the request's
+  project and policy (measured: a worker told only to `claim` found them by refused posts). The board cannot open a desktop window; the requesting Claude session calls
   `start_session` with those arguments. The app drops a model above the caller's and the effort argument without an
   error (measured), so the requester reads the app's record of the new session, switches it with
   `set_session_model` then `set_session_effort`, waits for the worker's one-line stop, and sends `go`
