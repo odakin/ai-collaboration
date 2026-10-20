@@ -442,7 +442,19 @@ python3 board_items.py list    --root <board>
   exists*, stop and say so in one line. 3. Do the work; `submit` with the deliverable paths." Paste that file's text
   only into a window opened by other means (a desktop window someone wants to steer, another machine): a window runs
   on whatever model it happens to have (measured), so the model and effort are in the text as well. The native id in
-  the name lets a second worker under the same role see the claim is not its own. For a cross-vendor pass on a copy
+  the name lets a second worker under the same role see the claim is not its own.
+  **`--surface desktop`** (or `AGENT_BOARD_LAUNCH_SURFACE=desktop` in the owner's wiring) prints, instead of the shell
+  line, the desktop app's `start_session` arguments (also written as `<request id>.start_session.json`): the same model
+  and effort, a title with the task first and the model last (the app's list cuts titles from the left, measured), and
+  the hand-off text with a step 0 = read the app's record of this window (`session-model.py self`) and stop in one
+  line when its model or effort differ. The board cannot open a desktop window; the requesting Claude session calls
+  `start_session` with those arguments. The app drops a model above the caller's and the effort argument without an
+  error (measured), so the requester reads the app's record of the new session, switches it with
+  `set_session_model` then `set_session_effort`, waits for the worker's one-line stop, and sends `go`
+  (claude-config `multi-session-coordination.md#desktop-start-model-cap`). Every request to a role leaves
+  `<request id>.launch.json` (model, effort, surface) in the outbox; `claim` refuses a session whose model tier differs
+  from that record (`--model-ok` when the requester or the owner accepted the model it runs). The record stays on the
+  requester's machine, so a claim from another machine is not checked. For a cross-vendor pass on a copy
   of a repository, also follow
   [`physics-verification-cycle.md#cross-vendor-repo-copy`](../conventions/physics-verification-cycle.md#cross-vendor-repo-copy).
 - <a id="role-claim-is-not-assignment"></a>**A self-declared role is not an assignment**: "this session is the review

@@ -1418,6 +1418,78 @@ class LaunchCommandCLI(Transport):
             else: os.environ['AGENT_BOARD_LAUNCH_MODEL']=saved
             os.environ.update({k:v for k,v in wiring.items() if v is not None})
 
+    def test_request_desktop_surface_prints_start_session_arguments(self):
+        """--surface desktop (or the owner's env default) prints the desktop app's start_session arguments = model, effort,
+        a title with the task first and the model last, the hand-off with step 0 = and writes them and the launch record
+        to the outbox. It never runs the CLI, even when the owner's wiring launches by default."""
+        import sys, os
+        script=board.ENGINE/'board.py'
+        def cli(*args):
+            p=subprocess.run([sys.executable,str(script),*args],capture_output=True,text=True); self.assertEqual(p.returncode,0,p.stderr); return p.stdout
+        src=self.base/'qproj'   # an ordinary post needs an unencrypted git source (the fixture board is encrypted)
+        if not src.exists(): subprocess.run(['git','init','-q','-b','main',str(src)],check=True)
+        base=['--root',str(self.root),'--agent','claude','--session','claude-win-9','--source',str(src),'--policy','ordinary',
+              '--project','qproj','--summary','画面が崩れる不具合を直す。 仕様 = 参照','--acceptance','直った commit']
+        keys=('AGENT_BOARD_LAUNCH_DEFAULT','AGENT_BOARD_LAUNCH_CLI','AGENT_BOARD_LAUNCH_CONFIG_DIR','AGENT_BOARD_LAUNCH_EFFORT',
+              'AGENT_BOARD_LAUNCH_REMOTE_CONTROL','AGENT_BOARD_LAUNCH_SURFACE','AGENT_BOARD_LAUNCH_MODEL','AGENT_BOARD_DEFAULT_REVIEWER')
+        wiring={k:os.environ.pop(k,None) for k in keys}
+        stub=self.base/'claude-stub'; stub.write_text('#!/bin/sh\necho backgrounded deadbeef\n'); stub.chmod(0o755)
+        os.environ.update({'AGENT_BOARD_LAUNCH_DEFAULT':'1','AGENT_BOARD_LAUNCH_CLI':str(stub),'AGENT_BOARD_LAUNCH_EFFORT':'high'})
+        try:
+            out=cli('request',*base,'--thread','2026-01-01-screen-a','--to','claude','--to-session','role-qproj-screen','--expect-model','claude-fable-5-1',
+                    '--surface','desktop','--title','画面が崩れる')
+            self.assertIn('desktop app の session として起こす',out); self.assertNotIn('起動した',out)
+            rid=next(l.split('=',1)[1] for l in out.splitlines() if l.startswith('event_id='))
+            args=json.loads((board.outbox_dir(self.root)/(rid+'.start_session.json')).read_text())
+            self.assertEqual((args['model'],args['effort'],args['name'],args['initiation']),('claude-fable-5-1','high','screen','user_asked'))
+            self.assertEqual(args['title'],'画面が崩れる · Fable 5.1 high'); self.assertFalse(args['use_worktree'])
+            self.assertIn('0. First run',args['prompt']); self.assertIn('must run on claude-fable-5-1 at high effort',args['prompt'])
+            self.assertGreaterEqual(len(args['background']),80)
+            rec=board.launch_record(self.root,rid); self.assertEqual((rec['surface'],rec['model'],rec['effort']),('desktop','claude-fable-5-1','high'))
+            os.environ['AGENT_BOARD_LAUNCH_SURFACE']='desktop'   # the owner's default chooses the surface as well
+            out2=cli('request',*base,'--thread','2026-01-01-screen-b','--to','claude','--to-session','role-qproj-other')
+            self.assertIn('desktop app の session として起こす',out2); self.assertNotIn('起動した',out2)
+            rid2=next(l.split('=',1)[1] for l in out2.splitlines() if l.startswith('event_id='))
+            self.assertTrue(json.loads((board.outbox_dir(self.root)/(rid2+'.start_session.json')).read_text())['title'].startswith('画面が崩れる不具合を直す'))
+            out3=cli('request',*base,'--thread','2026-01-01-screen-c','--to','claude','--to-session','role-qproj-third','--surface','background')
+            self.assertIn('起動した: backgrounded deadbeef',out3)   # --surface background overrides the default
+            self.assertEqual(board.launch_record(self.root,next(l.split('=',1)[1] for l in out3.splitlines() if l.startswith('event_id=')))['surface'],'background')
+        finally:
+            for k in keys: os.environ.pop(k,None)
+            os.environ.update({k:v for k,v in wiring.items() if v is not None})
+
+
+class ClaimModelCheck(unittest.TestCase):
+    """A claim from a session on another model tier than the request's launch record is refused (the declared label in
+    --session-name does not count, the transcript does); --model-ok and a matching model pass; no record, no check."""
+    def test_claim_model_against_launch_record(self):
+        import os, argparse
+        companion=board.ENGINE.parent.parent/'claude-config'/'scripts'/'lib'/'session_model.py'
+        if not companion.is_file(): self.skipTest('the claude-config companion is not next to this engine')
+        td=tempfile.TemporaryDirectory(); base=Path(td.name)
+        root=base/'board'; (root/'.local').mkdir(parents=True)
+        sdir,pdir,adir=base/'sessions',base/'projects',base/'app'; sdir.mkdir(); (pdir/'-w').mkdir(parents=True); adir.mkdir()
+        native='abcdef01-0000-4000-8000-000000000001'
+        def transcript(model): (pdir/'-w'/(native+'.jsonl')).write_text(json.dumps({'type':'assistant','message':{'model':model},'timestamp':'t'})+'\n')
+        keys=('CLAUDE_SESSIONS_DIR','CLAUDE_PROJECTS_DIR','CLAUDE_DESKTOP_SESSIONS_DIR')
+        saved={k:os.environ.get(k) for k in keys}
+        os.environ.update({'CLAUDE_SESSIONS_DIR':str(sdir),'CLAUDE_PROJECTS_DIR':str(pdir),'CLAUDE_DESKTOP_SESSIONS_DIR':str(adir)})
+        rid='20260101T000000Z-claude-0000aa'
+        a=argparse.Namespace(command='claim',agent='claude',model_ok=False,request=rid,root=root,session='role-p-w',session_name='abcdef01 (claude-fable-5-1)')
+        try:
+            transcript('claude-opus-5-5')
+            board.claim_model_check(a)   # no launch record = nothing to compare
+            board.write_launch_record(root,rid,model='claude-fable-5-1',effort='high',surface='desktop')
+            with self.assertRaises(ValueError) as cm: board.claim_model_check(a)
+            self.assertIn('claude-opus-5-5',str(cm.exception)); self.assertIn('--model-ok',str(cm.exception))
+            a.model_ok=True; board.claim_model_check(a)
+            a.model_ok=False; transcript('claude-fable-5-1'); board.claim_model_check(a)
+        finally:
+            for k,v in saved.items():
+                if v is None: os.environ.pop(k,None)
+                else: os.environ[k]=v
+            td.cleanup()
+
 
 class OptimisticPost(Transport):
     """A post right after this machine fetched or pushed does not fetch again (one round trip saved); when the remote
