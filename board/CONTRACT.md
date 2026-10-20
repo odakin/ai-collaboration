@@ -451,7 +451,11 @@ python3 board_items.py list    --root <board>
   `start_session` with those arguments. The app drops a model above the caller's and the effort argument without an
   error (measured), so the requester reads the app's record of the new session, switches it with
   `set_session_model` then `set_session_effort`, waits for the worker's one-line stop, and sends `go`
-  (claude-config `multi-session-coordination.md#desktop-start-model-cap`). Every request to a role leaves
+  (claude-config `multi-session-coordination.md#desktop-start-model-cap`). Unless `--nested`, the printed steps end
+  with `detach_session` once the model is right: a child's every turn end reaches the requester, which then relayed
+  the child's questions to the owner a second time (measured); submit and blocker still reach the requester through
+  `watch`. The desktop hand-off text tells the worker to ask the owner for approvals in its own window and not
+  through the requester. Every request to a role leaves
   `<request id>.launch.json` (model, effort, surface) in the outbox; `claim` refuses a session whose model tier differs
   from that record (`--model-ok` when the requester or the owner accepted the model it runs). The record stays on the
   requester's machine, so a claim from another machine is not checked. For a cross-vendor pass on a copy

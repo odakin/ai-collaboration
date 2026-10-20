@@ -716,11 +716,15 @@ def handoff_text(root, role, request_id, spec, model, effort, surface='backgroun
         sm_cli=ENGINE.parent.parent/'claude-config'/'scripts'/'session-model.py'
         hold=(f"0. First run `python3 {sm_cli} self`: if the app's record (`app の記録`) is not {model}"+(f" with effort {effort}" if effort else '')
               +", stop at once without reading anything else and say so in one line; the requester switches you and sends `go`.\n")
+    # A desktop window is the owner's own window: an approval asked there and relayed by the requester reached the owner
+    # twice (measured), so the worker asks in its window only.
+    ask=(" Ask the owner for any approval or OK in this window, where the owner reads it; do not ask the requester to relay it."
+         if surface=='desktop' else '')
     return (f"You are the board worker for role `{role}`, request `{request_id}`, spec `{spec or '(the request itself)'}`; execute it yourself.{run}\n"
             +hold+
             f"1. `python3 {eng} inbox --root {root} --agent claude --session {role} --sync`; if the request is not visible, do not read the spec — ask the requester or `watch`.\n"
             f"2. `claim` with `--session-name '<your native session id, 8 chars> ({model or '<model>'})'`; if refused with *another live claim exists*, stop and say so in one line.\n"
-            f"3. Do the work the spec asks for; when done, `submit` with the deliverable paths.\n")
+            f"3. Do the work the spec asks for; when done, `submit` with the deliverable paths.{ask}\n")
 
 
 def own_model(session):
@@ -762,11 +766,14 @@ def model_label(model, effort):
     return (name+(' '+effort if effort else '')).strip()
 
 
-def desktop_plan(root, role, request_id, spec, expect, session, title=None, project=None, summary=None):
+def desktop_plan(root, role, request_id, spec, expect, session, title=None, project=None, summary=None, nested=False):
     """The desktop app's start_session arguments for a role's worker (the worker is listed in the app, unlike a
     background CLI session). The board cannot call the app: the requesting Claude session calls start_session with
     these arguments. Returns (arguments, file). Title = the task first and the model last (measured: a title that
-    starts with tags is cut to the same prefix for every child in the app's list)."""
+    starts with tags is cut to the same prefix for every child in the app's list). Unless nested, the launch record
+    asks the requester to detach the worker once its model is right: a child's every turn end reaches the requester,
+    which relayed the child's questions to the owner a second time (measured); the board's watch carries submit and
+    blocker instead."""
     model,effort=launch_settings(expect,session)
     text=handoff_text(root,role,request_id,spec,model,effort,surface='desktop')
     write_outbox(root,request_id+'.handoff.txt',text)
@@ -784,7 +791,7 @@ def desktop_plan(root, role, request_id, spec, expect, session, title=None, proj
     if effort: args['effort']=effort
     path=write_outbox(root,request_id+'.start_session.json',json.dumps(args,ensure_ascii=False,indent=1))
     write_launch_record(root,request_id,role=role,spec=spec,model=model,effort=effort,surface='desktop',title=args['title'],
-                        name=name,requester=session)
+                        name=name,requester=session,detach=not nested)
     return args,path
 
 
@@ -844,15 +851,18 @@ def announce_launch(a, ev, audience):
     if surface=='desktop':
         # The worker the owner wants to watch: a desktop session is listed in the app (a background CLI session with
         # Remote Control off is listed nowhere, and with it on it sits on the shelf shared with other machines = measured).
+        nested=bool(getattr(a,'nested',False))
         args,spath=desktop_plan(a.root,a.to_session,ev['event_id'],(a.reference or [None])[0],a.expect_model,a.session,
-                                title=getattr(a,'title',None),project=a.project,summary=ev.get('summary'))
+                                title=getattr(a,'title',None),project=a.project,summary=ev.get('summary'),nested=nested)
         sm_cli=ENGINE.parent.parent/'claude-config'/'scripts'/'session-model.py'
         want=' / '.join(x for x in (args.get('model'),('effort '+args['effort']) if args.get('effort') else '') if x)
         print(f'→ 受け手を desktop app の session として起こす (本人の左の一覧に出る)。 起こすのは依頼元の Claude の start_session'
               f' (この shell からは起こせない)。 引数 = {spath} (全文が下):\n  '+json.dumps(args,ensure_ascii=False))
         print(f'  起こした後: python3 {sm_cli} <返りの local_…> で app の記録が {want or "頼んだ値"} かを読む。'
               ' start_session は呼び元より高い model と effort の指定を黙って捨てる (実測) = 違えば set_session_model → set_session_effort'
-              ' の順で直し (worker は step 0 で止まって 1 行返す)、 記録が合ってから go を送る。 本人に「起きた」 と言うのはその後')
+              ' の順で直し (worker は step 0 で止まって 1 行返す)、 記録が合ってから go を送る。 本人に「起きた」 と言うのはその後'
+              +('' if nested else '。 記録が合ったら detach_session(<local_…>) = 一覧の上の段に独立させる (子の turn の終わりの知らせと'
+                ' 本人への問いが依頼元に来なくなる。 提出と blocker は掲示板の watch で届く。 子のままにするなら --nested)'))
         if getattr(a,'launch',False): print('  (--launch は CLI の起動だけ = desktop の session は依頼元が start_session で起こす)')
         return None
     # A role names a window nobody has opened: print the command that opens it with model, effort and account
@@ -1033,6 +1043,7 @@ def main():
     ap.add_argument('--no-launch',action='store_true',help=f'request to a role: only print the command even when {LAUNCH_DEFAULT_ENV}=1 (that default applies to owner boards only)')
     ap.add_argument('--surface',choices=['background','desktop'],help=f'request to a role: desktop = print the desktop app\'s start_session arguments (the worker is listed in the app); background = the CLI line (default; env {LAUNCH_SURFACE_ENV})')
     ap.add_argument('--title',help='request to a role with --surface desktop: the worker\'s title in the app\'s list (default: the summary\'s first clause); the model is added at the end')
+    ap.add_argument('--nested',action='store_true',help='request to a role with --surface desktop: keep the worker as the requester\'s child (default: detach it once its model is right, so its turn ends and its questions to the owner do not reach the requester)')
     ap.add_argument('--model-ok',action='store_true',help='claim: the requester or the owner accepted the model this session runs although the request was launched for another')
     ap.add_argument('--reviewer',help='request: the session that receives the submission (default: the requester; env '
                     f'{DEFAULT_REVIEWER_ENV} with <project> on an owner board). A role id outlives this session; posted as a reviewer handover right after the request')

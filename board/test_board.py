@@ -1446,11 +1446,16 @@ class LaunchCommandCLI(Transport):
             self.assertIn('0. First run',args['prompt']); self.assertIn('must run on claude-fable-5-1 at high effort',args['prompt'])
             self.assertGreaterEqual(len(args['background']),80)
             rec=board.launch_record(self.root,rid); self.assertEqual((rec['surface'],rec['model'],rec['effort']),('desktop','claude-fable-5-1','high'))
+            self.assertTrue(rec['detach']); self.assertIn('detach_session',out)   # detached once its model is right, unless --nested
+            self.assertIn('Ask the owner for any approval',args['prompt'])         # approvals are asked in the worker's own window
             os.environ['AGENT_BOARD_LAUNCH_SURFACE']='desktop'   # the owner's default chooses the surface as well
             out2=cli('request',*base,'--thread','2026-01-01-screen-b','--to','claude','--to-session','role-qproj-other')
             self.assertIn('desktop app の session として起こす',out2); self.assertNotIn('起動した',out2)
             rid2=next(l.split('=',1)[1] for l in out2.splitlines() if l.startswith('event_id='))
             self.assertTrue(json.loads((board.outbox_dir(self.root)/(rid2+'.start_session.json')).read_text())['title'].startswith('画面が崩れる不具合を直す'))
+            out4=cli('request',*base,'--thread','2026-01-01-screen-d','--to','claude','--to-session','role-qproj-fourth','--nested')
+            rid4=next(l.split('=',1)[1] for l in out4.splitlines() if l.startswith('event_id='))
+            self.assertFalse(board.launch_record(self.root,rid4)['detach']); self.assertNotIn('detach_session',out4)
             out3=cli('request',*base,'--thread','2026-01-01-screen-c','--to','claude','--to-session','role-qproj-third','--surface','background')
             self.assertIn('起動した: backgrounded deadbeef',out3)   # --surface background overrides the default
             self.assertEqual(board.launch_record(self.root,next(l.split('=',1)[1] for l in out3.splitlines() if l.startswith('event_id=')))['surface'],'background')
