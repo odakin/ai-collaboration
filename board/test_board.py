@@ -1341,6 +1341,7 @@ class LaunchCommand(unittest.TestCase):
             self.assertEqual(argv[:6],[str(stub),'--bg','--model','claude-model-x','--effort','high'])
             self.assertIn('You are the board worker for role `role-p-f`',argv[-1]); self.assertIn('spec `p/spec.md`',argv[-1])
             self.assertIn('run on claude-model-x at high effort',argv[-1])
+            self.assertIn('summary in plain words',argv[-1])   # summaries are relayed to the owner: no unexplained work labels
             self.assertEqual(env['CLAUDE_CONFIG_DIR'],os.path.expanduser('~/.claude-fixture')); self.assertNotIn('CLAUDECODE',env)
             self.assertTrue(line.startswith('CLAUDE_CONFIG_DIR=')); self.assertIn('--bg --model claude-model-x --effort high --settings ',line); self.assertIn(' "$(cat ',line)
             self.assertEqual(path,root/'.local'/'outbox'/'20260101T000000Z-claude-000001.handoff.txt'); self.assertEqual(path.read_text(),argv[-1])

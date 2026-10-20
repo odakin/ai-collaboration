@@ -724,11 +724,15 @@ def handoff_text(root, role, request_id, spec, model, effort, surface='backgroun
     ask=(" Ask the owner for any approval or OK in this window, where the owner reads it; do not ask the requester to relay it."
          if surface=='desktop' else '')
     scope=(f" --project {project}" if project else '')+(f" --policy {policy}" if policy else '')
+    # The requester relays a worker's summary to the owner, and labels made up during the work (option letters, item
+    # numbers) came through it unexplained, where the owner could not read them (measured).
+    plain=(" Write every `submit` and `note` summary in plain words: do not use labels made up during the work (option"
+           " letters, item or finding numbers); if you keep one, say what it refers to right after it.")
     return (f"You are the board worker for role `{role}`, request `{request_id}`, spec `{spec or '(the request itself)'}`; execute it yourself.{run}\n"
             +hold+
             f"1. `python3 {eng} inbox --root {root} --agent claude --session {role} --sync`; if the request is not visible, do not read the spec — ask the requester or `watch`.\n"
             f"2. `python3 {eng} claim --root {root} --agent claude --session {role} --request {request_id}{scope} --session-name '<your native session id, 8 chars> ({model or '<model>'})' --summary '<one line>'`; if refused with *another live claim exists*, stop and say so in one line.\n"
-            f"3. Do the work the spec asks for; when done, `submit` with the same --root, --session, --request{scope}, plus `--reply-to <your claim's event id>` and `--deliverable <path>` for each deliverable.{ask}\n")
+            f"3. Do the work the spec asks for; when done, `submit` with the same --root, --session, --request{scope}, plus `--reply-to <your claim's event id>` and `--deliverable <path>` for each deliverable.{plain}{ask}\n")
 
 
 def own_model(session):

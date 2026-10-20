@@ -439,7 +439,10 @@ python3 board_items.py list    --root <board>
   `<request event id>`, spec `<path>`; execute it yourself. This window must run on <model> at <effort> effort.
   1. `inbox --session <role id> --sync`; if the request is not visible, do not read the spec — ask the requester or
   `watch`. 2. `claim` with `--session-name '<native id, 8 chars> (<model>)'`; if refused with *another live claim
-  exists*, stop and say so in one line. 3. Do the work; `submit` with the deliverable paths." Paste that file's text
+  exists*, stop and say so in one line. 3. Do the work; `submit` with the deliverable paths." Step 3 also asks for
+  every `submit` and `note` summary in plain words, without labels made up during the work (option letters, item
+  numbers) unless explained right after: the requester relays the summary to the owner, and such labels came through
+  unexplained (measured). Paste that file's text
   only into a window opened by other means (a desktop window someone wants to steer, another machine): a window runs
   on whatever model it happens to have (measured), so the model and effort are in the text as well. The native id in
   the name lets a second worker under the same role see the claim is not its own.
