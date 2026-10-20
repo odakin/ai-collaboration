@@ -1456,6 +1456,10 @@ class LaunchCommandCLI(Transport):
             out4=cli('request',*base,'--thread','2026-01-01-screen-d','--to','claude','--to-session','role-qproj-fourth','--nested')
             rid4=next(l.split('=',1)[1] for l in out4.splitlines() if l.startswith('event_id='))
             self.assertFalse(board.launch_record(self.root,rid4)['detach']); self.assertNotIn('detach_session',out4)
+            out5=cli('request',*base,'--thread','2026-01-01-screen-e','--to','claude','--to-session','role-qproj-fifth','--surface','agent')
+            rid5=next(l.split('=',1)[1] for l in out5.splitlines() if l.startswith('event_id='))
+            self.assertIn('Agent tool',out5); self.assertNotIn('起動した',out5); self.assertNotIn('start_session',out5)
+            self.assertEqual(board.launch_record(self.root,rid5)['surface'],'agent')
             out3=cli('request',*base,'--thread','2026-01-01-screen-c','--to','claude','--to-session','role-qproj-third','--surface','background')
             self.assertIn('起動した: backgrounded deadbeef',out3)   # --surface background overrides the default
             self.assertEqual(board.launch_record(self.root,next(l.split('=',1)[1] for l in out3.splitlines() if l.startswith('event_id=')))['surface'],'background')
@@ -1465,8 +1469,10 @@ class LaunchCommandCLI(Transport):
 
 
 class ClaimModelCheck(unittest.TestCase):
-    """A claim from a session on another model tier than the request's launch record is refused (the declared label in
-    --session-name does not count, the transcript does); --model-ok and a matching model pass; no record, no check."""
+    """A claim that does not match the request's launch record is refused: another model tier (the transcript decides,
+    not the label in --session-name; --model-ok passes), and a subagent (Agent tool) claiming a request launched for a
+    desktop window (--subagent-ok passes; --surface agent is the request for a subagent). A subagent shares its parent's
+    session id, so the actor is the transcript whose last tool call is the claim (the parent's or a subagents/ file)."""
     def test_claim_model_against_launch_record(self):
         import os, argparse
         companion=board.ENGINE.parent.parent/'claude-config'/'scripts'/'lib'/'session_model.py'
@@ -1475,20 +1481,40 @@ class ClaimModelCheck(unittest.TestCase):
         root=base/'board'; (root/'.local').mkdir(parents=True)
         sdir,pdir,adir=base/'sessions',base/'projects',base/'app'; sdir.mkdir(); (pdir/'-w').mkdir(parents=True); adir.mkdir()
         native='abcdef01-0000-4000-8000-000000000001'
-        def transcript(model): (pdir/'-w'/(native+'.jsonl')).write_text(json.dumps({'type':'assistant','message':{'model':model},'timestamp':'t'})+'\n')
-        keys=('CLAUDE_SESSIONS_DIR','CLAUDE_PROJECTS_DIR','CLAUDE_DESKTOP_SESSIONS_DIR')
-        saved={k:os.environ.get(k) for k in keys}
-        os.environ.update({'CLAUDE_SESSIONS_DIR':str(sdir),'CLAUDE_PROJECTS_DIR':str(pdir),'CLAUDE_DESKTOP_SESSIONS_DIR':str(adir)})
         rid='20260101T000000Z-claude-0000aa'
-        a=argparse.Namespace(command='claim',agent='claude',model_ok=False,request=rid,root=root,session='role-p-w',session_name='abcdef01 (claude-fable-5-1)')
+        def line(model,cmd=None,ts='2026-01-01T00:00:00Z'):
+            content=[{'type':'tool_use','name':'Bash','input':{'command':cmd}}] if cmd else [{'type':'text','text':'x'}]
+            return json.dumps({'type':'assistant','message':{'model':model,'content':content},'timestamp':ts})+'\n'
+        def parent(model,cmd='git status'): (pdir/'-w'/(native+'.jsonl')).write_text(line(model)+line(model,cmd))
+        def subagent(model,cmd):
+            d=pdir/'-w'/native/'subagents'; d.mkdir(parents=True,exist_ok=True)
+            (d/'agent-a1.jsonl').write_text(line(model)+line(model,cmd,'2026-01-01T00:00:05Z'))
+        claim_cmd=f'python3 board.py claim --request {rid} --session role-p-w'
+        keys=('CLAUDE_SESSIONS_DIR','CLAUDE_PROJECTS_DIR','CLAUDE_DESKTOP_SESSIONS_DIR','CLAUDE_CODE_SESSION_ID')
+        saved={k:os.environ.get(k) for k in keys}
+        os.environ.update({'CLAUDE_SESSIONS_DIR':str(sdir),'CLAUDE_PROJECTS_DIR':str(pdir),'CLAUDE_DESKTOP_SESSIONS_DIR':str(adir),
+                           'CLAUDE_CODE_SESSION_ID':native})
+        a=argparse.Namespace(command='claim',agent='claude',model_ok=False,subagent_ok=False,request=rid,root=root,session='role-p-w',
+                             session_name='abcdef01 (claude-fable-5-1)')
         try:
-            transcript('claude-opus-5-5')
+            parent('claude-opus-5-5',claim_cmd)
             board.claim_model_check(a)   # no launch record = nothing to compare
             board.write_launch_record(root,rid,model='claude-fable-5-1',effort='high',surface='desktop')
             with self.assertRaises(ValueError) as cm: board.claim_model_check(a)
             self.assertIn('claude-opus-5-5',str(cm.exception)); self.assertIn('--model-ok',str(cm.exception))
             a.model_ok=True; board.claim_model_check(a)
-            a.model_ok=False; transcript('claude-fable-5-1'); board.claim_model_check(a)
+            a.model_ok=False; parent('claude-fable-5-1',claim_cmd); board.claim_model_check(a)
+            # a Fable subagent of an Opus parent claims (measured shape): the subagent is the actor
+            parent('claude-opus-5-5'); subagent('claude-fable-5-1',claim_cmd)
+            with self.assertRaises(ValueError) as cm: board.claim_model_check(a)   # a desktop request claimed by a subagent
+            self.assertIn('subagent',str(cm.exception)); self.assertIn('--subagent-ok',str(cm.exception))
+            a.subagent_ok=True; board.claim_model_check(a)                          # accepted, and its model (fable) matches
+            a.subagent_ok=False
+            board.write_launch_record(root,rid,model='claude-fable-5-1',effort='high',surface='agent')
+            board.claim_model_check(a)                                               # a request meant for a subagent
+            subagent('claude-opus-5-5',claim_cmd)
+            with self.assertRaises(ValueError) as cm: board.claim_model_check(a)   # the subagent's own model is compared
+            self.assertIn('this subagent',str(cm.exception))
         finally:
             for k,v in saved.items():
                 if v is None: os.environ.pop(k,None)

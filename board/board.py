@@ -796,22 +796,41 @@ def desktop_plan(root, role, request_id, spec, expect, session, title=None, proj
 
 
 def claim_model_check(a):
-    """Refuse a claim from a session that runs another model tier than the request's launch record names (the record is
-    on the machine that posted the request; elsewhere nothing is checked). The claimant is the native id at the head of
-    --session-name (the hand-off text asks for it). --model-ok = the requester or the owner accepted the model it runs."""
-    if a.command!='claim' or a.agent!='claude' or getattr(a,'model_ok',False) or not a.request: return
-    want=(launch_record(a.root,a.request) or {}).get('model') or ''
-    if not want: return
+    """Refuse a claim that does not match the request's launch record (the record is on the machine that posted the
+    request; elsewhere nothing is checked): a claimant on another model tier (--model-ok = the requester or the owner
+    accepted the model it runs), and a subagent (Agent tool) claiming a request launched for a desktop window, which the
+    owner cannot see in the app's list (--subagent-ok = the requester or the owner accepted it; a request meant for a
+    subagent is posted with --surface agent).
+
+    The claimant: the session running this command (CLAUDE_CODE_SESSION_ID, else the native id at the head of
+    --session-name), and inside it the transcript whose last tool call is this claim. A subagent shares its parent's
+    session id and environment, so reading the session alone took the parent's model for the subagent's (measured)."""
+    if a.command!='claim' or a.agent!='claude' or not a.request: return
+    rec=launch_record(a.root,a.request) or {}
+    want=rec.get('model') or ''
+    if not want and rec.get('surface')!='desktop': return
     m=re.match(r'([0-9a-f]{8})(?![0-9a-z])',(a.session_name or '').strip())
-    native=m.group(1) if m else (a.session if a.session and not a.session.startswith(('role-','resident-')) else None)
+    native=(os.environ.get('CLAUDE_CODE_SESSION_ID') or (m.group(1) if m else '')
+            or (a.session if a.session and not a.session.startswith(('role-','resident-')) else ''))
     if not native: return
     try:
         sm=_session_model(); rows=[sm.describe(s) for s in sm.resolve(native)]
     except Exception: return
     if len(rows)!=1: return
-    got=rows[0].get('model') or rows[0].get('app_model') or ''
+    actor=None
+    try:
+        if hasattr(sm,'acting_transcript'): actor=sm.acting_transcript(rows[0]['sessionId'],[a.request,'claim'])
+    except Exception: actor=None
+    if actor and actor.get('subagent') and rec.get('surface')=='desktop' and not getattr(a,'subagent_ok',False):
+        raise ValueError(f'claim refused: this claim runs in a subagent (Agent tool) of session {native[:8]}, but the request was launched for a'
+                         ' desktop window the owner sees in the app\'s list. Say so to the requester in one line and end: the requester'
+                         ' opens the worker with start_session (the arguments the request printed). If the requester or the owner chose a'
+                         ' subagent for this request, claim again with --subagent-ok')
+    if getattr(a,'model_ok',False) or not want: return
+    got=(actor or {}).get('model') or rows[0].get('model') or rows[0].get('app_model') or ''
     if got and sm.tier(got)!=sm.tier(want):
-        raise ValueError(f'claim refused: this session ({native}) runs {got}, the request was launched for {want}. Say so to the requester'
+        who=f'this subagent of {native[:8]}' if actor and actor.get('subagent') else f'this session ({native[:8]})'
+        raise ValueError(f'claim refused: {who} runs {got}, the request was launched for {want}. Say so to the requester'
                          ' in one line and end the turn (it switches the model and sends go); if the requester or the owner said this'
                          ' model is fine, claim again with --model-ok')
 
@@ -848,6 +867,17 @@ def announce_launch(a, ev, audience):
     None otherwise. Printed on --preview too (the command is part of what the requester reviews before posting)."""
     if a.command!='request' or a.to!='claude' or not (a.to_session or '').startswith('role-'): return None
     surface=(getattr(a,'surface',None) or os.environ.get(LAUNCH_SURFACE_ENV) or 'background').strip()
+    if surface=='agent':
+        # Work the owner does not watch, run as the requester's own subagent: no window to open, so only the record
+        # (the claim check compares the subagent's model with it) and the hand-off text the Agent tool's prompt carries.
+        model,effort=launch_settings(a.expect_model,a.session)
+        text=handoff_text(a.root,a.to_session,ev['event_id'],(a.reference or [None])[0],model,effort)
+        hpath=write_outbox(a.root,ev['event_id']+'.handoff.txt',text)
+        write_launch_record(a.root,ev['event_id'],role=a.to_session,model=model,effort=effort,surface='agent',requester=a.session)
+        print(f'→ 受け手は依頼元の Agent tool (subagent) で起こす = app の一覧に出ない (本人が見ない手元の仕事だけ)。'
+              f' model {model or "?"} / effort {effort or "?"} を Agent の引数に、 prompt は hand-off 文 = {hpath}。'
+              ' 本人が見る・話しかける worker なら --surface desktop で出し直す')
+        return None
     if surface=='desktop':
         # The worker the owner wants to watch: a desktop session is listed in the app (a background CLI session with
         # Remote Control off is listed nowhere, and with it on it sits on the shelf shared with other machines = measured).
@@ -1041,10 +1071,11 @@ def main():
     ap.add_argument('--interval',type=float,default=30,help='watch: seconds between remote checks (default transport: one ls-remote round trip, a read only when the branch moved; clone transport: a full read)')
     ap.add_argument('--launch',action='store_true',help='request to a role: start the worker now with the printed CLI command (background session; the id is printed)')
     ap.add_argument('--no-launch',action='store_true',help=f'request to a role: only print the command even when {LAUNCH_DEFAULT_ENV}=1 (that default applies to owner boards only)')
-    ap.add_argument('--surface',choices=['background','desktop'],help=f'request to a role: desktop = print the desktop app\'s start_session arguments (the worker is listed in the app); background = the CLI line (default; env {LAUNCH_SURFACE_ENV})')
+    ap.add_argument('--surface',choices=['background','desktop','agent'],help=f'request to a role: desktop = print the desktop app\'s start_session arguments (the worker is listed in the app); background = the CLI line (default; env {LAUNCH_SURFACE_ENV}); agent = the requester runs it as its own subagent (Agent tool, not listed in the app: work the owner does not watch)')
     ap.add_argument('--title',help='request to a role with --surface desktop: the worker\'s title in the app\'s list (default: the summary\'s first clause); the model is added at the end')
     ap.add_argument('--nested',action='store_true',help='request to a role with --surface desktop: keep the worker as the requester\'s child (default: detach it once its model is right, so its turn ends and its questions to the owner do not reach the requester)')
     ap.add_argument('--model-ok',action='store_true',help='claim: the requester or the owner accepted the model this session runs although the request was launched for another')
+    ap.add_argument('--subagent-ok',action='store_true',help='claim: the requester or the owner accepted a subagent (Agent tool) for a request launched for a desktop window')
     ap.add_argument('--reviewer',help='request: the session that receives the submission (default: the requester; env '
                     f'{DEFAULT_REVIEWER_ENV} with <project> on an owner board). A role id outlives this session; posted as a reviewer handover right after the request')
     ap.add_argument('--max-minutes',type=float,default=240,help='watch: give up after this long (exit 3)')

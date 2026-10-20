@@ -455,7 +455,13 @@ python3 board_items.py list    --root <board>
   with `detach_session` once the model is right: a child's every turn end reaches the requester, which then relayed
   the child's questions to the owner a second time (measured); submit and blocker still reach the requester through
   `watch`. The desktop hand-off text tells the worker to ask the owner for approvals in its own window and not
-  through the requester. Every request to a role leaves
+  through the requester. **`--surface agent`** is for work the requester runs as its own subagent (Agent tool), which
+  the app does not list: it prints no launch line, only the record and the hand-off file for the Agent's prompt. A
+  subagent claiming a request launched for a desktop window is refused (`--subagent-ok` when the requester or the
+  owner chose a subagent): measured, a request for a worker the owner wanted to watch was taken by a subagent. A
+  subagent shares its parent's session id and environment, so the claim check takes as the claimant the transcript
+  whose last tool call is this claim (the parent's, or `<parent dir>/<parent id>/subagents/agent-*.jsonl`) and compares
+  that transcript's model. Every request to a role leaves
   `<request id>.launch.json` (model, effort, surface) in the outbox; `claim` refuses a session whose model tier differs
   from that record (`--model-ok` when the requester or the owner accepted the model it runs). The record stays on the
   requester's machine, so a claim from another machine is not checked. For a cross-vendor pass on a copy
