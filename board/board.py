@@ -32,6 +32,8 @@ LAUNCH_MODEL_ENV='AGENT_BOARD_LAUNCH_MODEL'            # request to a role: defa
 LAUNCH_EFFORT_ENV='AGENT_BOARD_LAUNCH_EFFORT'          # request to a role: default --effort (else the requester's CLAUDE_EFFORT)
 LAUNCH_CLI_ENV='AGENT_BOARD_LAUNCH_CLI'                # the CLI executable (default `claude`; tests point it at a stub)
 LAUNCH_DEFAULT_ENV='AGENT_BOARD_LAUNCH_DEFAULT'        # `1` = on an owner board, a request to a role starts the worker at once unless --no-launch (owner wiring)
+LAUNCH_REMOTE_CONTROL_ENV='AGENT_BOARD_LAUNCH_REMOTE_CONTROL'  # `1` = the worker keeps the account's remoteControlAtStartup (default: off for that session only)
+LAUNCH_NO_REMOTE_CONTROL='{"remoteControlAtStartup": false}'   # --settings JSON: higher than the user settings file, which stays as it is
 
 
 def run(root, *args, check=True):
@@ -724,8 +726,10 @@ def launch_plan(root, role, request_id, spec, expect, session):
     Returns (argv, env, shell line, hand-off file). Model = --expect-model, else the owner's default, else the
     requester's own model (the chip's old default); effort = the owner's default, else the requester's; config dir =
     the owner's default (a logged-in account: measured, the default dir of one machine was not logged in and the
-    banner showed usage billing). The board does not start the worker itself unless --launch is given: the
-    requester's shell does, with the hand-off text read from the file."""
+    banner showed usage billing). Remote Control is off for the worker's session unless LAUNCH_REMOTE_CONTROL_ENV=1:
+    an account with remoteControlAtStartup otherwise lists every worker on the desktop app's Remote Control shelf,
+    which reads as work sent to another machine (measured). The board does not start the worker itself unless
+    --launch is given: the requester's shell does, with the hand-off text read from the file."""
     model=(expect or os.environ.get(LAUNCH_MODEL_ENV) or own_model(session) or '').strip()
     effort=(os.environ.get(LAUNCH_EFFORT_ENV) or os.environ.get('CLAUDE_EFFORT') or '').strip()
     cfg=os.path.expanduser((os.environ.get(LAUNCH_CONFIG_DIR_ENV) or '').strip())
@@ -733,11 +737,14 @@ def launch_plan(root, role, request_id, spec, expect, session):
     path=outbox_dir(root)/(request_id+'.handoff.txt'); path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
     path.write_text(text,encoding='utf-8'); path.chmod(0o600)
     cli=os.environ.get(LAUNCH_CLI_ENV) or 'claude'
-    argv=[cli,'--bg']+(['--model',model] if model else [])+(['--effort',effort] if effort else [])+[text]
+    rc_off=os.environ.get(LAUNCH_REMOTE_CONTROL_ENV,'').strip()!='1'
+    argv=([cli,'--bg']+(['--model',model] if model else [])+(['--effort',effort] if effort else [])
+          +(['--settings',LAUNCH_NO_REMOTE_CONTROL] if rc_off else [])+[text])
     env=dict(os.environ); env.pop('CLAUDECODE',None)
     if cfg: env['CLAUDE_CONFIG_DIR']=cfg
     line=((f'CLAUDE_CONFIG_DIR={shlex.quote(cfg)} ' if cfg else '')+shlex.quote(cli)+' --bg'+(f' --model {shlex.quote(model)}' if model else '')
-          +(f' --effort {shlex.quote(effort)}' if effort else '')+f' "$(cat {shlex.quote(str(path))})"')
+          +(f' --effort {shlex.quote(effort)}' if effort else '')+(f' --settings {shlex.quote(LAUNCH_NO_REMOTE_CONTROL)}' if rc_off else '')
+          +f' "$(cat {shlex.quote(str(path))})"')
     return argv,env,line,path
 
 

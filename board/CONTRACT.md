@@ -422,7 +422,8 @@ python3 board_items.py list    --root <board>
 - <a id="worker-handoff-text"></a>**Starting the worker a role names**: a `request --to claude --to-session role-…`
   writes the hand-off text to the outbox (`<request id>.handoff.txt`) and prints one shell line that opens the worker
   as a background CLI session with its model, reasoning effort and config dir pinned —
-  `CLAUDE_CONFIG_DIR=<dir> claude --bg --model <m> --effort <e> "$(cat <file>)"` — and `--launch` runs it at once
+  `CLAUDE_CONFIG_DIR=<dir> claude --bg --model <m> --effort <e> --settings '{"remoteControlAtStartup": false}' "$(cat <file>)"`
+  — and `--launch` runs it at once
   (with `AGENT_BOARD_LAUNCH_DEFAULT=1` in the owner's wiring every such request on an owner board runs it,
   `--no-launch` keeps it to the printed line; `--preview` never runs it). On a collaborator board that default does
   not apply and only `--launch` runs it: a role there may be a collaborator's, opened in the collaborator's own
@@ -431,7 +432,10 @@ python3 board_items.py list    --root <board>
   Model = `--expect-model`, else `AGENT_BOARD_LAUNCH_MODEL`, else the requester's own model; effort =
   `AGENT_BOARD_LAUNCH_EFFORT`, else the requester's `CLAUDE_EFFORT`; config dir = `AGENT_BOARD_LAUNCH_CONFIG_DIR`
   (the owner's wiring names a logged-in account: measured, a machine's default config dir was not logged in and the
-  window opened on usage billing). The text itself: "You are the board worker for role `<role id>`, request
+  window opened on usage billing). Remote Control is off for the worker's session (`--settings` JSON outranks the
+  account's settings file, which is left as it is): an account with `remoteControlAtStartup` otherwise lists every
+  worker on the desktop app's Remote Control shelf, where a local worker reads as work sent to another machine
+  (measured); `AGENT_BOARD_LAUNCH_REMOTE_CONTROL=1` drops the flag and leaves the account's setting in force. The text itself: "You are the board worker for role `<role id>`, request
   `<request event id>`, spec `<path>`; execute it yourself. This window must run on <model> at <effort> effort.
   1. `inbox --session <role id> --sync`; if the request is not visible, do not read the spec — ask the requester or
   `watch`. 2. `claim` with `--session-name '<native id, 8 chars> (<model>)'`; if refused with *another live claim

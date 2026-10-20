@@ -1332,17 +1332,17 @@ class LaunchCommand(unittest.TestCase):
         root=base/'board'; root.mkdir(); (root/'.local').mkdir()
         subprocess.run(['git','init','-q','-b','main',str(root)],check=True)
         stub=base/'claude'; stub.write_text('#!/bin/sh\nprintf \'%s\\n\' "$@" > "$STUB_OUT"; printf \'cfg=%s\\n\' "${CLAUDE_CONFIG_DIR:-}" >> "$STUB_OUT"; echo backgrounded 1234abcd\n'); stub.chmod(0o755)
-        saved={k:os.environ.get(k) for k in ('AGENT_BOARD_LAUNCH_CONFIG_DIR','AGENT_BOARD_LAUNCH_MODEL','AGENT_BOARD_LAUNCH_EFFORT','AGENT_BOARD_LAUNCH_CLI','CLAUDE_EFFORT','STUB_OUT')}
+        saved={k:os.environ.get(k) for k in ('AGENT_BOARD_LAUNCH_CONFIG_DIR','AGENT_BOARD_LAUNCH_MODEL','AGENT_BOARD_LAUNCH_EFFORT','AGENT_BOARD_LAUNCH_CLI','AGENT_BOARD_LAUNCH_REMOTE_CONTROL','CLAUDE_EFFORT','STUB_OUT')}
         os.environ.update({'AGENT_BOARD_LAUNCH_CONFIG_DIR':'~/.claude-fixture','AGENT_BOARD_LAUNCH_MODEL':'claude-model-x','AGENT_BOARD_LAUNCH_CLI':str(stub),'CLAUDE_EFFORT':'high','STUB_OUT':str(base/'stub.out')})
-        os.environ.pop('AGENT_BOARD_LAUNCH_EFFORT',None)
+        os.environ.pop('AGENT_BOARD_LAUNCH_EFFORT',None); os.environ.pop('AGENT_BOARD_LAUNCH_REMOTE_CONTROL',None)
         try:
             argv,env,line,path=board.launch_plan(root,'role-p-f','20260101T000000Z-claude-000001','p/spec.md',None,'claude-session-001')
             self.assertEqual(argv[:6],[str(stub),'--bg','--model','claude-model-x','--effort','high'])
-            self.assertIn('You are the board worker for role `role-p-f`',argv[6]); self.assertIn('spec `p/spec.md`',argv[6])
-            self.assertIn('run on claude-model-x at high effort',argv[6])
+            self.assertIn('You are the board worker for role `role-p-f`',argv[-1]); self.assertIn('spec `p/spec.md`',argv[-1])
+            self.assertIn('run on claude-model-x at high effort',argv[-1])
             self.assertEqual(env['CLAUDE_CONFIG_DIR'],os.path.expanduser('~/.claude-fixture')); self.assertNotIn('CLAUDECODE',env)
-            self.assertTrue(line.startswith('CLAUDE_CONFIG_DIR=')); self.assertIn('--bg --model claude-model-x --effort high "$(cat ',line)
-            self.assertEqual(path,root/'.local'/'outbox'/'20260101T000000Z-claude-000001.handoff.txt'); self.assertEqual(path.read_text(),argv[6])
+            self.assertTrue(line.startswith('CLAUDE_CONFIG_DIR=')); self.assertIn('--bg --model claude-model-x --effort high --settings ',line); self.assertIn(' "$(cat ',line)
+            self.assertEqual(path,root/'.local'/'outbox'/'20260101T000000Z-claude-000001.handoff.txt'); self.assertEqual(path.read_text(),argv[-1])
             # --expect-model wins over the default; no config dir → no prefix
             os.environ.pop('AGENT_BOARD_LAUNCH_CONFIG_DIR')
             argv2,env2,line2,_=board.launch_plan(root,'role-p-f','20260101T000000Z-claude-000002',None,'fable','claude-session-001')
@@ -1350,6 +1350,27 @@ class LaunchCommand(unittest.TestCase):
             out=board.launch(argv,env); self.assertIn('backgrounded 1234abcd',out)
             got=(base/'stub.out').read_text().splitlines()
             self.assertEqual(got[:5],['--bg','--model','claude-model-x','--effort','high']); self.assertEqual(got[-1],'cfg='+os.path.expanduser('~/.claude-fixture'))
+        finally:
+            for k,v in saved.items():
+                if v is None: os.environ.pop(k,None)
+                else: os.environ[k]=v
+            td.cleanup()
+
+    def test_remote_control_off_by_default(self):
+        """The worker starts with Remote Control off for its session only (--settings JSON; the account's settings file
+        is not touched), so it is not listed on the desktop app's Remote Control shelf; AGENT_BOARD_LAUNCH_REMOTE_CONTROL=1
+        leaves the account's own setting in force."""
+        import os, json, shlex
+        td=tempfile.TemporaryDirectory(); root=Path(td.name)/'board'; root.mkdir(); (root/'.local').mkdir()
+        saved={k:os.environ.get(k) for k in ('AGENT_BOARD_LAUNCH_REMOTE_CONTROL','AGENT_BOARD_LAUNCH_MODEL','AGENT_BOARD_LAUNCH_CLI')}
+        os.environ.pop('AGENT_BOARD_LAUNCH_REMOTE_CONTROL',None); os.environ['AGENT_BOARD_LAUNCH_MODEL']='claude-model-x'; os.environ.pop('AGENT_BOARD_LAUNCH_CLI',None)
+        try:
+            argv,_,line,_=board.launch_plan(root,'role-p-f','20260101T000000Z-claude-000003',None,None,'claude-session-001')
+            i=argv.index('--settings'); self.assertEqual(json.loads(argv[i+1]),{'remoteControlAtStartup':False})
+            words=shlex.split(line.split(' "$(cat ')[0]); self.assertEqual(words[words.index('--settings')+1],argv[i+1])   # the printed line passes the same JSON
+            os.environ['AGENT_BOARD_LAUNCH_REMOTE_CONTROL']='1'
+            argv2,_,line2,_=board.launch_plan(root,'role-p-f','20260101T000000Z-claude-000004',None,None,'claude-session-001')
+            self.assertNotIn('--settings',argv2); self.assertNotIn('--settings',line2)
         finally:
             for k,v in saved.items():
                 if v is None: os.environ.pop(k,None)
@@ -1365,6 +1386,9 @@ class LaunchCommandCLI(Transport):
         def cli(*args):
             p=subprocess.run([sys.executable,str(script),*args],capture_output=True,text=True); self.assertEqual(p.returncode,0,p.stderr); return p.stdout
         base=['--root',str(self.root),'--agent','claude','--session','claude-win-9','--source',str(self.root),'--policy','encrypted-metadata-only']
+        # the owner's wiring in the running shell (launch by default, its config dir) would start a real CLI here
+        keys=('AGENT_BOARD_LAUNCH_DEFAULT','AGENT_BOARD_LAUNCH_CLI','AGENT_BOARD_LAUNCH_CONFIG_DIR','AGENT_BOARD_LAUNCH_EFFORT','AGENT_BOARD_LAUNCH_REMOTE_CONTROL')
+        wiring={k:os.environ.pop(k,None) for k in keys}
         saved=os.environ.get('AGENT_BOARD_LAUNCH_MODEL'); os.environ['AGENT_BOARD_LAUNCH_MODEL']='claude-model-y'
         try:
             out=cli('request',*base,'--thread','r-00112233aabb','--to','claude','--to-session','role-q-work')
@@ -1392,6 +1416,7 @@ class LaunchCommandCLI(Transport):
         finally:
             if saved is None: os.environ.pop('AGENT_BOARD_LAUNCH_MODEL',None)
             else: os.environ['AGENT_BOARD_LAUNCH_MODEL']=saved
+            os.environ.update({k:v for k,v in wiring.items() if v is not None})
 
 
 class OptimisticPost(Transport):
