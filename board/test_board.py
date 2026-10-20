@@ -1147,10 +1147,11 @@ class CollaboratorBoards(unittest.TestCase):
         import os
         base=Path(self.tmp.name); mark=base/'launched.txt'
         stub=base/'claude-stub'; stub.write_text(f'#!/bin/sh\necho ran >> {mark}\necho backgrounded deadbeef\n'); stub.chmod(0o755)
-        keys=('AGENT_BOARD_LAUNCH_DEFAULT','AGENT_BOARD_LAUNCH_CLI','AGENT_BOARD_LAUNCH_MODEL','AGENT_BOARD_LAUNCH_CONFIG_DIR')
+        keys=('AGENT_BOARD_LAUNCH_DEFAULT','AGENT_BOARD_LAUNCH_CLI','AGENT_BOARD_LAUNCH_MODEL','AGENT_BOARD_LAUNCH_CONFIG_DIR','CLAUDE_CODE_ENTRYPOINT')
         saved={k:os.environ.get(k) for k in keys}
         os.environ.update({'AGENT_BOARD_LAUNCH_DEFAULT':'1','AGENT_BOARD_LAUNCH_CLI':str(stub),'AGENT_BOARD_LAUNCH_MODEL':'claude-model-z'})
         os.environ.pop('AGENT_BOARD_LAUNCH_CONFIG_DIR',None)
+        os.environ.pop('CLAUDE_CODE_ENTRYPOINT',None)   # a terminal requester: this test is about the CLI line
         def runs(): return len(mark.read_text().splitlines()) if mark.exists() else 0
         try:
             b=str(self.proj/'board')
@@ -1387,7 +1388,7 @@ class LaunchCommandCLI(Transport):
             p=subprocess.run([sys.executable,str(script),*args],capture_output=True,text=True); self.assertEqual(p.returncode,0,p.stderr); return p.stdout
         base=['--root',str(self.root),'--agent','claude','--session','claude-win-9','--source',str(self.root),'--policy','encrypted-metadata-only']
         # the owner's wiring in the running shell (launch by default, its config dir) would start a real CLI here
-        keys=('AGENT_BOARD_LAUNCH_DEFAULT','AGENT_BOARD_LAUNCH_CLI','AGENT_BOARD_LAUNCH_CONFIG_DIR','AGENT_BOARD_LAUNCH_EFFORT','AGENT_BOARD_LAUNCH_REMOTE_CONTROL')
+        keys=('AGENT_BOARD_LAUNCH_DEFAULT','AGENT_BOARD_LAUNCH_CLI','AGENT_BOARD_LAUNCH_CONFIG_DIR','AGENT_BOARD_LAUNCH_EFFORT','AGENT_BOARD_LAUNCH_REMOTE_CONTROL','CLAUDE_CODE_ENTRYPOINT')
         wiring={k:os.environ.pop(k,None) for k in keys}
         saved=os.environ.get('AGENT_BOARD_LAUNCH_MODEL'); os.environ['AGENT_BOARD_LAUNCH_MODEL']='claude-model-y'
         try:
@@ -1431,7 +1432,7 @@ class LaunchCommandCLI(Transport):
         base=['--root',str(self.root),'--agent','claude','--session','claude-win-9','--source',str(src),'--policy','ordinary',
               '--project','qproj','--summary','画面が崩れる不具合を直す。 仕様 = 参照','--acceptance','直った commit']
         keys=('AGENT_BOARD_LAUNCH_DEFAULT','AGENT_BOARD_LAUNCH_CLI','AGENT_BOARD_LAUNCH_CONFIG_DIR','AGENT_BOARD_LAUNCH_EFFORT',
-              'AGENT_BOARD_LAUNCH_REMOTE_CONTROL','AGENT_BOARD_LAUNCH_SURFACE','AGENT_BOARD_LAUNCH_MODEL','AGENT_BOARD_DEFAULT_REVIEWER')
+              'AGENT_BOARD_LAUNCH_REMOTE_CONTROL','AGENT_BOARD_LAUNCH_SURFACE','AGENT_BOARD_LAUNCH_MODEL','AGENT_BOARD_DEFAULT_REVIEWER','CLAUDE_CODE_ENTRYPOINT')
         wiring={k:os.environ.pop(k,None) for k in keys}
         stub=self.base/'claude-stub'; stub.write_text('#!/bin/sh\necho backgrounded deadbeef\n'); stub.chmod(0o755)
         os.environ.update({'AGENT_BOARD_LAUNCH_DEFAULT':'1','AGENT_BOARD_LAUNCH_CLI':str(stub),'AGENT_BOARD_LAUNCH_EFFORT':'high'})
@@ -1462,6 +1463,12 @@ class LaunchCommandCLI(Transport):
             self.assertEqual(board.launch_record(self.root,rid5)['surface'],'agent')
             out3=cli('request',*base,'--thread','2026-01-01-screen-c','--to','claude','--to-session','role-qproj-third','--surface','background')
             self.assertIn('起動した: backgrounded deadbeef',out3)   # --surface background overrides the default
+            os.environ.pop('AGENT_BOARD_LAUNCH_SURFACE',None); os.environ['CLAUDE_CODE_ENTRYPOINT']='claude-desktop'
+            out6=cli('request',*base,'--thread','2026-01-01-screen-f','--to','claude','--to-session','role-qproj-sixth')
+            self.assertIn('desktop app の session として起こす',out6)   # owner board + desktop requester, no env: desktop
+            os.environ['CLAUDE_CODE_ENTRYPOINT']='cli'
+            out7=cli('request',*base,'--thread','2026-01-01-screen-g','--to','claude','--to-session','role-qproj-seventh')
+            self.assertIn('起動した',out7); self.assertNotIn('desktop app の session',out7)   # a terminal requester: CLI line
             self.assertEqual(board.launch_record(self.root,next(l.split('=',1)[1] for l in out3.splitlines() if l.startswith('event_id=')))['surface'],'background')
         finally:
             for k in keys: os.environ.pop(k,None)

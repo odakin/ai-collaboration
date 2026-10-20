@@ -866,7 +866,12 @@ def announce_launch(a, ev, audience):
     """For a request addressed to a Claude role: write the hand-off file, print the launch line, return (argv, env);
     None otherwise. Printed on --preview too (the command is part of what the requester reviews before posting)."""
     if a.command!='request' or a.to!='claude' or not (a.to_session or '').startswith('role-'): return None
-    surface=(getattr(a,'surface',None) or os.environ.get(LAUNCH_SURFACE_ENV) or 'background').strip()
+    # Default surface: on an owner board a desktop requester gets the desktop arguments (the owner sees that worker in
+    # the app; a background CLI session is listed nowhere), whatever entry path called the engine (measured: a session
+    # that called the engine directly skipped the forwarder's wiring and got the CLI line). Others get the CLI line.
+    desktop_requester=os.environ.get('CLAUDE_CODE_ENTRYPOINT')=='claude-desktop'
+    surface=(getattr(a,'surface',None) or os.environ.get(LAUNCH_SURFACE_ENV)
+             or ('desktop' if audience=='owner' and desktop_requester else 'background')).strip()
     if surface=='agent':
         # Work the owner does not watch, run as the requester's own subagent: no window to open, so only the record
         # (the claim check compares the subagent's model with it) and the hand-off text the Agent tool's prompt carries.

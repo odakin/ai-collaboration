@@ -443,8 +443,9 @@ python3 board_items.py list    --root <board>
   only into a window opened by other means (a desktop window someone wants to steer, another machine): a window runs
   on whatever model it happens to have (measured), so the model and effort are in the text as well. The native id in
   the name lets a second worker under the same role see the claim is not its own.
-  **`--surface desktop`** (or `AGENT_BOARD_LAUNCH_SURFACE=desktop` in the owner's wiring) prints, instead of the shell
-  line, the desktop app's `start_session` arguments (also written as `<request id>.start_session.json`): the same model
+  **`--surface desktop`** (the default on an owner board when the requester is a desktop session,
+  `CLAUDE_CODE_ENTRYPOINT=claude-desktop`, whatever path called the engine; `AGENT_BOARD_LAUNCH_SURFACE` overrides;
+  other requesters default to the shell line) prints, instead of the shell line, the desktop app's `start_session` arguments (also written as `<request id>.start_session.json`): the same model
   and effort, a title with the task first and the model last (the app's list cuts titles from the left, measured), and
   the hand-off text with a step 0 = read the app's record of this window (`session-model.py self`) and stop in one
   line when its model or effort differ. The board cannot open a desktop window; the requesting Claude session calls
