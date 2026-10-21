@@ -721,6 +721,17 @@ def event_from(a, events):
     return ev
 
 
+def safety_stop_handoff_text():
+    """One refusal/recovery contract for Claude and Codex worker hand-offs."""
+    return (
+        "4. If a provider safety refusal occurs, stop the affected work and do not resend into the same window, "
+        "reproduce the stopped output, or automatically retry on another model. The worker or requester records "
+        "a board note (state and artifact paths only), then releases the current claim using its event id; "
+        "the requester asks the owner about closing the window and a permitted next scope. A live process "
+        "still counts for duplicate prevention. Read claude-config/conventions/tool-call-robustness.md"
+        "#api-safety-filter-on-main-response.\n")
+
+
 def handoff_text(root, role, request_id, spec, model, effort, surface='background', project=None, policy=None, reason=None):
     """What a worker window starts from (CONTRACT.md#worker-handoff-text): role, request, spec, the model and effort it
     must run on, and the first two steps. Written to a file and passed to the CLI whole, so quoting never bites.
@@ -750,7 +761,7 @@ def handoff_text(root, role, request_id, spec, model, effort, surface='backgroun
             +hold+
             f"1. `python3 {eng} inbox --root {root} --agent claude --session {role} --sync`; if the request is not visible, do not read the spec — ask the requester or `watch`.\n"
             f"2. `python3 {eng} claim --root {root} --agent claude --session {role} --request {request_id}{scope} --session-name '<your native session id, 8 chars> ({model or '<model>'})' --summary '<one line>'`; if refused with *another live claim exists*, stop and say so in one line.\n"
-            f"3. Do the work the spec asks for; when done, `submit` with the same --root, --session, --request{scope}, plus `--reply-to <your claim's event id>` and `--deliverable <path>` for each deliverable.{plain}{ask}\n")
+            f"3. Do the work the spec asks for; when done, `submit` with the same --root, --session, --request{scope}, plus `--reply-to <your claim's event id>` and `--deliverable <path>` for each deliverable.{plain}{ask}\n" + safety_stop_handoff_text())
 
 
 def own_model(session):
@@ -1037,7 +1048,8 @@ def codex_handoff_text(root, role, request_id, spec, f, project=None, policy=Non
             f"3. Do the work the spec asks for; when done, `submit` with the same --root, --agent, --session, --request{scope}, plus `--reply-to <your claim's event id>` and `--deliverable <path>` for each deliverable."
             " Write every `submit` and `note` summary in plain words: do not use labels made up during the work (option letters, item"
             " or finding numbers); if you keep one, say what it refers to right after it. Ask a question for the requester or the owner"
-            " as a `blocker` on the board: this thread runs in the background and its chat is read only after it ends.\n")
+            " as a `blocker` on the board: this thread runs in the background and its chat is read only after it ends.\n"
+            + safety_stop_handoff_text())
 
 
 def codex_launcher():

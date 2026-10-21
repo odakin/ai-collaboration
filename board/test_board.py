@@ -1327,6 +1327,18 @@ class FetchTransport(Transport):
 class LaunchCommand(unittest.TestCase):
     """A request to a role prints the CLI command that opens the worker with model, effort and config dir pinned, writes
     the hand-off text to the outbox, and --launch runs it (a stub CLI records what it got)."""
+    def test_handoff_safety_stop(self):
+        texts = [board.codex_handoff_text(Path('/fixture/board'), 'role-fixture-worker',
+            '20990101T000000Z-codex-000001', 'fixture/spec.md', {'model': 'fixture-model', 'effort': 'high'})]
+        for surface in ('desktop', 'background', 'agent'):
+            texts.append(board.handoff_text(Path('/fixture/board'), 'role-fixture-worker',
+                '20990101T000000Z-claude-000001', 'fixture/spec.md', 'fixture-model', 'high', surface=surface))
+        for text in texts:
+            self.assertIn('do not resend into the same window', text)
+            self.assertIn('releases the current claim', text)
+            self.assertIn('asks the owner about closing', text)
+            self.assertIn('automatically retry on another model', text)
+
     def test_plan_and_launch(self):
         import os
         td=tempfile.TemporaryDirectory(); base=Path(td.name)

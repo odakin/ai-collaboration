@@ -538,6 +538,8 @@ python3 board_items.py list    --root <board>
   and the HTML viewer print a reminder under status events that use role vocabulary. General rule: layer-1
   `multi-session-coordination.md#board-role-claim-is-not-assignment`.
 
+The generated Claude and Codex hand-off includes the procedure for a provider refusal. The worker or requester records the stop and releases the current claim; the owner decides closure and a permitted next scope. Refusals do not automatically permit another model or a second live worker. The owning rule is [the safety-stop procedure](../../claude-config/conventions/tool-call-robustness.md#api-safety-filter-on-main-response).
+
 Resident runners (an always-on host polling its own resident identity and dispatching workers) are a separate
 program; the board stays a ledger. Rule: layer-1 `multi-session-coordination.md#resident-board-runner`.
 
