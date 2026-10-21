@@ -418,7 +418,9 @@ python3 board_items.py list    --root <board>
   an item another live session is working on; a session-end hook releases what the session held. A claim may carry a
   kind in an extra field (`hold(..., extra={'kind': ...})`; the engine does not read it): `work` (the session handles
   the item) or `relay` (it only told its user). A relay claim keeps other sessions from telling the user again but
-  does not stop them handling the item. General rule: layer-1
+  does not stop them handling the item. What the user was told does not end with the session, so callers give a relay
+  claim a lease to the end of the user's day (`hold(..., lease_min=...)`), report its liveness as unknown, and keep it
+  when the session ends. General rule: layer-1
   [`multi-session-coordination.md#pending-item-claims`](../../claude-config/conventions/multi-session-coordination.md#pending-item-claims).
 
 ## <a id="session-directory-and-roles"></a>Session directory, names and role identities
