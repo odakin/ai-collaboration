@@ -482,6 +482,8 @@ python3 board_items.py list    --root <board>
   worker to push its branch, not to merge it, and to name it in the submit, since merging into main needs the owner's OK.
   The text itself: "You are the board worker for role `<role id>`, request
   `<request event id>`, spec `<path>`; execute it yourself. This window must run on <model> at <effort> effort.
+  Work in the repository's own working tree on its main branch: do not call EnterWorktree or create a branch; commit by
+  explicit paths and push to main.
   1. `inbox --session <role id> --sync`; if the request is not visible, do not read the spec — ask the requester or
   `watch`. 2. `claim --request <request event id> --session-name '<native id, 8 chars> (<model>)' --summary '<one
   line>'` (`claim` refuses without `--request` and `--summary`); if refused with *another live claim exists*, stop and
