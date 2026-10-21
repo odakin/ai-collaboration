@@ -1032,8 +1032,11 @@ def codex_plan(root, role, request_id, spec, f, project=None, policy=None, title
           '--name',name,'--host',f['host'],'--record',str(rec),'--json']
     if f.get('model'): argv+=['--model',f['model']]
     if f.get('effort'): argv+=['--effort',f['effort']]
+    # The sandbox keeps `.git` read-only inside writable roots unless the git dir itself is named (measured: a worker's
+    # `--sync` was refused at .git/FETCH_HEAD; naming the git dir let it write).
     cache=Path(os.environ.get('AGENT_BOARD_CACHE_DIR') or Path.home()/'.cache'/'agent-board')
-    argv+=['--network','--writable-root',str(cache),'--writable-root',str(Path(root).resolve())]
+    gd=run(root,'rev-parse','--path-format=absolute','--git-common-dir',check=False).stdout.decode().strip()
+    argv+=['--network','--writable-root',str(cache),'--writable-root',str(Path(root).resolve())]+(['--writable-root',gd] if gd else [])
     line=' '.join(shlex.quote(x) for x in ['python3',*argv[1:]] if x!='--json')
     return argv,line,hpath
 

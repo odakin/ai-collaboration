@@ -1518,7 +1518,8 @@ class CodexLaunchCLI(Transport):
             self.assertEqual(argv[0],'start')
             for flag,val in (('--model','gpt-fixture'),('--effort','xhigh'),('--host',board.this_host())):
                 self.assertEqual(argv[argv.index(flag)+1],val)
-            self.assertIn('--network',argv); self.assertEqual(argv.count('--writable-root'),2)   # a board worker posts
+            self.assertIn('--network',argv); self.assertEqual(argv.count('--writable-root'),3)   # a board worker posts: cache, checkout, its git dir
+            self.assertTrue(any(v.endswith('.git') for v in (argv[i+1] for i,x in enumerate(argv) if x=='--writable-root')))
             hand=Path(argv[argv.index('--prompt-file')+1]).read_text()
             self.assertIn('--agent codex --session role-qproj-table',hand); self.assertIn('check-self --model gpt-fixture --effort xhigh',hand)
             self.assertIn('blocker',hand)   # questions go to the board: the thread's chat is read only after it ends
