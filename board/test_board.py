@@ -1378,6 +1378,9 @@ class LaunchCommand(unittest.TestCase):
             os.environ['AGENT_BOARD_LAUNCH_REMOTE_CONTROL']='1'
             argv2,_,line2,_=board.launch_plan(root,'role-p-f','20260101T000000Z-claude-000004',None,None,'claude-session-001')
             self.assertNotIn('--settings',argv2); self.assertNotIn('--settings',line2)
+            os.environ['AGENT_BOARD_LAUNCH_REMOTE_CONTROL']='follow'   # the Remote Control fallback line: the worker follows the requester
+            argv3,_,line3,_=board.launch_plan(root,'role-p-f','20260101T000000Z-claude-000005',None,None,'claude-session-001')
+            self.assertNotIn('--settings',argv3); self.assertNotIn('--settings',line3)
         finally:
             for k,v in saved.items():
                 if v is None: os.environ.pop(k,None)
@@ -1453,7 +1456,14 @@ class LaunchCommandCLI(Transport):
             self.assertIn('0. First run',args['prompt']); self.assertIn('must run on claude-fable-5-1 at high effort',args['prompt'])
             self.assertGreaterEqual(len(args['background']),80)
             rec=board.launch_record(self.root,rid); self.assertEqual((rec['surface'],rec['model'],rec['effort']),('desktop','claude-fable-5-1','high'))
-            self.assertTrue(rec['detach']); self.assertIn('detach_session',out)   # detached once its model is right, unless --nested
+            self.assertFalse(rec['detach']); self.assertNotIn('detach_session',out)   # stays the requester's child by default
+            self.assertIn('子のまま並ぶ',out); self.assertIn('--detach',out)
+            fb=next(l for l in out.splitlines() if 'AGENT_BOARD_LAUNCH_REMOTE_CONTROL=follow' in l)   # start_session refused under Remote Control
+            self.assertIn(f'launch --root {self.root} --agent claude --session claude-win-9 --request {rid} --surface background',fb)
+            self.assertIn('--expect-model claude-fable-5-1 --effort high --launch',fb)
+            ran=subprocess.run(fb.strip(),shell=True,capture_output=True,text=True)   # the line runs as printed (stub CLI)
+            self.assertEqual(ran.returncode,0,ran.stderr); self.assertIn('起動した',ran.stdout); self.assertNotIn('remoteControlAtStartup',ran.stdout)
+            self.assertEqual(board.launch_record(self.root,rid)['surface'],'background')
             self.assertIn('Ask the owner for any approval',args['prompt'])         # approvals are asked in the worker's own window
             os.environ['AGENT_BOARD_LAUNCH_SURFACE']='desktop'   # the owner's default chooses the surface as well
             out2=cli('request',*base,'--thread','2026-01-01-screen-b','--to','claude','--to-session','role-qproj-other')
@@ -1462,7 +1472,11 @@ class LaunchCommandCLI(Transport):
             self.assertTrue(json.loads((board.outbox_dir(self.root)/(rid2+'.start_session.json')).read_text())['title'].startswith('画面が崩れる不具合を直す'))
             out4=cli('request',*base,'--thread','2026-01-01-screen-d','--to','claude','--to-session','role-qproj-fourth','--nested')
             rid4=next(l.split('=',1)[1] for l in out4.splitlines() if l.startswith('event_id='))
-            self.assertFalse(board.launch_record(self.root,rid4)['detach']); self.assertNotIn('detach_session',out4)
+            self.assertFalse(board.launch_record(self.root,rid4)['detach']); self.assertNotIn('detach_session',out4)   # --nested = the default, still accepted
+            outd=cli('request',*base,'--thread','2026-01-01-screen-detach','--to','claude','--to-session','role-qproj-detached','--detach')
+            ridd=next(l.split('=',1)[1] for l in outd.splitlines() if l.startswith('event_id='))
+            self.assertTrue(board.launch_record(self.root,ridd)['detach']); self.assertIn('detach_session(<local_…>)',outd)   # detached only when asked
+            self.assertNotIn('子のまま並ぶ',outd)
             out5=cli('request',*base,'--thread','2026-01-01-screen-e','--to','claude','--to-session','role-qproj-fifth','--surface','agent')
             rid5=next(l.split('=',1)[1] for l in out5.splitlines() if l.startswith('event_id='))
             self.assertIn('Agent tool',out5); self.assertNotIn('起動した',out5); self.assertNotIn('start_session',out5)
@@ -1661,6 +1675,17 @@ class LaunchClaudeRole(EffortFlag):
         self.assertIn('must run on claude-opus-5-5 at xhigh effort',args['prompt']); self.assertIn('role-eproj-r',args['prompt'])
         self.assertIn('掲示板には何も書いていない',out); self.assertNotIn('⚠️',out)
         self.assertEqual(self.events(),n)
+
+    def test_launch_desktop_keeps_the_worker_nested_unless_detach(self):
+        rid=self.incoming('2026-01-01-lcr-n')
+        base=('launch','--root',str(self.root),'--agent','claude','--session','claude-win-9','--request',rid,
+              '--surface','desktop','--expect-model','claude-opus-5-5','--effort','high')
+        out=self.cli(*base).stdout
+        self.assertFalse(board.launch_record(self.root,rid)['detach']); self.assertNotIn('detach_session',out); self.assertIn('子のまま並ぶ',out)
+        out=self.cli(*base,'--detach').stdout
+        self.assertTrue(board.launch_record(self.root,rid)['detach']); self.assertIn('detach_session',out); self.assertNotIn('子のまま並ぶ',out)
+        bad=self.cli(*base,'--detach','--nested',ok=False)
+        self.assertNotEqual(bad.returncode,0); self.assertIn('contradict',bad.stderr)
 
     def test_premium_without_reason_is_reported_and_reason_is_kept(self):
         rid=self.incoming('2026-01-01-lcr-b')

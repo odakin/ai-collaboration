@@ -496,10 +496,18 @@ python3 board_items.py list    --root <board>
   `start_session` with those arguments. The app drops a model above the caller's and the effort argument without an
   error (measured), so the requester reads the app's record of the new session, switches it with
   `set_session_model` then `set_session_effort`, waits for the worker's one-line stop, and sends `go`
-  (claude-config `multi-session-coordination.md#desktop-start-model-cap`). Unless `--nested`, the printed steps end
-  with `detach_session` once the model is right: a child's every turn end reaches the requester, which then relayed
-  the child's questions to the owner a second time (measured); submit and blocker still reach the requester through
-  `watch`. The desktop hand-off text tells the worker to ask the owner for approvals in its own window and not
+  (claude-config `multi-session-coordination.md#desktop-start-model-cap`). The worker stays the requester's child and
+  is listed under it in the app (the view the owner reads: the workers under the session that sent them). Its turn
+  ends reach the requester, which acts only on the board's submit and blocker and does not relay the child's
+  questions to the owner (relayed, they reached the owner twice, measured). Only with `--detach` do the printed steps
+  end with `detach_session` once the model is right, so that the child's turn ends stop reaching the requester;
+  submit and blocker still reach it through `watch`. <a id="remote-control-fallback"></a>The app starts a session only
+  for an instruction typed in the desktop app (measured: a requester the owner drove through Remote Control was
+  refused), so the printed steps also carry the line to run instead: `launch --request <id> --surface background
+  --launch` with the same model and effort and `AGENT_BOARD_LAUNCH_REMOTE_CONTROL=follow`, a background CLI session
+  with Remote Control on under the same config dir, listed where the owner is reading (not the requester's child).
+  `follow` = the worker takes the requester's exposure; a refusal shows that the owner kept Remote Control on in the
+  requester's window, so a forwarder that drops `1` for an account shared with other people lets `follow` through. The desktop hand-off text tells the worker to ask the owner for approvals in its own window and not
   through the requester. **`--surface agent`** is for work the requester runs as its own subagent (Agent tool), which
   the app does not list: it prints no launch line, only the record and the hand-off file for the Agent's prompt. A
   subagent claiming a request launched for a desktop window is refused (`--subagent-ok` when the requester or the
@@ -514,7 +522,7 @@ python3 board_items.py list    --root <board>
   for a request already on the board (posted to a Claude role by a co-author's AI, another machine or another session,
   so this machine has no launch record) after reading the board again: it writes the same launch record, hand-off file
   and `start_session` arguments (or the CLI line, `--launch` runs it) that a request to a role writes, with the same
-  `--expect-model` / `--effort` / `--surface` / `--title` / `--nested`, and posts nothing; refused once the work has a
+  `--expect-model` / `--effort` / `--surface` / `--title` / `--detach`, and posts nothing; refused once the work has a
   receiver (claimed or later). Without it the receiving side wrote its card by hand, and neither the model nor the
   effort was checked against anything (measured). On a Codex role the same command starts the worker as
   [#codex-worker-launch](#codex-worker-launch) says. **`--reason`** (request and launch) keeps why the worker needs the

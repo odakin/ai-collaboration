@@ -34,7 +34,7 @@ LAUNCH_EFFORT_ENV='AGENT_BOARD_LAUNCH_EFFORT'          # request to a role: the 
 EFFORTS=('low','medium','high','xhigh','max')
 LAUNCH_CLI_ENV='AGENT_BOARD_LAUNCH_CLI'                # the CLI executable (default `claude`; tests point it at a stub)
 LAUNCH_DEFAULT_ENV='AGENT_BOARD_LAUNCH_DEFAULT'        # `1` = on an owner board, a request to a role starts the worker at once unless --no-launch (owner wiring)
-LAUNCH_REMOTE_CONTROL_ENV='AGENT_BOARD_LAUNCH_REMOTE_CONTROL'  # `1` = the worker keeps the account's remoteControlAtStartup (default: off for that session only)
+LAUNCH_REMOTE_CONTROL_ENV='AGENT_BOARD_LAUNCH_REMOTE_CONTROL'  # `1` = the worker keeps the account's remoteControlAtStartup (default: off for that session only); `follow` = the same, set by the fallback line for a requester the owner drives through Remote Control (the worker follows the requester's exposure)
 LAUNCH_NO_REMOTE_CONTROL='{"remoteControlAtStartup": false}'   # --settings JSON: higher than the user settings file, which stays as it is
 LAUNCH_SURFACE_ENV='AGENT_BOARD_LAUNCH_SURFACE'          # request to a role: `desktop` = print the desktop app's start_session arguments (the worker shows in the app's list); default `background` = the CLI line
 CODEX_LAUNCHER_ENV='AGENT_BOARD_CODEX_LAUNCHER'          # request to a Codex role: the launcher (default: layer-1 claude-config scripts/codex-app-launch.py next to this engine; tests point it at a stub)
@@ -794,14 +794,35 @@ def model_label(model, effort):
     return (name+(' '+effort if effort else '')).strip()
 
 
-def desktop_plan(root, role, request_id, spec, expect, session, title=None, project=None, summary=None, nested=False, policy=None, effort=None, reason=None):
+STAY_NESTED=('。 worker は依頼元の下に子のまま並ぶ (既定 = 一覧の上の段に独立させない)。 子の turn の終わりの知らせは依頼元に届くが、 依頼元が動くのは掲示板の提出と blocker だけで、 子が本人に出す問いは取り次がない (本人は worker の窓で答える)。 独立させるなら --detach')
+
+
+def remote_control_fallback(root, request_id, session, model, effort):
+    """The line a requester runs when start_session is refused because the owner drives it through Remote Control (the
+    app starts sessions only for instructions typed in the desktop app = measured). The worker then starts as a
+    background CLI session with Remote Control on, under the same config dir, so it is listed where the owner reads (the
+    phone's list); it is not the requester's child. `follow` = the worker takes the requester's exposure: the owner kept
+    Remote Control on in the requester's window, which a refused start shows, so the forwarder lets it through even on
+    an account shared with others (the owner's choice). A requester not on Remote Control does not get this refusal."""
+    cfg=(os.environ.get(LAUNCH_CONFIG_DIR_ENV) or '').strip()
+    env=(f'{LAUNCH_CONFIG_DIR_ENV}={shlex.quote(cfg)} ' if cfg else '')+f'{LAUNCH_REMOTE_CONTROL_ENV}=follow '
+    line=(env+f'python3 {shlex.quote(str(ENGINE/"board.py"))} launch --root {shlex.quote(str(root))} --agent claude'
+          +(f' --session {shlex.quote(session)}' if session else '')+f' --request {request_id} --surface background'
+          +(f' --expect-model {shlex.quote(model)}' if model else '')+(f' --effort {shlex.quote(effort)}' if effort else '')+' --launch')
+    return ('  start_session が「desktop アプリで打った指示からしか起こせない」 と断られたら (本人が Remote Control から操作中)、'
+            ' 代わりにこの 1 行 = Remote Control つきの CLI の背景 session (本人のスマホの一覧に出る。 依頼元の子にはならない。'
+            ' 依頼元と同じ account に載る = 依頼元が Remote Control に載っているときだけ使う):\n  '+line)
+
+
+def desktop_plan(root, role, request_id, spec, expect, session, title=None, project=None, summary=None, detach=False, policy=None, effort=None, reason=None):
     """The desktop app's start_session arguments for a role's worker (the worker is listed in the app, unlike a
     background CLI session). The board cannot call the app: the requesting Claude session calls start_session with
     these arguments. Returns (arguments, file). Title = the task first and the model last (measured: a title that
-    starts with tags is cut to the same prefix for every child in the app's list). Unless nested, the launch record
-    asks the requester to detach the worker once its model is right: a child's every turn end reaches the requester,
-    which relayed the child's questions to the owner a second time (measured); the board's watch carries submit and
-    blocker instead."""
+    starts with tags is cut to the same prefix for every child in the app's list). The worker stays the requester's
+    child, listed under it (the owner's choice of view: the workers sit under the session that sent them). Only with
+    detach does the launch record ask the requester to detach it once its model is right, so that its turn ends stop
+    reaching the requester; the requester does not relay a child's questions to the owner either way (relayed, they
+    reached the owner twice, measured), and the board's watch carries submit and blocker."""
     model,effort=launch_settings(expect,session,effort)
     text=handoff_text(root,role,request_id,spec,model,effort,surface='desktop',project=project,policy=policy,reason=reason)
     write_outbox(root,request_id+'.handoff.txt',text)
@@ -819,7 +840,7 @@ def desktop_plan(root, role, request_id, spec, expect, session, title=None, proj
     if effort: args['effort']=effort
     path=write_outbox(root,request_id+'.start_session.json',json.dumps(args,ensure_ascii=False,indent=1))
     write_launch_record(root,request_id,role=role,spec=spec,model=model,effort=effort,surface='desktop',title=args['title'],
-                        name=name,requester=session,detach=not nested,**({'reason':reason} if reason else {}))
+                        name=name,requester=session,detach=bool(detach),**({'reason':reason} if reason else {}))
     return args,path
 
 
@@ -880,7 +901,7 @@ def launch_plan(root, role, request_id, spec, expect, session, project=None, pol
     write_launch_record(root,request_id,role=role,spec=spec,model=model,effort=effort,surface='background',requester=session,
                         **({'reason':reason} if reason else {}))
     cli=os.environ.get(LAUNCH_CLI_ENV) or 'claude'
-    rc_off=os.environ.get(LAUNCH_REMOTE_CONTROL_ENV,'').strip()!='1'
+    rc_off=os.environ.get(LAUNCH_REMOTE_CONTROL_ENV,'').strip() not in ('1','follow')
     argv=([cli,'--bg']+(['--model',model] if model else [])+(['--effort',effort] if effort else [])
           +(['--settings',LAUNCH_NO_REMOTE_CONTROL] if rc_off else [])+[text])
     env=dict(os.environ); env.pop('CLAUDECODE',None)
@@ -919,9 +940,9 @@ def announce_launch(a, ev, audience):
     if surface=='desktop':
         # The worker the owner wants to watch: a desktop session is listed in the app (a background CLI session with
         # Remote Control off is listed nowhere, and with it on it sits on the shelf shared with other machines = measured).
-        nested=bool(getattr(a,'nested',False))
+        detach=bool(getattr(a,'detach',False))
         args,spath=desktop_plan(a.root,a.to_session,ev['event_id'],(a.reference or [None])[0],a.expect_model,a.session,
-                                title=getattr(a,'title',None),project=a.project,summary=ev.get('summary'),nested=nested,policy=a.policy,effort=a.effort,reason=a.reason)
+                                title=getattr(a,'title',None),project=a.project,summary=ev.get('summary'),detach=detach,policy=a.policy,effort=a.effort,reason=a.reason)
         sm_cli=ENGINE.parent.parent/'claude-config'/'scripts'/'session-model.py'
         want=' / '.join(x for x in (args.get('model'),('effort '+args['effort']) if args.get('effort') else '') if x)
         print(f'→ 受け手を desktop app の session として起こす (本人の左の一覧に出る)。 起こすのは依頼元の Claude の start_session'
@@ -929,8 +950,9 @@ def announce_launch(a, ev, audience):
         print(f'  起こした後: python3 {sm_cli} <返りの local_…> で app の記録が {want or "頼んだ値"} かを読む。'
               ' start_session は呼び元より高い model と effort の指定を黙って捨てる (実測) = 違えば set_session_model → set_session_effort'
               ' の順で直し (worker は step 0 で止まって 1 行返す)、 記録が合ってから go を送る。 本人に「起きた」 と言うのはその後'
-              +('' if nested else '。 記録が合ったら detach_session(<local_…>) = 一覧の上の段に独立させる (子の turn の終わりの知らせと'
-                ' 本人への問いが依頼元に来なくなる。 提出と blocker は掲示板の watch で届く。 子のままにするなら --nested)'))
+              +('。 記録が合ったら detach_session(<local_…>) = 一覧の上の段に独立させる (--detach の指定。 子の turn の終わりの知らせが'
+                ' 依頼元に来なくなる。 提出と blocker は掲示板の watch で届く)' if detach else STAY_NESTED))
+        print(remote_control_fallback(a.root,ev['event_id'],a.session,args.get('model'),args.get('effort')))
         if getattr(a,'launch',False): print('  (--launch は CLI の起動だけ = desktop の session は依頼元が start_session で起こす)')
         return None
     # A role names a window nobody has opened: print the command that opens it with model, effort and account
@@ -1199,7 +1221,7 @@ def launch_claude_role(a, req, events):
     poster=(req.get('actor') or {}).get('session_id') or '?'
     if surface=='desktop':
         args,spath=desktop_plan(a.root,role,a.request,spec,a.expect_model,a.session,title=a.title,project=project,
-                                summary=req.get('summary'),nested=a.nested,policy=policy,effort=a.effort,reason=a.reason)
+                                summary=req.get('summary'),detach=a.detach,policy=policy,effort=a.effort,reason=a.reason)
         args['background']=(f'Board request {a.request} for role {role}, posted by {poster} and opened here by session'
                             f' {(a.session or "")[:8]}. The request and its spec are the task; report through the board (claim,'
                             ' a note at each milestone, submit). The poster reviews the submission on the board.')
@@ -1208,7 +1230,7 @@ def launch_claude_role(a, req, events):
               ' 起こすのはこの session の start_session (本人が押す card なら initiation だけ own_initiative に替える)。'
               f' 引数 = {spath} (全文が下):\n  '+json.dumps(args,ensure_ascii=False))
         print('  起こした後: app の記録で model・effort を読み、 違えば set_session_model → set_session_effort → worker の 1 行を待って go'
-              +('' if a.nested else '。 合ったら detach_session (子のままにするなら --nested)'))
+              +('。 合ったら detach_session (--detach の指定)' if a.detach else STAY_NESTED))
         return
     argv,env,line,hpath=launch_plan(a.root,role,a.request,spec,a.expect_model,a.session,project=project,policy=policy,
                                     effort=a.effort,reason=a.reason)
@@ -1388,7 +1410,8 @@ def main():
     ap.add_argument('--launch-host',help='request to a Codex role: the machine that starts the worker (default: this one). Written in the request; another machine\'s session starts it with `launch --request <id>`, this one does not')
     ap.add_argument('--launch-cwd',help='request to a Codex role: the worker\'s working directory (default: the workspace). A sealed blind-review judge is not a board worker: the worker starts it with codex-app-launch.py start --sealed (cold-eyes-isolation.md#board-blind-variant)')
     ap.add_argument('--headless-reason',help='request to a Codex role with --surface background: why a headless `codex exec` (listed nowhere in the Codex app) instead of the app-visible launch')
-    ap.add_argument('--nested',action='store_true',help='request to a role with --surface desktop: keep the worker as the requester\'s child (default: detach it once its model is right, so its turn ends and its questions to the owner do not reach the requester)')
+    ap.add_argument('--detach',action='store_true',help='request / launch to a role with --surface desktop: detach the worker from the requester once its model is right (default: it stays the requester\'s child, listed under it)')
+    ap.add_argument('--nested',action='store_true',help='request / launch to a role with --surface desktop: the default (the worker stays the requester\'s child); accepted so older command lines still run')
     ap.add_argument('--model-ok',action='store_true',help='claim: the requester or the owner accepted the model this session runs although the request was launched for another')
     ap.add_argument('--subagent-ok',action='store_true',help='claim: the requester or the owner accepted a subagent (Agent tool) for a request launched for a desktop window')
     ap.add_argument('--reviewer',help='request: the session that receives the submission (default: the requester; env '
@@ -1410,6 +1433,7 @@ def main():
     if a.thread and a.thread.startswith('today:'): a.thread=f"{view.dt.date.today():%Y-%m-%d}-{a.thread[6:]}"  # local date, any shell
     if a.include_closed and a.command != 'inbox': ap.error('--include-closed is for inbox only')
     if a.effort and a.command not in {'request','handover','launch'}: ap.error('--effort is for request, handover and launch only')
+    if a.detach and a.nested: ap.error('--detach and --nested contradict (nested is the default)')
     if a.reason and a.command not in {'request','launch'}: ap.error('--reason is for request and launch only')
     if a.command == 'show' and not a.request: ap.error('show requires --request')
     if a.all_boards:
