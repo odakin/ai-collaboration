@@ -2,6 +2,10 @@
 
 > 📌 SESSION.md = 案件ごとの現在地 + 正本への link (進んだら置き換える、 日付を見出しにした節・commit hash・messageId を置かない = 層1 claude-config/CONVENTIONS.md#session-no-durable-record)。 日付つきの節は SESSION-archive.md へ verbatim MOVE 済 (2026-09-28)。
 
+## 現在地：worker の安全停止の案内
+
+起動時の案内を整え、依頼元の検収に進む段階。次の起動時は生成した hand-off を [契約](board/CONTRACT.md#worker-handoff-text) と照合する。停止後の手順の正本は [共通規約](../claude-config/conventions/tool-call-robustness.md#api-safety-filter-on-main-response)。
+
 ## 現在地：役割 id 宛ての依頼と vendor
 
 役割 id (`role-…` / `resident-…`) 宛ての依頼は、 依頼に書いた agent に依らず、 その役割で開いた Claude・Codex
