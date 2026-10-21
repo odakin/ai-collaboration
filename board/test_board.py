@@ -1375,6 +1375,33 @@ class LaunchCommand(unittest.TestCase):
                 else: os.environ[k]=v
             td.cleanup()
 
+    def test_worker_tree_default_main(self):
+        """A background CLI worker edits the repository's own working tree on main by default: the CLI's background
+        default refuses Edit/Write under the session's cwd until EnterWorktree, and a worker that had cd'd into the
+        repository pushed its work to a worktree branch (measured). --worktree only when the requester asks: then the
+        CLI keeps its default and the hand-off text says merging into main needs the owner's OK."""
+        import os, json
+        td=tempfile.TemporaryDirectory(); root=Path(td.name)/'board'; root.mkdir(); (root/'.local').mkdir()
+        saved={k:os.environ.get(k) for k in ('AGENT_BOARD_LAUNCH_REMOTE_CONTROL','AGENT_BOARD_LAUNCH_MODEL','AGENT_BOARD_LAUNCH_CLI')}
+        os.environ.pop('AGENT_BOARD_LAUNCH_REMOTE_CONTROL',None); os.environ['AGENT_BOARD_LAUNCH_MODEL']='claude-model-x'; os.environ.pop('AGENT_BOARD_LAUNCH_CLI',None)
+        try:
+            argv,_,_,_=board.launch_plan(root,'role-p-f','20260101T000000Z-claude-000011',None,None,'claude-session-001')
+            self.assertEqual(json.loads(argv[argv.index('--settings')+1])['worktree'],{'bgIsolation':'none'})
+            self.assertIn('do not call EnterWorktree',argv[-1]); self.assertIn('push to main',argv[-1])
+            self.assertNotIn('worktree',board.launch_record(root,'20260101T000000Z-claude-000011'))
+            argv2,_,_,_=board.launch_plan(root,'role-p-f','20260101T000000Z-claude-000012',None,None,'claude-session-001',worktree=True)
+            self.assertEqual(json.loads(argv2[argv2.index('--settings')+1]),{'remoteControlAtStartup':False})
+            self.assertIn('call EnterWorktree before your first edit',argv2[-1]); self.assertIn("needs the owner's OK",argv2[-1])
+            self.assertTrue(board.launch_record(root,'20260101T000000Z-claude-000012')['worktree'])
+            args,_=board.desktop_plan(root,'role-p-f','20260101T000000Z-claude-000013',None,None,'claude-session-001',worktree=True)
+            self.assertTrue(args['use_worktree']); self.assertIn("needs the owner's OK",args['prompt'])
+            self.assertIn(' --worktree --launch',board.remote_control_fallback(root,'20260101T000000Z-claude-000013','s',None,None,True))
+        finally:
+            for k,v in saved.items():
+                if v is None: os.environ.pop(k,None)
+                else: os.environ[k]=v
+            td.cleanup()
+
     def test_remote_control_off_by_default(self):
         """The worker starts with Remote Control off for its session only (--settings JSON; the account's settings file
         is not touched), so it is not listed on the desktop app's Remote Control shelf; AGENT_BOARD_LAUNCH_REMOTE_CONTROL=1
@@ -1384,15 +1411,18 @@ class LaunchCommand(unittest.TestCase):
         saved={k:os.environ.get(k) for k in ('AGENT_BOARD_LAUNCH_REMOTE_CONTROL','AGENT_BOARD_LAUNCH_MODEL','AGENT_BOARD_LAUNCH_CLI')}
         os.environ.pop('AGENT_BOARD_LAUNCH_REMOTE_CONTROL',None); os.environ['AGENT_BOARD_LAUNCH_MODEL']='claude-model-x'; os.environ.pop('AGENT_BOARD_LAUNCH_CLI',None)
         try:
+            in_place={'worktree':{'bgIsolation':'none'}}   # every default launch also keeps the worker in the repository's own tree
             argv,_,line,_=board.launch_plan(root,'role-p-f','20260101T000000Z-claude-000003',None,None,'claude-session-001')
-            i=argv.index('--settings'); self.assertEqual(json.loads(argv[i+1]),{'remoteControlAtStartup':False})
+            i=argv.index('--settings'); self.assertEqual(json.loads(argv[i+1]),{'remoteControlAtStartup':False,**in_place})
             words=shlex.split(line.split(' "$(cat ')[0]); self.assertEqual(words[words.index('--settings')+1],argv[i+1])   # the printed line passes the same JSON
             os.environ['AGENT_BOARD_LAUNCH_REMOTE_CONTROL']='1'
             argv2,_,line2,_=board.launch_plan(root,'role-p-f','20260101T000000Z-claude-000004',None,None,'claude-session-001')
-            self.assertNotIn('--settings',argv2); self.assertNotIn('--settings',line2)
+            self.assertEqual(json.loads(argv2[argv2.index('--settings')+1]),in_place); self.assertNotIn('remoteControlAtStartup',line2)
             os.environ['AGENT_BOARD_LAUNCH_REMOTE_CONTROL']='follow'   # the Remote Control fallback line: the worker follows the requester
             argv3,_,line3,_=board.launch_plan(root,'role-p-f','20260101T000000Z-claude-000005',None,None,'claude-session-001')
-            self.assertNotIn('--settings',argv3); self.assertNotIn('--settings',line3)
+            self.assertEqual(json.loads(argv3[argv3.index('--settings')+1]),in_place); self.assertNotIn('remoteControlAtStartup',line3)
+            argv4,_,line4,_=board.launch_plan(root,'role-p-f','20260101T000000Z-claude-000006',None,None,'claude-session-001',worktree=True)
+            self.assertNotIn('--settings',argv4); self.assertNotIn('--settings',line4)   # follow + worktree: nothing to override
         finally:
             for k,v in saved.items():
                 if v is None: os.environ.pop(k,None)

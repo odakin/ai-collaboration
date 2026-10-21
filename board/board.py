@@ -35,7 +35,8 @@ EFFORTS=('low','medium','high','xhigh','max')
 LAUNCH_CLI_ENV='AGENT_BOARD_LAUNCH_CLI'                # the CLI executable (default `claude`; tests point it at a stub)
 LAUNCH_DEFAULT_ENV='AGENT_BOARD_LAUNCH_DEFAULT'        # `1` = on an owner board, a request to a role starts the worker at once unless --no-launch (owner wiring)
 LAUNCH_REMOTE_CONTROL_ENV='AGENT_BOARD_LAUNCH_REMOTE_CONTROL'  # `1` = the worker keeps the account's remoteControlAtStartup (default: off for that session only); `follow` = the same, set by the fallback line for a requester the owner drives through Remote Control (the worker follows the requester's exposure)
-LAUNCH_NO_REMOTE_CONTROL='{"remoteControlAtStartup": false}'   # --settings JSON: higher than the user settings file, which stays as it is
+LAUNCH_NO_REMOTE_CONTROL={'remoteControlAtStartup': False}   # --settings JSON: higher than the user settings file, which stays as it is
+LAUNCH_IN_PLACE={'worktree': {'bgIsolation': 'none'}}        # --settings JSON: the worker edits the repository's own working tree (the CLI's background default refuses that until EnterWorktree)
 LAUNCH_SURFACE_ENV='AGENT_BOARD_LAUNCH_SURFACE'          # request to a role: `desktop` = print the desktop app's start_session arguments (the worker shows in the app's list); default `background` = the CLI line
 CODEX_LAUNCHER_ENV='AGENT_BOARD_CODEX_LAUNCHER'          # request to a Codex role: the launcher (default: layer-1 claude-config scripts/codex-app-launch.py next to this engine; tests point it at a stub)
 CODEX_MODEL_ENV='AGENT_BOARD_CODEX_MODEL'                # request to a Codex role: the model when --expect-model is not given (else Codex's own config.toml)
@@ -732,7 +733,7 @@ def safety_stop_handoff_text():
         "#api-safety-filter-on-main-response.\n")
 
 
-def handoff_text(root, role, request_id, spec, model, effort, surface='background', project=None, policy=None, reason=None):
+def handoff_text(root, role, request_id, spec, model, effort, surface='background', project=None, policy=None, reason=None, worktree=False):
     """What a worker window starts from (CONTRACT.md#worker-handoff-text): role, request, spec, the model and effort it
     must run on, and the first two steps. Written to a file and passed to the CLI whole, so quoting never bites.
     A desktop window gets a step 0: the app starts it on the requester's model when the asked one is higher, and on
@@ -757,7 +758,14 @@ def handoff_text(root, role, request_id, spec, model, effort, surface='backgroun
     # numbers) came through it unexplained, where the owner could not read them (measured).
     plain=(" Write every `submit` and `note` summary in plain words: do not use labels made up during the work (option"
            " letters, item or finding numbers); if you keep one, say what it refers to right after it.")
-    return (f"You are the board worker for role `{role}`, request `{request_id}`, spec `{spec or '(the request itself)'}`; execute it yourself.{run}\n"
+    # Where the work lands: a worker that went into a worktree pushed it to a branch the sessions reading main did not
+    # see, and merging it back waited on the owner (measured). A worktree only when the requester asked for one.
+    tree=(" Work in a git worktree of your own (the requester asked for one): call EnterWorktree before your first edit and"
+          " commit and push its branch. Merging that branch into the main branch needs the owner's OK: do not merge it"
+          " yourself; name the branch in the submit." if worktree else
+          " Work in the repository's own working tree on its main branch: do not call EnterWorktree or create a branch;"
+          " commit by explicit paths and push to main.")
+    return (f"You are the board worker for role `{role}`, request `{request_id}`, spec `{spec or '(the request itself)'}`; execute it yourself.{run}{tree}\n"
             +hold+
             f"1. `python3 {eng} inbox --root {root} --agent claude --session {role} --sync`; if the request is not visible, do not read the spec — ask the requester or `watch`.\n"
             f"2. `python3 {eng} claim --root {root} --agent claude --session {role} --request {request_id}{scope} --session-name '<your native session id, 8 chars> ({model or '<model>'})' --summary '<one line>'`; if refused with *another live claim exists*, stop and say so in one line.\n"
@@ -808,7 +816,7 @@ def model_label(model, effort):
 STAY_NESTED=('。 worker は依頼元の下に子のまま並ぶ (既定 = 一覧の上の段に独立させない)。 子の turn の終わりの知らせは依頼元に届くが、 依頼元が動くのは掲示板の提出と blocker だけで、 子が本人に出す問いは取り次がない (本人は worker の窓で答える)。 独立させるなら --detach')
 
 
-def remote_control_fallback(root, request_id, session, model, effort):
+def remote_control_fallback(root, request_id, session, model, effort, worktree=False):
     """The line a requester runs when start_session is refused because the owner drives it through Remote Control (the
     app starts sessions only for instructions typed in the desktop app = measured). The worker then starts as a
     background CLI session with Remote Control on, under the same config dir, so it is listed where the owner reads (the
@@ -819,13 +827,14 @@ def remote_control_fallback(root, request_id, session, model, effort):
     env=(f'{LAUNCH_CONFIG_DIR_ENV}={shlex.quote(cfg)} ' if cfg else '')+f'{LAUNCH_REMOTE_CONTROL_ENV}=follow '
     line=(env+f'python3 {shlex.quote(str(ENGINE/"board.py"))} launch --root {shlex.quote(str(root))} --agent claude'
           +(f' --session {shlex.quote(session)}' if session else '')+f' --request {request_id} --surface background'
-          +(f' --expect-model {shlex.quote(model)}' if model else '')+(f' --effort {shlex.quote(effort)}' if effort else '')+' --launch')
+          +(f' --expect-model {shlex.quote(model)}' if model else '')+(f' --effort {shlex.quote(effort)}' if effort else '')
+          +(' --worktree' if worktree else '')+' --launch')
     return ('  start_session が「desktop アプリで打った指示からしか起こせない」 と断られたら (本人が Remote Control から操作中)、'
             ' 代わりにこの 1 行 = Remote Control つきの CLI の背景 session (本人のスマホの一覧に出る。 依頼元の子にはならない。'
             ' 依頼元と同じ account に載る = 依頼元が Remote Control に載っているときだけ使う):\n  '+line)
 
 
-def desktop_plan(root, role, request_id, spec, expect, session, title=None, project=None, summary=None, detach=False, policy=None, effort=None, reason=None):
+def desktop_plan(root, role, request_id, spec, expect, session, title=None, project=None, summary=None, detach=False, policy=None, effort=None, reason=None, worktree=False):
     """The desktop app's start_session arguments for a role's worker (the worker is listed in the app, unlike a
     background CLI session). The board cannot call the app: the requesting Claude session calls start_session with
     these arguments. Returns (arguments, file). Title = the task first and the model last (measured: a title that
@@ -835,7 +844,7 @@ def desktop_plan(root, role, request_id, spec, expect, session, title=None, proj
     reaching the requester; the requester does not relay a child's questions to the owner either way (relayed, they
     reached the owner twice, measured), and the board's watch carries submit and blocker."""
     model,effort=launch_settings(expect,session,effort)
-    text=handoff_text(root,role,request_id,spec,model,effort,surface='desktop',project=project,policy=policy,reason=reason)
+    text=handoff_text(root,role,request_id,spec,model,effort,surface='desktop',project=project,policy=policy,reason=reason,worktree=worktree)
     write_outbox(root,request_id+'.handoff.txt',text)
     name=role[len('role-'):] if role.startswith('role-') else role
     if project and name.startswith(project+'-'): name=name[len(project)+1:]
@@ -843,7 +852,7 @@ def desktop_plan(root, role, request_id, spec, expect, session, title=None, proj
     head=(title or re.split(r'[。:：(（]',summary or '')[0] or name).strip()
     head=head if len(head)<=40 else head[:39]+'…'
     label=model_label(model,effort)
-    args={'initiation':'user_asked','context':'fresh','title':head+(' · '+label if label else ''),'name':name,'use_worktree':False,
+    args={'initiation':'user_asked','context':'fresh','title':head+(' · '+label if label else ''),'name':name,'use_worktree':bool(worktree),
           'prompt':text,'background':(f'Board request {request_id} for role {role}, posted by session {(session or "")[:8]}. The request and its'
                                       ' spec are the task; report through the board (claim, a note at each milestone, submit). The requester'
                                       ' reviews the submission on the board.')}
@@ -851,7 +860,8 @@ def desktop_plan(root, role, request_id, spec, expect, session, title=None, proj
     if effort: args['effort']=effort
     path=write_outbox(root,request_id+'.start_session.json',json.dumps(args,ensure_ascii=False,indent=1))
     write_launch_record(root,request_id,role=role,spec=spec,model=model,effort=effort,surface='desktop',title=args['title'],
-                        name=name,requester=session,detach=bool(detach),**({'reason':reason} if reason else {}))
+                        name=name,requester=session,detach=bool(detach),**({'reason':reason} if reason else {}),
+                        **({'worktree':True} if worktree else {}))
     return args,path
 
 
@@ -895,7 +905,18 @@ def claim_model_check(a):
                          ' model is fine, claim again with --model-ok')
 
 
-def launch_plan(root, role, request_id, spec, expect, session, project=None, policy=None, effort=None, reason=None):
+def launch_cli_settings(rc_off, worktree=False):
+    """The --settings JSON of a background worker ('' = none). Remote Control off (rc_off) and, unless the requester
+    asked for a worktree, the worker edits the repository's own working tree: the CLI's background default refuses
+    Edit/Write under the session's cwd until EnterWorktree, so a worker that had cd'd into the repository went into a
+    worktree and pushed its work to that branch instead of main (measured). The setting has to ride on --settings: an
+    environment variable on the launch line does not reach the job (measured)."""
+    s=dict(LAUNCH_NO_REMOTE_CONTROL) if rc_off else {}
+    if not worktree: s.update(LAUNCH_IN_PLACE)
+    return json.dumps(s) if s else ''
+
+
+def launch_plan(root, role, request_id, spec, expect, session, project=None, policy=None, effort=None, reason=None, worktree=False):
     """The command that starts the addressed worker as a background CLI session with model, effort and config dir pinned.
 
     Returns (argv, env, shell line, hand-off file). Model = --expect-model, else the owner's default, else the
@@ -903,22 +924,24 @@ def launch_plan(root, role, request_id, spec, expect, session, project=None, pol
     the owner's default (a logged-in account: measured, the default dir of one machine was not logged in and the
     banner showed usage billing). Remote Control is off for the worker's session unless LAUNCH_REMOTE_CONTROL_ENV=1:
     an account with remoteControlAtStartup otherwise lists every worker on the desktop app's Remote Control shelf,
-    which reads as work sent to another machine (measured). The board does not start the worker itself unless
-    --launch is given: the requester's shell does, with the hand-off text read from the file."""
+    which reads as work sent to another machine (measured). The worker works in the repository's own working tree
+    unless worktree (launch_cli_settings). The board does not start the worker itself unless --launch is given: the
+    requester's shell does, with the hand-off text read from the file."""
     model,effort=launch_settings(expect,session,effort)
     cfg=os.path.expanduser((os.environ.get(LAUNCH_CONFIG_DIR_ENV) or '').strip())
-    text=handoff_text(root,role,request_id,spec,model,effort,project=project,policy=policy,reason=reason)
+    text=handoff_text(root,role,request_id,spec,model,effort,project=project,policy=policy,reason=reason,worktree=worktree)
     path=write_outbox(root,request_id+'.handoff.txt',text)
     write_launch_record(root,request_id,role=role,spec=spec,model=model,effort=effort,surface='background',requester=session,
-                        **({'reason':reason} if reason else {}))
+                        **({'reason':reason} if reason else {}),**({'worktree':True} if worktree else {}))
     cli=os.environ.get(LAUNCH_CLI_ENV) or 'claude'
     rc_off=os.environ.get(LAUNCH_REMOTE_CONTROL_ENV,'').strip() not in ('1','follow')
+    settings=launch_cli_settings(rc_off,worktree)
     argv=([cli,'--bg']+(['--model',model] if model else [])+(['--effort',effort] if effort else [])
-          +(['--settings',LAUNCH_NO_REMOTE_CONTROL] if rc_off else [])+[text])
+          +(['--settings',settings] if settings else [])+[text])
     env=dict(os.environ); env.pop('CLAUDECODE',None)
     if cfg: env['CLAUDE_CONFIG_DIR']=cfg
     line=((f'CLAUDE_CONFIG_DIR={shlex.quote(cfg)} ' if cfg else '')+shlex.quote(cli)+' --bg'+(f' --model {shlex.quote(model)}' if model else '')
-          +(f' --effort {shlex.quote(effort)}' if effort else '')+(f' --settings {shlex.quote(LAUNCH_NO_REMOTE_CONTROL)}' if rc_off else '')
+          +(f' --effort {shlex.quote(effort)}' if effort else '')+(f' --settings {shlex.quote(settings)}' if settings else '')
           +f' "$(cat {shlex.quote(str(path))})"')
     return argv,env,line,path
 
@@ -953,7 +976,8 @@ def announce_launch(a, ev, audience):
         # Remote Control off is listed nowhere, and with it on it sits on the shelf shared with other machines = measured).
         detach=bool(getattr(a,'detach',False))
         args,spath=desktop_plan(a.root,a.to_session,ev['event_id'],(a.reference or [None])[0],a.expect_model,a.session,
-                                title=getattr(a,'title',None),project=a.project,summary=ev.get('summary'),detach=detach,policy=a.policy,effort=a.effort,reason=a.reason)
+                                title=getattr(a,'title',None),project=a.project,summary=ev.get('summary'),detach=detach,policy=a.policy,effort=a.effort,reason=a.reason,
+                                worktree=getattr(a,'worktree',False))
         sm_cli=ENGINE.parent.parent/'claude-config'/'scripts'/'session-model.py'
         want=' / '.join(x for x in (args.get('model'),('effort '+args['effort']) if args.get('effort') else '') if x)
         print(f'→ 受け手を desktop app の session として起こす (本人の左の一覧に出る)。 起こすのは依頼元の Claude の start_session'
@@ -963,12 +987,13 @@ def announce_launch(a, ev, audience):
               ' の順で直し (worker は step 0 で止まって 1 行返す)、 記録が合ってから go を送る。 本人に「起きた」 と言うのはその後'
               +('。 記録が合ったら detach_session(<local_…>) = 一覧の上の段に独立させる (--detach の指定。 子の turn の終わりの知らせが'
                 ' 依頼元に来なくなる。 提出と blocker は掲示板の watch で届く)' if detach else STAY_NESTED))
-        print(remote_control_fallback(a.root,ev['event_id'],a.session,args.get('model'),args.get('effort')))
+        print(remote_control_fallback(a.root,ev['event_id'],a.session,args.get('model'),args.get('effort'),getattr(a,'worktree',False)))
         if getattr(a,'launch',False): print('  (--launch は CLI の起動だけ = desktop の session は依頼元が start_session で起こす)')
         return None
     # A role names a window nobody has opened: print the command that opens it with model, effort and account
     # pinned (measured: the chip opens on the parent's model, and a pasted hand-off ran on whatever the window had).
-    argv,env,line,hpath=launch_plan(a.root,a.to_session,ev['event_id'],(a.reference or [None])[0],a.expect_model,a.session,project=a.project,policy=a.policy,effort=a.effort,reason=a.reason)
+    argv,env,line,hpath=launch_plan(a.root,a.to_session,ev['event_id'],(a.reference or [None])[0],a.expect_model,a.session,project=a.project,policy=a.policy,effort=a.effort,reason=a.reason,
+                                    worktree=getattr(a,'worktree',False))
     if audience=='owner':
         print(f'→ 受け手を起こす (model・effort・account を固定、 貼り付け不要。 依頼元の shell でそのまま):\n  {line}')
     else:
@@ -1233,7 +1258,7 @@ def launch_claude_role(a, req, events):
     poster=(req.get('actor') or {}).get('session_id') or '?'
     if surface=='desktop':
         args,spath=desktop_plan(a.root,role,a.request,spec,a.expect_model,a.session,title=a.title,project=project,
-                                summary=req.get('summary'),detach=a.detach,policy=policy,effort=a.effort,reason=a.reason)
+                                summary=req.get('summary'),detach=a.detach,policy=policy,effort=a.effort,reason=a.reason,worktree=a.worktree)
         args['background']=(f'Board request {a.request} for role {role}, posted by {poster} and opened here by session'
                             f' {(a.session or "")[:8]}. The request and its spec are the task; report through the board (claim,'
                             ' a note at each milestone, submit). The poster reviews the submission on the board.')
@@ -1245,7 +1270,7 @@ def launch_claude_role(a, req, events):
               +('。 合ったら detach_session (--detach の指定)' if a.detach else STAY_NESTED))
         return
     argv,env,line,hpath=launch_plan(a.root,role,a.request,spec,a.expect_model,a.session,project=project,policy=policy,
-                                    effort=a.effort,reason=a.reason)
+                                    effort=a.effort,reason=a.reason,worktree=a.worktree)
     print(f'→ 既にある依頼 {a.request} の worker を起こす 1 行 (掲示板には何も書いていない):\n  {line}')
     if a.launch: print('→ 起動した: '+launch(argv,env,cwd=bc.workspace(a.root)).replace('\n','\n  '))
 
@@ -1423,6 +1448,9 @@ def main():
     ap.add_argument('--launch-cwd',help='request to a Codex role: the worker\'s working directory (default: the workspace). A sealed blind-review judge is not a board worker: the worker starts it with codex-app-launch.py start --sealed (cold-eyes-isolation.md#board-blind-variant)')
     ap.add_argument('--headless-reason',help='request to a Codex role with --surface background: why a headless `codex exec` (listed nowhere in the Codex app) instead of the app-visible launch')
     ap.add_argument('--detach',action='store_true',help='request / launch to a role with --surface desktop: detach the worker from the requester once its model is right (default: it stays the requester\'s child, listed under it)')
+    ap.add_argument('--worktree',action='store_true',help='request / launch to a Claude role: the worker works in a git worktree of its own'
+                    ' (when it shares files with a parallel writer); merging its branch into main needs the owner\'s OK. Default: the'
+                    ' repository\'s own working tree on main (a background CLI worker is started with worktree.bgIsolation none)')
     ap.add_argument('--nested',action='store_true',help='request / launch to a role with --surface desktop: the default (the worker stays the requester\'s child); accepted so older command lines still run')
     ap.add_argument('--model-ok',action='store_true',help='claim: the requester or the owner accepted the model this session runs although the request was launched for another')
     ap.add_argument('--subagent-ok',action='store_true',help='claim: the requester or the owner accepted a subagent (Agent tool) for a request launched for a desktop window')
