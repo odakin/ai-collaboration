@@ -1043,6 +1043,7 @@ def codex_fields(a):
        'effort':(a.effort or os.environ.get(CODEX_EFFORT_ENV) or de or '').strip(),
        'cwd':'~'+cwd[len(home):] if cwd==home or cwd.startswith(home+os.sep) else cwd,
        'surface':'background' if a.surface=='background' else 'codex-app'}
+    if getattr(a,'title',None): f['title']=' '.join(a.title.split())   # the thread's name in the app (measured: --title was ignored)
     if a.surface=='background': f['headless-reason']=' '.join((a.headless_reason or '').split())
     a._codex_fields=f
     return f
@@ -1059,8 +1060,10 @@ def parse_codex_details(text):
 def codex_handoff_text(root, role, request_id, spec, f, project=None, policy=None):
     """What a Codex worker thread starts from: the Codex counterpart of handoff_text. Step 0 reads this thread's own
     model and effort from Codex's local record (the launcher pins them; a text pasted into a window opened by hand runs
-    on whatever that window has). Questions go to the board as a blocker: the thread runs in the shared daemon, where
-    the app shows it but nobody reads its chat until the turn ends (measured)."""
+    on whatever that window has). The Codex app runs the thread, so the owner may watch it and talk to it there, but the
+    requester reads the board: questions for the requester go to the board as a blocker. Board commands run one at a
+    time: the app's sandbox has no network, and the Codex rule that runs the board's commands outside it matches a lone
+    command only (measured: a push chained after another command with `;` stayed sandboxed)."""
     eng=Path(__file__).resolve(); launcher=codex_launcher(); m,e=f.get('model'),f.get('effort')
     scope=(f" --project {project}" if project else '')+(f" --policy {policy}" if policy else '')
     run=(f" This thread must run on {m}"+(f" at {e} effort" if e else '')+'.') if m else ''
@@ -1072,8 +1075,10 @@ def codex_handoff_text(root, role, request_id, spec, f, project=None, policy=Non
             f"2. `python3 {eng} claim --root {root} --agent codex --session {role} --request {request_id}{scope} --session-name '<first 8 chars of $CODEX_THREAD_ID> ({m or '<model>'})' --summary '<one line>'`; if refused with *another live claim exists*, stop and say so in one line.\n"
             f"3. Do the work the spec asks for; when done, `submit` with the same --root, --agent, --session, --request{scope}, plus `--reply-to <your claim's event id>` and `--deliverable <path>` for each deliverable."
             " Write every `submit` and `note` summary in plain words: do not use labels made up during the work (option letters, item"
-            " or finding numbers); if you keep one, say what it refers to right after it. Ask a question for the requester or the owner"
-            " as a `blocker` on the board: this thread runs in the background and its chat is read only after it ends.\n"
+            " or finding numbers); if you keep one, say what it refers to right after it. Ask a question for the requester as a"
+            " `blocker` on the board: the requester reads the board, not this window (the owner may also watch this window and"
+            " talk to you here). Run each board command on its own, not chained with `;`, `&&` or a pipe: a Codex rule runs"
+            " exactly those commands outside the sandbox, which has no network.\n"
             + safety_stop_handoff_text())
 
 
@@ -1082,10 +1087,13 @@ def codex_launcher():
 
 
 def codex_plan(root, role, request_id, spec, f, project=None, policy=None, title=None):
-    """(argv, shell line, hand-off file) that start the worker through the launcher: a thread in the shared local Codex
-    daemon with model, effort, sandbox and working directory pinned, opened in the Codex app so it is listed there
-    (claude-config scripts/codex-app-launch.py; measured: a `codex exec` thread is listed nowhere in the app). A board
-    worker posts: network on, and the board's cache and checkout writable (the thread runs unattended, approval never)."""
+    """(argv, shell line, hand-off file) that start the worker through the launcher (claude-config
+    scripts/codex-app-launch.py): a thread with model, effort, sandbox and working directory pinned, whose hand-off is
+    queued and run by the Codex app, so the owner sees its progress and can talk to it there (measured: a `codex exec`
+    thread is listed nowhere in the app; a thread the shared daemon runs shows no progress there). A board worker posts:
+    the board's cache and checkout writable, and the board engine's worker subcommands allowed outside the sandbox by a
+    Codex rule (the app's sandbox has no network); network on for the daemon fallback (approval never: it runs
+    unattended). The thread's name = the request's --title (else the summary's first clause) and the model."""
     text=codex_handoff_text(root,role,request_id,spec,f,project=project,policy=policy)
     hpath=write_outbox(root,request_id+'.handoff.txt',text)
     rec=write_launch_record(root,request_id,role=role,spec=spec,model=f.get('model'),effort=f.get('effort'),surface='codex-app',
@@ -1101,6 +1109,7 @@ def codex_plan(root, role, request_id, spec, f, project=None, policy=None, title
     cache=Path(os.environ.get('AGENT_BOARD_CACHE_DIR') or Path.home()/'.cache'/'agent-board')
     gd=run(root,'rev-parse','--path-format=absolute','--git-common-dir',check=False).stdout.decode().strip()
     argv+=['--network','--writable-root',str(cache),'--writable-root',str(Path(root).resolve())]+(['--writable-root',gd] if gd else [])
+    argv+=['--allow-board-engine',str(Path(__file__).resolve())]
     line=' '.join(shlex.quote(x) for x in ['python3',*argv[1:]] if x!='--json')
     return argv,line,hpath
 
@@ -1137,10 +1146,10 @@ def codex_announce(a, ev, audience):
               ' 依頼元の shell でそのまま (理由は CODEX_EXEC_REASON で起動の検査に渡る):\n  '+codex_headless_line(a.root,rid,f,hpath))
         return None
     argv,line,hpath=codex_plan(a.root,a.to_session,rid,spec,f,project=a.project,policy=a.policy,
-                               title=re.split(r'[。:：(（]',ev.get('summary') or '')[0].strip() or None)
-    print('→ 受け手を Codex アプリに出る形で起こす (手元の共有 Codex daemon に thread を作り、 アプリに開かせて一覧に載せる。'
+                               title=f.get('title') or re.split(r'[。:：(（]',ev.get('summary') or '')[0].strip() or None)
+    print('→ 受け手を Codex アプリに出る形で起こす (thread を作って起動文を予約し、 アプリに開かせる = アプリが走らせる。'
           f' model {f.get("model") or "既定"} / effort {f.get("effort") or "既定"} / cwd {f["cwd"]} / 機械 {f["host"]} を固定):\n  {line}')
-    print(f'  (hand-off 文 = {hpath}。 走っている間アプリは「別のアプリで開いています」 と出す = 進行は codex resume <thread id> で見る)')
+    print(f'  (hand-off 文 = {hpath}。 進行はアプリに出て、 その窓から話しかけられる)')
     if not same_host(f['host'],this_host()):
         print(f'→ 起動する機械 = {f["host"]} (この機械 {this_host()} ではない) = ここでは起こさない。 {f["host"]} の session が'
               f' board.py launch --request {rid} で起こす (掲示板の details に機械・model・effort・cwd がある)')
@@ -1217,7 +1226,7 @@ def cmd_launch(a):
     a.policy=req['source_policy']; a.project=req['project']['key']
     spec=next(iter(req.get('references') or []),None)
     argv,line,_=codex_plan(a.root,asg['session_id'],a.request,spec,f,project=a.project,policy=a.policy,
-                           title=re.split(r'[。:：(（]',req.get('summary') or '')[0].strip() or None)
+                           title=f.get('title') or re.split(r'[。:：(（]',req.get('summary') or '')[0].strip() or None)
     print('→ 起こす: '+line)
     run_codex_launch(a,a.request,argv,dict(os.environ))
 
@@ -1443,7 +1452,7 @@ def main():
     ap.add_argument('--launch',action='store_true',help='request to a role: start the worker now with the printed CLI command (background session; the id is printed)')
     ap.add_argument('--no-launch',action='store_true',help=f'request to a role: only print the command even when {LAUNCH_DEFAULT_ENV}=1 (that default applies to owner boards only)')
     ap.add_argument('--surface',choices=['background','desktop','agent'],help=f'request to a role: desktop = print the desktop app\'s start_session arguments (the worker is listed in the app); background = the CLI line (default; env {LAUNCH_SURFACE_ENV}); agent = the requester runs it as its own subagent (Agent tool, not listed in the app: work the owner does not watch)')
-    ap.add_argument('--title',help='request to a role with --surface desktop: the worker\'s title in the app\'s list (default: the summary\'s first clause); the model is added at the end')
+    ap.add_argument('--title',help='request to a role (--surface desktop, or a Codex role): the worker\'s title in the app\'s list (default: the summary\'s first clause); the model is added at the end')
     ap.add_argument('--launch-host',help='request to a Codex role: the machine that starts the worker (default: this one). Written in the request; another machine\'s session starts it with `launch --request <id>`, this one does not')
     ap.add_argument('--launch-cwd',help='request to a Codex role: the worker\'s working directory (default: the workspace). A sealed blind-review judge is not a board worker: the worker starts it with codex-app-launch.py start --sealed (cold-eyes-isolation.md#board-blind-variant)')
     ap.add_argument('--headless-reason',help='request to a Codex role with --surface background: why a headless `codex exec` (listed nowhere in the Codex app) instead of the app-visible launch')

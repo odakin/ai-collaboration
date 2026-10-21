@@ -1576,9 +1576,20 @@ class CodexLaunchCLI(Transport):
                 self.assertEqual(argv[argv.index(flag)+1],val)
             self.assertIn('--network',argv); self.assertEqual(argv.count('--writable-root'),3)   # a board worker posts: cache, checkout, its git dir
             self.assertTrue(any(v.endswith('.git') for v in (argv[i+1] for i,x in enumerate(argv) if x=='--writable-root')))
+            # the app runs the thread with its own sandbox (no network): the board's commands run outside it by a Codex rule
+            self.assertEqual(argv[argv.index('--allow-board-engine')+1],str((board.ENGINE/'board.py').resolve()))
+            self.assertEqual(argv[argv.index('--name')+1],'表の崩れを直す · gpt-fixture xhigh')   # no --title: the summary's first clause
             hand=Path(argv[argv.index('--prompt-file')+1]).read_text()
             self.assertIn('--agent codex --session role-qproj-table',hand); self.assertIn('check-self --model gpt-fixture --effort xhigh',hand)
-            self.assertIn('blocker',hand)   # questions go to the board: the thread's chat is read only after it ends
+            self.assertIn('blocker',hand)   # questions for the requester go to the board: the requester reads the board, not the app
+            self.assertIn('Run each board command on its own',hand)
+            # --title names the thread (measured: it was ignored for a Codex role) and travels in details for `launch`
+            outt=cli('request',*base,'--thread','2026-01-01-codex-t','--to','codex','--to-session','role-qproj-titled',
+                     '--title','表の崩れの修正 (第 2 版)').stdout
+            argt=json.loads(calls()[-1]); self.assertEqual(argt[argt.index('--name')+1],'表の崩れの修正 (第 2 版) · gpt-fixture xhigh')
+            with board.snapshot(self.root,fresh=True) as snap: est=board.read(snap)
+            self.assertEqual(board.parse_codex_details(next(e for e in est if e['event_id']==rid_of(outt))['details'])['title'],'表の崩れの修正 (第 2 版)')
+            log.write_text('\n'.join(calls()[:1])+'\n')   # the later counts assume one start so far
             with board.snapshot(self.root,fresh=True) as snap: es=board.read(snap)
             f=board.parse_codex_details(next(e for e in es if e['event_id']==rid)['details'])
             self.assertEqual((f['model'],f['effort'],f['surface']),('gpt-fixture','xhigh','codex-app')); self.assertTrue(board.same_host(f['host'],board.this_host()))

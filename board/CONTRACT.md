@@ -151,21 +151,30 @@ note answering a blocker reached the worker through a hand relay). Rule and tool
 
 <a id="codex-worker-launch"></a>**Starting a Codex worker so the owner sees it.** A `codex exec` worker is listed nowhere
 in the Codex app: its thread is recorded with source `exec`, and the app lists the interactive kinds only (measured). A
-`request --to codex --to-session role-…` therefore starts the worker through layer-1
-`claude-config/scripts/codex-app-launch.py`: a thread in the shared local Codex app-server daemon (`codex app-server
-daemon`, JSON-RPC over the websocket on its unix socket) with model, effort, sandbox and working directory pinned, opened
-in the app with `codex://threads/<id>?hostId=local`, which lists it in the app's recent items. Model = `--expect-model`,
-else `AGENT_BOARD_CODEX_MODEL`, else Codex's own `config.toml`; effort = `--effort`, else `AGENT_BOARD_CODEX_EFFORT`,
-else the same file; working directory = `--launch-cwd`, else the workspace. The thread runs unattended (approval
-`never`), so it gets network and write access to the board's cache and checkout to post, asks its questions as a
-`blocker`, and starts with step 0 = `codex-app-launch.py check-self` (its own model and effort in Codex's local record).
-While the daemon runs the thread, the app shows it as open elsewhere and does not stream it (the daemon holds the
-writer); `codex resume <thread id>` attaches a terminal view to the same daemon, and some 30–45 seconds after the turn
-ends the app can open and continue it (measured). Being in Codex's local store, the thread is reachable by `codex queue`
-([#codex-reach](#codex-reach)). On an owner board with the launch default the request starts the worker at once;
-`--no-launch` prints the line only. **Which machine**: the request's `details` carry `launch-host`, `launch-model`,
-`launch-effort`, `launch-cwd` and `launch-surface` lines (`--launch-host <name>`; default = the requester's machine), so
-every machine reads them. A request for another machine is not started here: a session on that machine runs
+thread that the shared local daemon (`codex app-server daemon`) runs is listed once the app opens it, but while the
+daemon runs it the app shows it as open elsewhere: no progress, and no way to talk to it there (the daemon holds the
+writer; measured). A `request --to codex --to-session role-…` therefore starts the worker through layer-1
+`claude-config/scripts/codex-app-launch.py` with **the app as the writer**: a one-shot `codex app-server` (JSON lines on
+stdio) makes the thread with model, effort, sandbox, working directory and writable roots pinned, names it, seeds its
+history with one launch record (no turn and no model call: a thread with no history has no rollout file, and the app
+cannot open it) and exits; the hand-off is queued with `codex queue`; the app opens `codex://threads/<id>?hostId=local`,
+takes the thread as its writer and runs the queued hand-off as a turn. The owner sees the progress in the app and can
+talk to the worker there; the requester reads the board. The pinned values hold on the app's turn except network,
+which takes the machine's Codex default (off): the board engine's worker subcommands (`inbox`, `show`, `watch`,
+`claim`, `note`, `blocker`, `finding`, `submit`, `release`, `handover`, `touch`, …; not `request`, `launch`, `accept`,
+`revise`) run outside the sandbox by a Codex rule that `codex-app-launch.py --allow-board-engine` installs when it is
+missing (layer-1 `claude-config/scripts/setup-codex-board-rule.py`; the owner chose it over turning network on for every
+Codex thread, 2026-10-21). The rule matches a lone command, so the hand-off asks for one board command at a time
+(measured: a command chained after another with `;` stayed sandboxed). Model = `--expect-model`, else
+`AGENT_BOARD_CODEX_MODEL`, else Codex's own `config.toml`; effort = `--effort`, else `AGENT_BOARD_CODEX_EFFORT`, else the
+same file; working directory = `--launch-cwd`, else the workspace; the thread's name in the app = `--title`, else the
+summary's first clause, then the model. The thread runs unattended (approval `never`), asks the requester's questions as
+a `blocker`, and starts with step 0 = `codex-app-launch.py check-self` (its own model and effort in Codex's local
+record). Being in Codex's local store, the thread is reachable by `codex queue` ([#codex-reach](#codex-reach)): the app
+takes a queued message as the thread's next turn (measured). On an owner board with the launch default the request
+starts the worker at once; `--no-launch` prints the line only. **Which machine**: the request's `details` carry
+`launch-host`, `launch-model`, `launch-effort`, `launch-cwd`, `launch-surface` and `launch-title` lines (`--launch-host
+<name>`; default = the requester's machine), so every machine reads them. A request for another machine is not started here: a session on that machine runs
 `launch --request <id>`, which reads the board again and refuses when the request names another machine, when a launch
 note (`起動した: Codex thread …`) is already on the request, or when the work is claimed. Every launch posts that note,
 so a session that reads the board learns that the worker runs before it would start a second one (measured: a session
@@ -174,7 +183,10 @@ on one machine started a worker its owner meant to start from the other). **Head
 `CODEX_EXEC_REASON` and never starts it; layer-1 `claude-config/hooks/codex-headless-launch-check.sh` stops a headless
 `codex exec` that starts a board worker or a sealed-review judge without a reason. A sealed blind-review judge is not a
 board worker: the worker that holds the request starts it with `codex-app-launch.py start --sealed`
-([`cold-eyes-isolation.md#sealed-sandbox`](../conventions/cold-eyes-isolation.md#sealed-sandbox) step 5).
+([`cold-eyes-isolation.md#sealed-sandbox`](../conventions/cold-eyes-isolation.md#sealed-sandbox) step 5), which keeps
+the daemon as the writer, so the judge keeps the environment its launch checked and the network it was given; the app
+shows no progress while it runs (`codex resume <thread id>` attaches a terminal view to the daemon), and the app can
+open and continue it some 40–60 seconds after its turn ends (measured).
 
 Operating facts (measured):
 
@@ -192,9 +204,10 @@ Operating facts (measured):
   the project's checkout, so there the working tree is stale right after a post — read back with `--sync`.
   `AGENT_BOARD_TRANSPORT=clone` selects the previous transport (a temporary clone, decrypting every file) for one
   release; the events, paths and commits are the same either way.
-- Inside the Codex sandbox (`workspace-write`) there is no network: `--sync`, `--preview` and every post fetch or push
-  and fail until the command is approved to run outside the sandbox. Reads of the local checkout
-  (`inbox` without `--sync`, `board-view.py --surface`) work there.
+- Inside the Codex sandbox (`workspace-write`) there is no network unless the thread was given it: `--sync`,
+  `--preview` and every post fetch or push and fail there until the command runs outside the sandbox (the board rule
+  above for the worker subcommands, else an approval). Reads of the local checkout (`inbox` without `--sync`,
+  `board-view.py --surface`) work there.
 - `handover` replies to the request itself: name it with `--request` or `--reply-to` (either one is enough; a submission or other event id in `--reply-to` is refused). A session about to close hands the requests it reviews to its
   successor with `handover --role reviewer`. A reviewer whose session has died is replaced by a `human` handover on
   the owner's explicit instruction: `--agent human --session <chat>:<user id>` (a bare name is refused).
