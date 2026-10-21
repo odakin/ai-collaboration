@@ -1481,6 +1481,78 @@ class LaunchCommandCLI(Transport):
             os.environ.update({k:v for k,v in wiring.items() if v is not None})
 
 
+class CodexLaunchCLI(Transport):
+    """A request to a Codex role starts its worker so the owner sees it in the Codex app (CONTRACT.md#codex-worker-launch):
+    the launcher's line with model, effort, cwd and machine pinned, written into the request's details; a launch note on
+    the request stops a second launch; a request for another machine is not started here; the headless `codex exec`
+    only with a reason. Measured: a `codex exec` worker was listed nowhere in the app, and a session on the wrong machine
+    started it before the owner's machine did."""
+    KEYS=('AGENT_BOARD_LAUNCH_DEFAULT','AGENT_BOARD_LAUNCH_CLI','AGENT_BOARD_LAUNCH_CONFIG_DIR','AGENT_BOARD_LAUNCH_EFFORT',
+          'AGENT_BOARD_LAUNCH_SURFACE','AGENT_BOARD_LAUNCH_MODEL','AGENT_BOARD_DEFAULT_REVIEWER','CLAUDE_CODE_ENTRYPOINT',
+          'AGENT_BOARD_CODEX_LAUNCHER','AGENT_BOARD_CODEX_MODEL','AGENT_BOARD_CODEX_EFFORT','CODEX_HOME')
+
+    def test_codex_role_request_launch_host_and_relaunch(self):
+        import sys, os
+        script=board.ENGINE/'board.py'
+        def cli(*args, ok=True):
+            p=subprocess.run([sys.executable,str(script),*args],capture_output=True,text=True)
+            if ok: self.assertEqual(p.returncode,0,p.stderr)
+            return p
+        def rid_of(out): return next(l.split('=',1)[1] for l in out.splitlines() if l.startswith('event_id='))
+        src=self.base/'qproj'
+        if not src.exists(): subprocess.run(['git','init','-q','-b','main',str(src)],check=True)
+        base=['--root',str(self.root),'--agent','claude','--session','claude-win-9','--source',str(src),'--policy','ordinary',
+              '--project','qproj','--summary','表の崩れを直す。 仕様 = 参照','--acceptance','直った commit']
+        wiring={k:os.environ.pop(k,None) for k in self.KEYS}
+        log=self.base/'stub-argv.jsonl'; stub=self.base/'codex-launch-stub.py'
+        stub.write_text('import json,sys\nopen(%r,"a").write(json.dumps(sys.argv[1:])+"\\n")\n'
+                        'print(json.dumps({"thread_id":"01bbbbbb-0000-7000-8000-000000000002","host":"fixture","model":"gpt-fixture",'
+                        '"effort":"xhigh","revealed":True,"instruction_sources":[]}))\n' % str(log))
+        os.environ.update({'AGENT_BOARD_LAUNCH_DEFAULT':'1','AGENT_BOARD_CODEX_LAUNCHER':str(stub),'AGENT_BOARD_CODEX_MODEL':'gpt-fixture',
+                           'AGENT_BOARD_CODEX_EFFORT':'xhigh','CODEX_HOME':str(self.base/'no-codex-home')})
+        calls=lambda: log.read_text().splitlines() if log.exists() else []
+        try:
+            out=cli('request',*base,'--thread','2026-01-01-codex-a','--to','codex','--to-session','role-qproj-table').stdout
+            self.assertIn('Codex アプリに出る形で起こす',out); self.assertIn('起動した: Codex thread 01bbbbbb',out)
+            rid=rid_of(out); argv=json.loads(calls()[-1])
+            self.assertEqual(argv[0],'start')
+            for flag,val in (('--model','gpt-fixture'),('--effort','xhigh'),('--host',board.this_host())):
+                self.assertEqual(argv[argv.index(flag)+1],val)
+            self.assertIn('--network',argv); self.assertEqual(argv.count('--writable-root'),2)   # a board worker posts
+            hand=Path(argv[argv.index('--prompt-file')+1]).read_text()
+            self.assertIn('--agent codex --session role-qproj-table',hand); self.assertIn('check-self --model gpt-fixture --effort xhigh',hand)
+            self.assertIn('blocker',hand)   # questions go to the board: the thread's chat is read only after it ends
+            with board.snapshot(self.root,fresh=True) as snap: es=board.read(snap)
+            f=board.parse_codex_details(next(e for e in es if e['event_id']==rid)['details'])
+            self.assertEqual((f['model'],f['effort'],f['surface']),('gpt-fixture','xhigh','codex-app')); self.assertTrue(board.same_host(f['host'],board.this_host()))
+            self.assertEqual(len(board.codex_launched(es,rid)),1)   # the launch note other machines read
+            p=cli('launch','--root',str(self.root),'--agent','claude','--session','claude-win-9','--request',rid,ok=False)
+            self.assertNotEqual(p.returncode,0); self.assertIn('起動済み',p.stderr); self.assertEqual(len(calls()),1)
+            # printed only (--no-launch), then started by `launch` on this machine, once
+            out1=cli('request',*base,'--thread','2026-01-01-codex-b','--to','codex','--to-session','role-qproj-later','--no-launch').stdout
+            self.assertIn('Codex アプリに出る形で起こす',out1); self.assertNotIn('起動した',out1); self.assertEqual(len(calls()),1)
+            out1b=cli('launch','--root',str(self.root),'--agent','claude','--session','claude-win-9','--request',rid_of(out1)).stdout
+            self.assertIn('起動した: Codex thread',out1b); self.assertEqual(len(calls()),2)
+            self.assertIn('起動済み',cli('launch','--root',str(self.root),'--agent','claude','--session','claude-win-9','--request',rid_of(out1),ok=False).stderr)
+            # a request for another machine is not started here, and `launch` here refuses it
+            out2=cli('request',*base,'--thread','2026-01-01-codex-c','--to','codex','--to-session','role-qproj-other','--launch-host','fixture-other-mac').stdout
+            self.assertIn('ここでは起こさない',out2); self.assertNotIn('起動した',out2); self.assertEqual(len(calls()),2)
+            p=cli('launch','--root',str(self.root),'--agent','claude','--session','claude-win-9','--request',rid_of(out2),ok=False)
+            self.assertNotEqual(p.returncode,0); self.assertIn('fixture-other-mac',p.stderr); self.assertEqual(len(calls()),2)
+            # the headless `codex exec` only with a reason, and never started by the board
+            p=cli('request',*base,'--thread','2026-01-01-codex-d','--to','codex','--to-session','role-qproj-third','--surface','background',ok=False)
+            self.assertNotEqual(p.returncode,0); self.assertIn('--headless-reason',p.stderr)
+            out3=cli('request',*base,'--thread','2026-01-01-codex-e','--to','codex','--to-session','role-qproj-fourth','--surface','background',
+                     '--headless-reason','fixture: この機械に Codex アプリが無い').stdout
+            self.assertIn('CODEX_EXEC_REASON=',out3); self.assertIn(' exec ',out3); self.assertEqual(len(calls()),2)
+            # Claude's surfaces are refused for a Codex role; the launch flags are for Codex roles only
+            self.assertNotEqual(cli('request',*base,'--thread','2026-01-01-codex-f','--to','codex','--to-session','role-qproj-fifth','--surface','desktop',ok=False).returncode,0)
+            self.assertNotEqual(cli('request',*base,'--thread','2026-01-01-codex-g','--to','claude','--to-session','role-qproj-sixth','--launch-host','x',ok=False).returncode,0)
+        finally:
+            for k in self.KEYS: os.environ.pop(k,None)
+            os.environ.update({k:v for k,v in wiring.items() if v is not None})
+
+
 class EffortFlag(unittest.TestCase):
     """--effort on a request to a role decides the worker's effort ahead of the owner's default and the requester's
     CLAUDE_EFFORT, on all three surfaces (desktop, background, agent): the launch record, the start_session arguments,

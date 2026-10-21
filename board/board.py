@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import socket
 import subprocess
 import sys
 import tempfile
@@ -36,6 +37,10 @@ LAUNCH_DEFAULT_ENV='AGENT_BOARD_LAUNCH_DEFAULT'        # `1` = on an owner board
 LAUNCH_REMOTE_CONTROL_ENV='AGENT_BOARD_LAUNCH_REMOTE_CONTROL'  # `1` = the worker keeps the account's remoteControlAtStartup (default: off for that session only)
 LAUNCH_NO_REMOTE_CONTROL='{"remoteControlAtStartup": false}'   # --settings JSON: higher than the user settings file, which stays as it is
 LAUNCH_SURFACE_ENV='AGENT_BOARD_LAUNCH_SURFACE'          # request to a role: `desktop` = print the desktop app's start_session arguments (the worker shows in the app's list); default `background` = the CLI line
+CODEX_LAUNCHER_ENV='AGENT_BOARD_CODEX_LAUNCHER'          # request to a Codex role: the launcher (default: layer-1 claude-config scripts/codex-app-launch.py next to this engine; tests point it at a stub)
+CODEX_MODEL_ENV='AGENT_BOARD_CODEX_MODEL'                # request to a Codex role: the model when --expect-model is not given (else Codex's own config.toml)
+CODEX_EFFORT_ENV='AGENT_BOARD_CODEX_EFFORT'              # request to a Codex role: the effort when --effort is not given (else Codex's own config.toml)
+CODEX_LAUNCHED='起動した: Codex thread'                   # the note a Codex launch posts on its request; a second launch reads it and stops
 
 
 def run(root, *args, check=True):
@@ -709,6 +714,7 @@ def event_from(a, events):
     if kind=='request':
         ev['assignee']={'agent':a.to,'session_id':a.to_session}
         ev['acceptance']='Confirm completion in source.' if restricted else a.acceptance
+        if not restricted and is_codex_role_request(a): ev['details']=codex_details(codex_fields(a))   # every machine reads where and how it starts
     if kind=='handover':
         if not a.to or not a.to_session or not a.role: raise ValueError('handover needs --to, --to-session, --role')
         ev.update(target={'agent':a.to,'session_id':a.to_session},handover_role=a.role)
@@ -886,6 +892,7 @@ def launch_plan(root, role, request_id, spec, expect, session, project=None, pol
 def announce_launch(a, ev, audience):
     """For a request addressed to a Claude role: write the hand-off file, print the launch line, return (argv, env);
     None otherwise. Printed on --preview too (the command is part of what the requester reviews before posting)."""
+    if is_codex_role_request(a): return codex_announce(a,ev,audience)
     if a.command!='request' or a.to!='claude' or not (a.to_session or '').startswith('role-'): return None
     # Default surface: on an owner board a desktop requester gets the desktop arguments (the owner sees that worker in
     # the app; a background CLI session is listed nowhere), whatever entry path called the engine (measured: a session
@@ -932,6 +939,217 @@ def announce_launch(a, ev, audience):
               f' 相手の側の役割は相手が自分の環境で開く):\n  {line}')
     print(f'  (hand-off 文 = {hpath}。 desktop の窓で steer したいときだけ chip、 その文面もこの file)')
     return argv,env
+
+
+def is_codex_role_request(a):
+    return a.command=='request' and a.to=='codex' and (a.to_session or '').startswith('role-')
+
+
+def this_host():
+    return socket.gethostname().split('.')[0]
+
+
+def same_host(x, y):
+    n=lambda h: (h or '').strip().lower().split('@')[-1].split('.')[0]
+    return bool(n(x)) and n(x)==n(y)
+
+
+def codex_defaults():
+    """(model, effort) from Codex's own config (top-level keys of $CODEX_HOME/config.toml), '' when absent."""
+    home=Path(os.environ.get('CODEX_HOME') or Path.home()/'.codex'); got={}
+    try:
+        for line in (home/'config.toml').read_text(encoding='utf-8').splitlines():
+            s=line.strip()
+            if s.startswith('['): break
+            m=re.match(r'(model|model_reasoning_effort)\s*=\s*"([^"]+)"',s)
+            if m: got[m.group(1)]=m.group(2)
+    except OSError: pass
+    return got.get('model',''),got.get('model_reasoning_effort','')
+
+
+def codex_fields(a):
+    """How a Codex role's worker starts (CONTRACT.md#codex-worker-launch): the machine, model, effort, working directory
+    and surface. Written into the request's `details` (one `launch-<key>: <value>` line each), so a session on another
+    machine reads the same values and the launch host is on record before anything starts."""
+    if getattr(a,'_codex_fields',None): return a._codex_fields
+    dm,de=codex_defaults()
+    cwd=a.launch_cwd or str(bc.workspace(a.root))
+    home=str(Path.home())
+    f={'host':a.launch_host or this_host(),
+       'model':(a.expect_model or os.environ.get(CODEX_MODEL_ENV) or dm or '').strip(),
+       'effort':(a.effort or os.environ.get(CODEX_EFFORT_ENV) or de or '').strip(),
+       'cwd':'~'+cwd[len(home):] if cwd==home or cwd.startswith(home+os.sep) else cwd,
+       'surface':'background' if a.surface=='background' else 'codex-app'}
+    if a.surface=='background': f['headless-reason']=' '.join((a.headless_reason or '').split())
+    a._codex_fields=f
+    return f
+
+
+def codex_details(f):
+    return '\n'.join(f'launch-{k}: {v}' for k,v in f.items() if v)
+
+
+def parse_codex_details(text):
+    return {m.group(1):m.group(2).strip() for m in re.finditer(r'(?m)^launch-([a-z-]+):[ \t]*(.*)$',text or '')}
+
+
+def codex_handoff_text(root, role, request_id, spec, f, project=None, policy=None):
+    """What a Codex worker thread starts from: the Codex counterpart of handoff_text. Step 0 reads this thread's own
+    model and effort from Codex's local record (the launcher pins them; a text pasted into a window opened by hand runs
+    on whatever that window has). Questions go to the board as a blocker: the thread runs in the shared daemon, where
+    the app shows it but nobody reads its chat until the turn ends (measured)."""
+    eng=Path(__file__).resolve(); launcher=codex_launcher(); m,e=f.get('model'),f.get('effort')
+    scope=(f" --project {project}" if project else '')+(f" --policy {policy}" if policy else '')
+    run=(f" This thread must run on {m}"+(f" at {e} effort" if e else '')+'.') if m else ''
+    hold=(f"0. First run `python3 {launcher} check-self --model {m}"+(f" --effort {e}" if e else '')+"`: if it does not print ✅,"
+          " stop at once without reading the request or its materials and say so in one line.\n") if m else ''
+    return (f"You are the board worker for role `{role}`, request `{request_id}`, spec `{spec or '(the request itself)'}`; execute it yourself.{run}\n"
+            +hold+
+            f"1. `python3 {eng} inbox --root {root} --agent codex --session {role} --sync`; if the request is not visible, do not read the spec — say so in one line and stop.\n"
+            f"2. `python3 {eng} claim --root {root} --agent codex --session {role} --request {request_id}{scope} --session-name '<first 8 chars of $CODEX_THREAD_ID> ({m or '<model>'})' --summary '<one line>'`; if refused with *another live claim exists*, stop and say so in one line.\n"
+            f"3. Do the work the spec asks for; when done, `submit` with the same --root, --agent, --session, --request{scope}, plus `--reply-to <your claim's event id>` and `--deliverable <path>` for each deliverable."
+            " Write every `submit` and `note` summary in plain words: do not use labels made up during the work (option letters, item"
+            " or finding numbers); if you keep one, say what it refers to right after it. Ask a question for the requester or the owner"
+            " as a `blocker` on the board: this thread runs in the background and its chat is read only after it ends.\n")
+
+
+def codex_launcher():
+    return Path(os.environ.get(CODEX_LAUNCHER_ENV) or ENGINE.parent.parent/'claude-config'/'scripts'/'codex-app-launch.py')
+
+
+def codex_plan(root, role, request_id, spec, f, project=None, policy=None, title=None):
+    """(argv, shell line, hand-off file) that start the worker through the launcher: a thread in the shared local Codex
+    daemon with model, effort, sandbox and working directory pinned, opened in the Codex app so it is listed there
+    (claude-config scripts/codex-app-launch.py; measured: a `codex exec` thread is listed nowhere in the app). A board
+    worker posts: network on, and the board's cache and checkout writable (the thread runs unattended, approval never)."""
+    text=codex_handoff_text(root,role,request_id,spec,f,project=project,policy=policy)
+    hpath=write_outbox(root,request_id+'.handoff.txt',text)
+    rec=write_launch_record(root,request_id,role=role,spec=spec,model=f.get('model'),effort=f.get('effort'),surface='codex-app',
+                            launch_host=f.get('host'),cwd=f.get('cwd'))
+    label=' '.join(x for x in (f.get('model'),f.get('effort')) if x)
+    name=((title or role)[:60]+(' · '+label if label else ''))
+    argv=[sys.executable,str(codex_launcher()),'start','--cwd',os.path.expanduser(f['cwd']),'--prompt-file',str(hpath),
+          '--name',name,'--host',f['host'],'--record',str(rec),'--json']
+    if f.get('model'): argv+=['--model',f['model']]
+    if f.get('effort'): argv+=['--effort',f['effort']]
+    cache=Path(os.environ.get('AGENT_BOARD_CACHE_DIR') or Path.home()/'.cache'/'agent-board')
+    argv+=['--network','--writable-root',str(cache),'--writable-root',str(Path(root).resolve())]
+    line=' '.join(shlex.quote(x) for x in ['python3',*argv[1:]] if x!='--json')
+    return argv,line,hpath
+
+
+def codex_headless_line(root, request_id, f, hpath):
+    """The headless `codex exec` line, printed only when the requester chose it with a reason (--surface background
+    --headless-reason): its thread is listed nowhere in the Codex app. The reason travels in CODEX_EXEC_REASON, which
+    the launch check reads (claude-config hooks/codex-headless-launch-check.sh)."""
+    out=outbox_dir(root)/(request_id+'.final.txt')
+    cli=(_codex_threads().codex_binary() if _codex_threads_ok() else None) or 'codex'
+    parts=[cli,'exec','--json','-o',str(out),'--skip-git-repo-check','-C',os.path.expanduser(f['cwd'])]
+    if f.get('model'): parts+=['-m',f['model']]
+    if f.get('effort'): parts+=['-c',f'model_reasoning_effort="{f["effort"]}"']
+    parts+=['-c','approval_policy="never"','-c','sandbox_mode="workspace-write"']
+    return (f"CODEX_EXEC_REASON={shlex.quote(f.get('headless-reason') or '')} "+' '.join(shlex.quote(x) for x in parts)
+            +f' "$(cat {shlex.quote(str(hpath))})" </dev/null')
+
+
+def _codex_threads_ok():
+    try: _codex_threads(); return True
+    except Exception: return False
+
+
+def codex_announce(a, ev, audience):
+    """For a request to a Codex role: write the hand-off and the launch record, print how the worker starts, and return
+    (argv, env) when it starts on this machine (None when another machine launches it, or for the headless line)."""
+    f=codex_fields(a); rid=ev['event_id']; spec=(a.reference or [None])[0]
+    if f['surface']=='background':
+        text=codex_handoff_text(a.root,a.to_session,rid,spec,f,project=a.project,policy=a.policy)
+        hpath=write_outbox(a.root,rid+'.handoff.txt',text)
+        write_launch_record(a.root,rid,role=a.to_session,spec=spec,model=f.get('model'),effort=f.get('effort'),surface='background',
+                            launch_host=f['host'],cwd=f['cwd'],headless_reason=f.get('headless-reason'))
+        print('→ 受け手を headless の codex exec で起こす (理由 = '+f.get('headless-reason','')+')。 Codex アプリのどこにも出ない。'
+              ' 依頼元の shell でそのまま (理由は CODEX_EXEC_REASON で起動の検査に渡る):\n  '+codex_headless_line(a.root,rid,f,hpath))
+        return None
+    argv,line,hpath=codex_plan(a.root,a.to_session,rid,spec,f,project=a.project,policy=a.policy,
+                               title=re.split(r'[。:：(（]',ev.get('summary') or '')[0].strip() or None)
+    print('→ 受け手を Codex アプリに出る形で起こす (手元の共有 Codex daemon に thread を作り、 アプリに開かせて一覧に載せる。'
+          f' model {f.get("model") or "既定"} / effort {f.get("effort") or "既定"} / cwd {f["cwd"]} / 機械 {f["host"]} を固定):\n  {line}')
+    print(f'  (hand-off 文 = {hpath}。 走っている間アプリは「別のアプリで開いています」 と出す = 進行は codex resume <thread id> で見る)')
+    if not same_host(f['host'],this_host()):
+        print(f'→ 起動する機械 = {f["host"]} (この機械 {this_host()} ではない) = ここでは起こさない。 {f["host"]} の session が'
+              f' board.py launch --request {rid} で起こす (掲示板の details に機械・model・effort・cwd がある)')
+        return None
+    a._codex_launch=True
+    return argv,dict(os.environ)
+
+
+def codex_launched(events, request_id):
+    return [e for e in events if e.get('kind')=='note' and e.get('request_id')==request_id
+            and (e.get('summary') or '').startswith(CODEX_LAUNCHED)]
+
+
+def run_codex_launch(a, request_id, argv, env):
+    """Run the launcher, print what started, and post the launch note on the request (the record another machine's
+    session reads before it would start the same worker). A refused launch (another machine, sealed sandbox leaking
+    instructions) raises with the launcher's own words."""
+    p=subprocess.run(argv,env=env,capture_output=True,text=True,timeout=180,cwd=str(Path.home()))
+    if p.returncode not in (0,1):
+        raise ValueError('Codex の起動が止まった (exit '+str(p.returncode)+'): '+((p.stderr or '')+(p.stdout or '')).strip()[-1200:])
+    try: out=json.loads((p.stdout or '').strip().splitlines()[-1])
+    except Exception: raise ValueError('Codex の起動の出力が読めない: '+(p.stdout or p.stderr or '')[-600:])
+    tid=out.get('thread_id') or '?'
+    print(f"→ 起動した: Codex thread {tid} ({out.get('host')}, model {out.get('model')} / effort {out.get('effort')}"
+          f"{', アプリに開かせた' if out.get('revealed') else ''})。 読んだ指示 file: {', '.join(out.get('instruction_sources') or []) or '(なし)'}")
+    if p.returncode==1: print('  ⚠️ thread の model・effort が頼んだ値と違う (起動の道具の出力を見る)')
+    summary=f"{CODEX_LAUNCHED} {tid} ({out.get('host')}, {out.get('model')} {out.get('effort')})。 同じ依頼を別の機械で起こさない"
+    try: post_request_note(a,request_id,summary)
+    except Exception as ex:  # the worker runs; only the record is missing
+        print(f'⚠️ 起動の記録 (note) を掲示板に載せられなかった: {ex}。 手で note を出す: summary = {summary}',file=sys.stderr)
+    return out
+
+
+def post_request_note(a, request_id, summary):
+    import copy
+    if a.policy=='encrypted-metadata-only':
+        print('  (不透明な thread なので起動の記録は掲示板に載せない = 他の機械からは起動済みが見えない)'); return
+    with snapshot(a.root,fresh=True) as dest: events=read(dest)
+    n=copy.copy(a); n.command='note'; n.request=request_id; n.reply_to=None; n.event_id=None; n.touch=None
+    n.deliverable=[]; n.reference=[]; n.acceptance=None; n.summary=summary; n.to=None; n.to_session=None
+    ev=event_from(n,events)
+    from board_schema import errors
+    same=[e for e in events if e['project']['key']==ev['project']['key'] and e['thread_id']==ev['thread_id']]
+    probs=errors(ev,json.loads(SCHEMA_PATH.read_text()))+[x for x in reduce_workflow(same+[ev],view.now_utc())['errors'] if x.startswith(ev['event_id']+':')]
+    if probs: raise ValueError('; '.join(probs))
+    print('posted '+post(a.root,ev)+' (起動の記録)')
+
+
+def cmd_launch(a):
+    """`launch --request <id>`: start the worker of a Codex-role request on this machine from what the request carries
+    (its `details` lines), after reading the board again: refused when the request names another machine, when a launch
+    note is already on the request, or when the work was already claimed (CONTRACT.md#codex-worker-launch)."""
+    if not a.request: raise ValueError('launch needs --request <request id>')
+    with snapshot(a.root,fresh=True) as dest: events=read(dest)
+    req=next((e for e in events if e['event_id']==a.request and e['kind']=='request'),None)
+    if req is None: raise ValueError('request not found: '+a.request)
+    asg=req.get('assignee') or {}
+    if asg.get('agent')!='codex' or not str(asg.get('session_id','')).startswith('role-'):
+        raise ValueError('launch は Codex の役割 id 宛ての依頼だけ (この依頼の宛先 = '+_who(asg)+')')
+    f=parse_codex_details(req.get('details'))
+    if not f.get('host'): raise ValueError('この依頼には起動の情報 (details の launch-* 行) が無い = 依頼元が request を出し直す')
+    done=codex_launched(events,a.request)
+    if done: raise ValueError('起動済み: '+done[-1]['summary']+' = 二重に起こさない')
+    same=[e for e in events if (e['project']['key'],e['thread_id'])==(req['project']['key'],req['thread_id'])]
+    st=reduce_workflow(same,view.now_utc()).get('status')
+    if st not in ('requested','stale'): raise ValueError(f'この依頼は {st} = 受け手はもう居る (か終わった)。 起こさない')
+    if not same_host(f['host'],this_host()):
+        raise ValueError(f"この依頼の起動する機械 = {f['host']} (この機械 = {this_host()})。 {f['host']} の session が起こす")
+    if f.get('surface')=='background':
+        raise ValueError('この依頼は headless の codex exec を選んでいる (理由 = '+f.get('headless-reason','')+') = 依頼元の shell が起こす')
+    a.policy=req['source_policy']; a.project=req['project']['key']
+    spec=next(iter(req.get('references') or []),None)
+    argv,line,_=codex_plan(a.root,asg['session_id'],a.request,spec,f,project=a.project,policy=a.policy,
+                           title=re.split(r'[。:：(（]',req.get('summary') or '')[0].strip() or None)
+    print('→ 起こす: '+line)
+    run_codex_launch(a,a.request,argv,dict(os.environ))
 
 
 def launch_now(a, audience):
@@ -1063,7 +1281,7 @@ def inbox_show(a, root, *, board_name=None, collect=None):
 
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('command',choices=sorted(KINDS|{'inbox','show','retry','sessions','watch','touch','untouch','touching','boards','init'}))
+    ap.add_argument('command',choices=sorted(KINDS|{'inbox','show','retry','sessions','watch','touch','untouch','touching','boards','init','launch'}))
     ap.add_argument('--root',type=Path,help='the board directory (holds board.json and events/)')
     ap.add_argument('--board',help='a board in the workspace by name (`boards` lists them)')
     ap.add_argument('--all-boards',action='store_true',help='inbox / show: every unlocked board in the workspace')
@@ -1100,6 +1318,9 @@ def main():
     ap.add_argument('--no-launch',action='store_true',help=f'request to a role: only print the command even when {LAUNCH_DEFAULT_ENV}=1 (that default applies to owner boards only)')
     ap.add_argument('--surface',choices=['background','desktop','agent'],help=f'request to a role: desktop = print the desktop app\'s start_session arguments (the worker is listed in the app); background = the CLI line (default; env {LAUNCH_SURFACE_ENV}); agent = the requester runs it as its own subagent (Agent tool, not listed in the app: work the owner does not watch)')
     ap.add_argument('--title',help='request to a role with --surface desktop: the worker\'s title in the app\'s list (default: the summary\'s first clause); the model is added at the end')
+    ap.add_argument('--launch-host',help='request to a Codex role: the machine that starts the worker (default: this one). Written in the request; another machine\'s session starts it with `launch --request <id>`, this one does not')
+    ap.add_argument('--launch-cwd',help='request to a Codex role: the worker\'s working directory (default: the workspace). A sealed blind-review judge is not a board worker: the worker starts it with codex-app-launch.py start --sealed (cold-eyes-isolation.md#board-blind-variant)')
+    ap.add_argument('--headless-reason',help='request to a Codex role with --surface background: why a headless `codex exec` (listed nowhere in the Codex app) instead of the app-visible launch')
     ap.add_argument('--nested',action='store_true',help='request to a role with --surface desktop: keep the worker as the requester\'s child (default: detach it once its model is right, so its turn ends and its questions to the owner do not reach the requester)')
     ap.add_argument('--model-ok',action='store_true',help='claim: the requester or the owner accepted the model this session runs although the request was launched for another')
     ap.add_argument('--subagent-ok',action='store_true',help='claim: the requester or the owner accepted a subagent (Agent tool) for a request launched for a desktop window')
@@ -1136,8 +1357,19 @@ def main():
             else: print(f"board {rows[0]['board']}: rerun with --board {rows[0]['board']} for the full view")
         elif a.json: print(json.dumps(rows,ensure_ascii=False,indent=2))
         return
+    if is_codex_role_request(a):
+        # A Codex role's worker is started so the owner sees it in the Codex app (CONTRACT.md#codex-worker-launch);
+        # the headless `codex exec` is listed nowhere there and is chosen only with a reason.
+        if a.surface in ('desktop','agent'):
+            ap.error('--surface desktop / agent は Claude の worker 用。 Codex の役割は既定 (アプリに出る起動) か --surface background --headless-reason')
+        if a.surface=='background' and not (a.headless_reason or '').strip():
+            ap.error("headless の codex exec は Codex アプリのどこにも出ない = 本人か依頼元が選んだときだけ: --headless-reason '<理由>' を付ける")
+    elif any((a.launch_host,a.launch_cwd,a.headless_reason)):
+        ap.error('--launch-host / --launch-cwd / --headless-reason は Codex の役割 id 宛ての request だけ')
     a.root=bc.resolve(a.root,a.board)
     ws=touch_base(a.root)
+    if a.command=='launch':
+        cmd_launch(a); return
     if a.command == 'touching':
         # Read-only. With --path the verdict covers the whole board (a file is one file whichever thread declared it);
         # --project / --thread narrow only the listing. Exit 2 = an earlier session holds a path, 3 = --wait timed out.
@@ -1391,7 +1623,8 @@ def main():
             print('posted '+post(a.root,hev)+f' (検収役 = {a.agent}/{reviewer}: 提出は inbox --session {reviewer} に載る。 受領は --session {reviewer} --session-name \'<native id 8 chars> (<model>)\' で accept / revise)')
         plan=announce_launch(a,ev,cfg['audience'])
         if plan and launch_now(a,cfg['audience']):
-            print('→ 起動した: '+launch(*plan,cwd=bc.workspace(a.root)).replace('\n','\n  '))
+            if getattr(a,'_codex_launch',False): run_codex_launch(a,ev['event_id'],*plan)
+            else: print('→ 起動した: '+launch(*plan,cwd=bc.workspace(a.root)).replace('\n','\n  '))
         elif plan and cfg['audience']!='owner' and os.environ.get(LAUNCH_DEFAULT_ENV,'').strip()=='1' and not a.no_launch:
             print(f'→ 起動していない: 共同研究者も読む掲示板では {LAUNCH_DEFAULT_ENV}=1 は効かない。'
                   ' 役割が依頼元の側なら上の 1 行を実行する (次からは --launch)')
