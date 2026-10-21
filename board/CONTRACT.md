@@ -507,7 +507,18 @@ python3 board_items.py list    --root <board>
   that transcript's model. Every request to a role leaves
   `<request id>.launch.json` (model, effort, surface) in the outbox; `claim` refuses a session whose model tier differs
   from that record (`--model-ok` when the requester or the owner accepted the model it runs). The record stays on the
-  requester's machine, so a claim from another machine is not checked. For a cross-vendor pass on a copy
+  requester's machine, so a claim from another machine is not checked unless the worker is opened there with
+  `launch --request`. <a id="launch-existing-request"></a>**`launch --request <id>` on a Claude role** opens the worker
+  for a request already on the board (posted to a Claude role by a co-author's AI, another machine or another session,
+  so this machine has no launch record) after reading the board again: it writes the same launch record, hand-off file
+  and `start_session` arguments (or the CLI line, `--launch` runs it) that a request to a role writes, with the same
+  `--expect-model` / `--effort` / `--surface` / `--title` / `--nested`, and posts nothing; refused once the work has a
+  receiver (claimed or later). Without it the receiving side wrote its card by hand, and neither the model nor the
+  effort was checked against anything (measured). On a Codex role the same command starts the worker as
+  [#codex-worker-launch](#codex-worker-launch) says. **`--reason`** (request and launch) keeps why the worker needs the
+  top tier or max effort (what it must derive or judge) in the launch record and the hand-off line; a request or a
+  launch for such a worker without one prints a one-line warning, and the desktop launch check stops the start on
+  machines that turn its premium gate on (claude-config `multi-session-coordination.md#premium-launch-reason`). For a cross-vendor pass on a copy
   of a repository, also follow
   [`physics-verification-cycle.md#cross-vendor-repo-copy`](../conventions/physics-verification-cycle.md#cross-vendor-repo-copy).
 - <a id="role-claim-is-not-assignment"></a>**A self-declared role is not an assignment**: "this session is the review

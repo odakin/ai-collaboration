@@ -1623,12 +1623,80 @@ class EffortFlag(unittest.TestCase):
 
     def test_refusals_and_live_note(self):
         p=self.cli('claim','--root',str(self.root),'--agent','claude','--session','role-x','--effort','high',ok=False)
-        self.assertNotEqual(p.returncode,0); self.assertIn('--effort is for request and handover only',p.stderr)
+        self.assertNotEqual(p.returncode,0); self.assertIn('--effort is for request, handover and launch only',p.stderr)
         p=self.cli('request','--root',str(self.root),'--agent','claude','--session','s','--effort','huge',ok=False)
         self.assertNotEqual(p.returncode,0); self.assertIn('invalid choice',p.stderr)
         self.assertIn('--effort max',board.effort_note('xhigh','max'))
         self.assertEqual(board.effort_note('max','max'),''); self.assertEqual(board.effort_note('xhigh',None),''); self.assertEqual(board.effort_note('','max'),'')
         self.assertIn('effort = --effort',board.target_model_note('role-eproj-a',effort='max'))
+
+
+class LaunchClaudeRole(EffortFlag):
+    """`launch --request <id>` on a Claude role opens the worker window for a request already on the board (a co-author's
+    AI or another machine posted it, so this machine has no launch record): the same launch record, hand-off file and
+    start_session arguments a request to a role writes, with nothing posted, and no second window once the work has a
+    receiver. `--reason` (request and launch) is kept in the record and the hand-off line; a top-tier or max-effort
+    worker without one is reported."""
+    test_order = test_three_surfaces = test_refusals_and_live_note = None   # EffortFlag's tests run once, in EffortFlag
+
+    def incoming(self, thread, role='role-eproj-r', to='claude'):
+        b=self.post_args(); b[b.index('--session')+1]='role-eproj-coauthor'
+        out=self.cli('request',*b,'--thread',thread,'--to',to,'--to-session',role,'--surface','background','--no-launch').stdout
+        rid=self.rid(out)
+        for f in board.outbox_dir(self.root).glob(rid+'.*'): f.unlink()   # the poster's machine kept those, not this one
+        self.assertIsNone(board.launch_record(self.root,rid))
+        return rid
+
+    def events(self):
+        with board.snapshot(self.root,fresh=True) as snap: return len(board.read(snap))
+
+    def test_launch_desktop_writes_the_record_and_posts_nothing(self):
+        rid=self.incoming('2026-01-01-lcr-a'); n=self.events()
+        out=self.cli('launch','--root',str(self.root),'--agent','claude','--session','claude-win-9','--request',rid,
+                     '--surface','desktop','--expect-model','claude-opus-5-5','--effort','xhigh','--nested').stdout
+        rec=board.launch_record(self.root,rid)
+        self.assertEqual((rec['model'],rec['effort'],rec['surface'],rec['detach']),('claude-opus-5-5','xhigh','desktop',False))
+        args=json.loads((board.outbox_dir(self.root)/(rid+'.start_session.json')).read_text())
+        self.assertIn('posted by role-eproj-coauthor and opened here by session claude-w',args['background'])
+        self.assertIn('must run on claude-opus-5-5 at xhigh effort',args['prompt']); self.assertIn('role-eproj-r',args['prompt'])
+        self.assertIn('掲示板には何も書いていない',out); self.assertNotIn('⚠️',out)
+        self.assertEqual(self.events(),n)
+
+    def test_premium_without_reason_is_reported_and_reason_is_kept(self):
+        rid=self.incoming('2026-01-01-lcr-b')
+        out=self.cli('launch','--root',str(self.root),'--agent','claude','--session','claude-win-9','--request',rid,
+                     '--surface','desktop','--expect-model','claude-fable-5-1','--effort','max').stdout
+        self.assertIn('⚠️ Fable と max の worker を理由なしで頼んでいる',out)
+        out=self.cli('launch','--root',str(self.root),'--agent','claude','--session','claude-win-9','--request',rid,'--surface','background',
+                     '--expect-model','claude-fable-5-1','--effort','max','--reason','付録 D の展開を full の式で導出し直す').stdout
+        self.assertNotIn('⚠️',out); self.assertIn('--model claude-fable-5-1 --effort max',out)
+        self.assertEqual(board.launch_record(self.root,rid)['reason'],'付録 D の展開を full の式で導出し直す')
+        self.assertIn('(why this model and effort: 付録 D の展開を full の式で導出し直す)',(board.outbox_dir(self.root)/(rid+'.handoff.txt')).read_text())
+
+    def test_request_carries_reason_and_warns_without_one(self):
+        b=self.post_args(); b[b.index('--expect-model')+1]='claude-fable-5-1'
+        out=self.cli('request',*b,'--thread','2026-01-01-lcr-c','--to','claude','--to-session','role-eproj-c','--surface','desktop','--effort','xhigh').stdout
+        self.assertIn('⚠️ Fable の worker を理由なしで頼んでいる',out)
+        out=self.cli('request',*b,'--thread','2026-01-01-lcr-d','--to','claude','--to-session','role-eproj-d','--surface','desktop',
+                     '--effort','xhigh','--reason','新しい極限の導出を worker が組む').stdout
+        self.assertNotIn('理由なしで',out); self.assertEqual(board.launch_record(self.root,self.rid(out))['reason'],'新しい極限の導出を worker が組む')
+        b=self.post_args()
+        out=self.cli('request',*b,'--thread','2026-01-01-lcr-e','--to','claude','--to-session','role-eproj-e','--surface','desktop','--effort','xhigh').stdout
+        self.assertNotIn('理由なしで',out)   # Opus xhigh needs no reason
+
+    def test_refusals(self):
+        rid=self.incoming('2026-01-01-lcr-f')
+        base=['--root',str(self.root),'--agent','claude']
+        self.cli('claim',*base,'--session','role-eproj-r','--request',rid,'--project','eproj','--policy','ordinary',
+                 '--session-name','aaaaaaaa (opus)','--summary','引き受けた')
+        p=self.cli('launch',*base,'--session','claude-win-9','--request',rid,'--surface','desktop',ok=False)
+        self.assertNotEqual(p.returncode,0); self.assertIn('受け手はもう居る',p.stderr)   # no second window for claimed work
+        p=self.cli('launch',*base,'--session','claude-win-9','--request','20260101T000000Z-claude-ffffff',ok=False)
+        self.assertNotEqual(p.returncode,0); self.assertIn('request not found',p.stderr)
+        p=self.cli('claim',*base,'--session','role-x','--reason','x',ok=False)
+        self.assertIn('--reason is for request and launch only',p.stderr)
+        p=self.cli('claim',*base,'--session','role-x','--effort','high',ok=False)
+        self.assertIn('--effort is for request, handover and launch only',p.stderr)
 
 
 class ClaimModelCheck(unittest.TestCase):

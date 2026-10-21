@@ -721,7 +721,7 @@ def event_from(a, events):
     return ev
 
 
-def handoff_text(root, role, request_id, spec, model, effort, surface='background', project=None, policy=None):
+def handoff_text(root, role, request_id, spec, model, effort, surface='background', project=None, policy=None, reason=None):
     """What a worker window starts from (CONTRACT.md#worker-handoff-text): role, request, spec, the model and effort it
     must run on, and the first two steps. Written to a file and passed to the CLI whole, so quoting never bites.
     A desktop window gets a step 0: the app starts it on the requester's model when the asked one is higher, and on
@@ -729,7 +729,8 @@ def handoff_text(root, role, request_id, spec, model, effort, surface='backgroun
     the request and its materials only; a session's own start-up reads are not the task. The claim and submit steps
     carry the whole command: a worker told only to `claim` with a session name found --root, --request, --project and
     --policy by refused posts (measured)."""
-    run=(f" This window must run on {model}"+(f" at {effort} effort" if effort else '')+'.') if model else ''
+    run=(f" This window must run on {model}"+(f" at {effort} effort" if effort else '')
+         +(f" (why this model and effort: {reason})" if reason else '')+'.') if model else ''
     eng=Path(__file__).resolve()
     hold=''
     if surface=='desktop' and model:
@@ -793,7 +794,7 @@ def model_label(model, effort):
     return (name+(' '+effort if effort else '')).strip()
 
 
-def desktop_plan(root, role, request_id, spec, expect, session, title=None, project=None, summary=None, nested=False, policy=None, effort=None):
+def desktop_plan(root, role, request_id, spec, expect, session, title=None, project=None, summary=None, nested=False, policy=None, effort=None, reason=None):
     """The desktop app's start_session arguments for a role's worker (the worker is listed in the app, unlike a
     background CLI session). The board cannot call the app: the requesting Claude session calls start_session with
     these arguments. Returns (arguments, file). Title = the task first and the model last (measured: a title that
@@ -802,7 +803,7 @@ def desktop_plan(root, role, request_id, spec, expect, session, title=None, proj
     which relayed the child's questions to the owner a second time (measured); the board's watch carries submit and
     blocker instead."""
     model,effort=launch_settings(expect,session,effort)
-    text=handoff_text(root,role,request_id,spec,model,effort,surface='desktop',project=project,policy=policy)
+    text=handoff_text(root,role,request_id,spec,model,effort,surface='desktop',project=project,policy=policy,reason=reason)
     write_outbox(root,request_id+'.handoff.txt',text)
     name=role[len('role-'):] if role.startswith('role-') else role
     if project and name.startswith(project+'-'): name=name[len(project)+1:]
@@ -818,7 +819,7 @@ def desktop_plan(root, role, request_id, spec, expect, session, title=None, proj
     if effort: args['effort']=effort
     path=write_outbox(root,request_id+'.start_session.json',json.dumps(args,ensure_ascii=False,indent=1))
     write_launch_record(root,request_id,role=role,spec=spec,model=model,effort=effort,surface='desktop',title=args['title'],
-                        name=name,requester=session,detach=not nested)
+                        name=name,requester=session,detach=not nested,**({'reason':reason} if reason else {}))
     return args,path
 
 
@@ -862,7 +863,7 @@ def claim_model_check(a):
                          ' model is fine, claim again with --model-ok')
 
 
-def launch_plan(root, role, request_id, spec, expect, session, project=None, policy=None, effort=None):
+def launch_plan(root, role, request_id, spec, expect, session, project=None, policy=None, effort=None, reason=None):
     """The command that starts the addressed worker as a background CLI session with model, effort and config dir pinned.
 
     Returns (argv, env, shell line, hand-off file). Model = --expect-model, else the owner's default, else the
@@ -874,9 +875,10 @@ def launch_plan(root, role, request_id, spec, expect, session, project=None, pol
     --launch is given: the requester's shell does, with the hand-off text read from the file."""
     model,effort=launch_settings(expect,session,effort)
     cfg=os.path.expanduser((os.environ.get(LAUNCH_CONFIG_DIR_ENV) or '').strip())
-    text=handoff_text(root,role,request_id,spec,model,effort,project=project,policy=policy)
+    text=handoff_text(root,role,request_id,spec,model,effort,project=project,policy=policy,reason=reason)
     path=write_outbox(root,request_id+'.handoff.txt',text)
-    write_launch_record(root,request_id,role=role,spec=spec,model=model,effort=effort,surface='background',requester=session)
+    write_launch_record(root,request_id,role=role,spec=spec,model=model,effort=effort,surface='background',requester=session,
+                        **({'reason':reason} if reason else {}))
     cli=os.environ.get(LAUNCH_CLI_ENV) or 'claude'
     rc_off=os.environ.get(LAUNCH_REMOTE_CONTROL_ENV,'').strip()!='1'
     argv=([cli,'--bg']+(['--model',model] if model else [])+(['--effort',effort] if effort else [])
@@ -898,15 +900,18 @@ def announce_launch(a, ev, audience):
     # the app; a background CLI session is listed nowhere), whatever entry path called the engine (measured: a session
     # that called the engine directly skipped the forwarder's wiring and got the CLI line). Others get the CLI line.
     desktop_requester=os.environ.get('CLAUDE_CODE_ENTRYPOINT')=='claude-desktop'
+    note=premium_note(*launch_settings(a.expect_model,a.session,a.effort),getattr(a,'reason',None))
+    if note: print(note)
     surface=(getattr(a,'surface',None) or os.environ.get(LAUNCH_SURFACE_ENV)
              or ('desktop' if audience=='owner' and desktop_requester else 'background')).strip()
     if surface=='agent':
         # Work the owner does not watch, run as the requester's own subagent: no window to open, so only the record
         # (the claim check compares the subagent's model with it) and the hand-off text the Agent tool's prompt carries.
         model,effort=launch_settings(a.expect_model,a.session,a.effort)
-        text=handoff_text(a.root,a.to_session,ev['event_id'],(a.reference or [None])[0],model,effort,project=a.project,policy=a.policy)
+        text=handoff_text(a.root,a.to_session,ev['event_id'],(a.reference or [None])[0],model,effort,project=a.project,policy=a.policy,reason=a.reason)
         hpath=write_outbox(a.root,ev['event_id']+'.handoff.txt',text)
-        write_launch_record(a.root,ev['event_id'],role=a.to_session,model=model,effort=effort,surface='agent',requester=a.session)
+        write_launch_record(a.root,ev['event_id'],role=a.to_session,model=model,effort=effort,surface='agent',requester=a.session,
+                            **({'reason':a.reason} if a.reason else {}))
         print(f'→ 受け手は依頼元の Agent tool (subagent) で起こす = app の一覧に出ない (本人が見ない手元の仕事だけ)。'
               f' model {model or "?"} / effort {effort or "?"} を Agent の引数に、 prompt は hand-off 文 = {hpath}。'
               ' 本人が見る・話しかける worker なら --surface desktop で出し直す')
@@ -916,7 +921,7 @@ def announce_launch(a, ev, audience):
         # Remote Control off is listed nowhere, and with it on it sits on the shelf shared with other machines = measured).
         nested=bool(getattr(a,'nested',False))
         args,spath=desktop_plan(a.root,a.to_session,ev['event_id'],(a.reference or [None])[0],a.expect_model,a.session,
-                                title=getattr(a,'title',None),project=a.project,summary=ev.get('summary'),nested=nested,policy=a.policy,effort=a.effort)
+                                title=getattr(a,'title',None),project=a.project,summary=ev.get('summary'),nested=nested,policy=a.policy,effort=a.effort,reason=a.reason)
         sm_cli=ENGINE.parent.parent/'claude-config'/'scripts'/'session-model.py'
         want=' / '.join(x for x in (args.get('model'),('effort '+args['effort']) if args.get('effort') else '') if x)
         print(f'→ 受け手を desktop app の session として起こす (本人の左の一覧に出る)。 起こすのは依頼元の Claude の start_session'
@@ -930,7 +935,7 @@ def announce_launch(a, ev, audience):
         return None
     # A role names a window nobody has opened: print the command that opens it with model, effort and account
     # pinned (measured: the chip opens on the parent's model, and a pasted hand-off ran on whatever the window had).
-    argv,env,line,hpath=launch_plan(a.root,a.to_session,ev['event_id'],(a.reference or [None])[0],a.expect_model,a.session,project=a.project,policy=a.policy,effort=a.effort)
+    argv,env,line,hpath=launch_plan(a.root,a.to_session,ev['event_id'],(a.reference or [None])[0],a.expect_model,a.session,project=a.project,policy=a.policy,effort=a.effort,reason=a.reason)
     if audience=='owner':
         print(f'→ 受け手を起こす (model・effort・account を固定、 貼り付け不要。 依頼元の shell でそのまま):\n  {line}')
     else:
@@ -1126,7 +1131,8 @@ def post_request_note(a, request_id, summary):
 
 
 def cmd_launch(a):
-    """`launch --request <id>`: start the worker of a Codex-role request on this machine from what the request carries
+    """`launch --request <id>`: on a Claude role, open its worker window (launch_claude_role); on a Codex role,
+    start the worker of a Codex-role request on this machine from what the request carries
     (its `details` lines), after reading the board again: refused when the request names another machine, when a launch
     note is already on the request, or when the work was already claimed (CONTRACT.md#codex-worker-launch)."""
     if not a.request: raise ValueError('launch needs --request <request id>')
@@ -1134,8 +1140,10 @@ def cmd_launch(a):
     req=next((e for e in events if e['event_id']==a.request and e['kind']=='request'),None)
     if req is None: raise ValueError('request not found: '+a.request)
     asg=req.get('assignee') or {}
+    if asg.get('agent')=='claude' and str(asg.get('session_id','')).startswith('role-'):
+        return launch_claude_role(a,req,events)
     if asg.get('agent')!='codex' or not str(asg.get('session_id','')).startswith('role-'):
-        raise ValueError('launch は Codex の役割 id 宛ての依頼だけ (この依頼の宛先 = '+_who(asg)+')')
+        raise ValueError('launch は Codex か Claude の役割 id 宛ての依頼だけ (この依頼の宛先 = '+_who(asg)+')')
     f=parse_codex_details(req.get('details'))
     if not f.get('host'): raise ValueError('この依頼には起動の情報 (details の launch-* 行) が無い = 依頼元が request を出し直す')
     done=codex_launched(events,a.request)
@@ -1153,6 +1161,59 @@ def cmd_launch(a):
                            title=re.split(r'[。:：(（]',req.get('summary') or '')[0].strip() or None)
     print('→ 起こす: '+line)
     run_codex_launch(a,a.request,argv,dict(os.environ))
+
+
+def premium_note(model, effort, reason):
+    """A role's worker asked for on the top tier or at max effort with no reason: one line when the request is posted
+    or its worker opened (the desktop launch check stops such a start on machines that turn its premium gate on). The
+    board does not judge the work from its words: measured, every word rule missed some of the model choices people
+    made."""
+    m=(model or '').lower()
+    top='fable' in m or 'mythos' in m
+    mx=(effort or '').lower()=='max'
+    if not (top or mx) or reason: return ''
+    what=' と '.join(x for x in (('Fable' if top else ''),('max' if mx else '')) if x)
+    return (f'⚠️ {what} の worker を理由なしで頼んでいる。 worker 自身が物理の中身 (導出・議論の正否・どう述べるか) を判断し、'
+            ' 生み出す仕事か。 与えられた文や基準に照らして読む仕事なら --expect-model / --effort を一段下げて出し直す。'
+            " 要るなら --reason '<worker が何を導出・判断するか>' を付ける (起動を検査する機械では、 理由が無いと起動の段で止まる)")
+
+
+def launch_claude_role(a, req, events):
+    """`launch --request <id>` on a Claude role: open the worker window for a request already on the board (a
+    co-author's AI, another machine or another session posted it, so this machine has no launch record) the way a
+    request to a role does: the launch record, the hand-off file and the start_session arguments (or the CLI line),
+    with nothing posted. Without it the receiving side wrote its card by hand, and neither its model nor its effort was
+    checked against anything (measured: a co-author's prose review went out as a top-tier, max-effort card). Model and
+    effort = --expect-model / --effort, else the owner's defaults, else this session's. Refused once the work has a
+    receiver (a second window for the same request)."""
+    same=[e for e in events if (e['project']['key'],e['thread_id'])==(req['project']['key'],req['thread_id'])]
+    st=reduce_workflow(same,view.now_utc()).get('status')
+    if st not in ('requested','stale'): raise ValueError(f'この依頼は {st} = 受け手はもう居る (か終わった)。 起こさない')
+    role=req['assignee']['session_id']
+    surface=(a.surface or os.environ.get(LAUNCH_SURFACE_ENV)
+             or ('desktop' if os.environ.get('CLAUDE_CODE_ENTRYPOINT')=='claude-desktop' else 'background')).strip()
+    if surface=='agent': raise ValueError('launch: --surface desktop か background (subagent に窓は要らない)')
+    project=req['project']['key']; policy=req['source_policy']; spec=next(iter(req.get('references') or []),None)
+    note=premium_note(*launch_settings(a.expect_model,a.session,a.effort),a.reason)
+    if note: print(note)
+    poster=(req.get('actor') or {}).get('session_id') or '?'
+    if surface=='desktop':
+        args,spath=desktop_plan(a.root,role,a.request,spec,a.expect_model,a.session,title=a.title,project=project,
+                                summary=req.get('summary'),nested=a.nested,policy=policy,effort=a.effort,reason=a.reason)
+        args['background']=(f'Board request {a.request} for role {role}, posted by {poster} and opened here by session'
+                            f' {(a.session or "")[:8]}. The request and its spec are the task; report through the board (claim,'
+                            ' a note at each milestone, submit). The poster reviews the submission on the board.')
+        spath=write_outbox(a.root,a.request+'.start_session.json',json.dumps(args,ensure_ascii=False,indent=1))
+        print(f'→ 既にある依頼 {a.request} の worker を desktop app の session として起こす引数 (掲示板には何も書いていない)。'
+              ' 起こすのはこの session の start_session (本人が押す card なら initiation だけ own_initiative に替える)。'
+              f' 引数 = {spath} (全文が下):\n  '+json.dumps(args,ensure_ascii=False))
+        print('  起こした後: app の記録で model・effort を読み、 違えば set_session_model → set_session_effort → worker の 1 行を待って go'
+              +('' if a.nested else '。 合ったら detach_session (子のままにするなら --nested)'))
+        return
+    argv,env,line,hpath=launch_plan(a.root,role,a.request,spec,a.expect_model,a.session,project=project,policy=policy,
+                                    effort=a.effort,reason=a.reason)
+    print(f'→ 既にある依頼 {a.request} の worker を起こす 1 行 (掲示板には何も書いていない):\n  {line}')
+    if a.launch: print('→ 起動した: '+launch(argv,env,cwd=bc.workspace(a.root)).replace('\n','\n  '))
 
 
 def launch_now(a, audience):
@@ -1305,6 +1366,9 @@ def main():
     ap.add_argument('--to-session'); ap.add_argument('--role',choices=['assignee','reviewer'])
     ap.add_argument('--expect-model',help='request/handover: refuse to post when the addressed session\'s actual model (its transcript) is known and does not match this tier (fable/opus) or model-id substring')
     ap.add_argument('--effort',choices=EFFORTS,help=f'request to a role: the effort its worker starts on, in the launch record, the start_session arguments, the CLI line, the hand-off text and the title (default: env {LAUNCH_EFFORT_ENV}, else the requester\'s CLAUDE_EFFORT); request/handover to a live session: report when its known effort differs')
+    ap.add_argument('--reason',help='request to a role / launch --request for a Claude role: why its worker needs the top tier or max'
+                    ' effort (what it must derive or judge); kept in the launch record and the hand-off line. The desktop launch'
+                    ' check asks for it on machines that turn the premium gate on (claude-config multi-session-coordination.md#premium-launch-reason)')
     ap.add_argument('--summary'); ap.add_argument('--acceptance')
     ap.add_argument('--deliverable',action='append',default=[]); ap.add_argument('--reference',action='append',default=[])
     ap.add_argument('--review-target',action='append',default=[],help='request: a file the receiver reviews blind; refused '
@@ -1345,7 +1409,8 @@ def main():
     if not a.session and a.command!='sessions': ap.error('--session requires the actual native session ID')
     if a.thread and a.thread.startswith('today:'): a.thread=f"{view.dt.date.today():%Y-%m-%d}-{a.thread[6:]}"  # local date, any shell
     if a.include_closed and a.command != 'inbox': ap.error('--include-closed is for inbox only')
-    if a.effort and a.command not in {'request','handover'}: ap.error('--effort is for request and handover only')
+    if a.effort and a.command not in {'request','handover','launch'}: ap.error('--effort is for request, handover and launch only')
+    if a.reason and a.command not in {'request','launch'}: ap.error('--reason is for request and launch only')
     if a.command == 'show' and not a.request: ap.error('show requires --request')
     if a.all_boards:
         if a.command not in {'inbox','show'}: ap.error('--all-boards is for inbox / show')
