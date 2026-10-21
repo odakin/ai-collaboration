@@ -20,6 +20,7 @@ Each module's first docstring line is the description source of truth. Every scr
 | [`editor-guard.py`](editor-guard.py) | 著者が editor で同じ原稿を開いている日の書き込みと commit の保護: 未 commit 変更を exit code で止め (check)、自分が書いた直後の内容を記録し (mark)、commit の直前にその後の保存を検出し (verify)、読んだ差分と同じ hash のときだけ著者の変更を commit する (carrier)。 |
 | [`expanding-mode-growth.py`](expanding-mode-growth.py) | Linear growth of daughter-field modes in an expanding oscillating-inflaton background, with the time at which |
 | [`exterior_algebra.py`](exterior_algebra.py) | Exact coordinate differential forms and complementary inverse minors; --selftest. |
+| [`fetch-literature.py`](fetch-literature.py) | Fetch an explicit list of literature (arXiv ids or URLs) into a fresh directory with a per-item provenance manifest (URL, version pin, HTTP status, PDF signature, size, sha256); --selftest. |
 | [`floquet-monodromy.py`](floquet-monodromy.py) | Floquet exponents by monodromy for parametric-resonance claims, with an exact (anharmonic) background (NumPy + SciPy). |
 | [`generate-script-index.py`](generate-script-index.py) | Generate scripts/README.md from each Python module's first docstring line; --check/--selftest. |
 | [`gpt_measurements.py`](gpt_measurements.py) | GPT / POVM の間主観性・sharpness・極値性を定義から検査する library (有限 outcome の certificate/LP、連続 outcome と無限次元の汎用の有限 anchor、--selftest) |
@@ -36,7 +37,7 @@ Each module's first docstring line is the description source of truth. Every scr
 | [`nstar-fixed-point.py`](nstar-fixed-point.py) | N_* fixed point for single-field inflation with a given reheating history, exact-background observables, and |
 | [`one_loop_pole.py`](one_loop_pole.py) | Exact 1/ε pole of one-loop Minkowski integrals with ≤ 2 propagators by large-loop-momentum expansion and covariant angular averaging (sympy, exact rationals only) — re-computes printed pole terms of self-energies, tadpoles and mixed two-point functions from printed Feynman rules; --selftest |
 | [`one_loop_vacuum.py`](one_loop_vacuum.py) | Exact radial log integrals, one-loop MSbar vacuum terms and logarithmic stationary points; --selftest. |
-| [`pdf-locator-grep.py`](pdf-locator-grep.py) | Pin page and equation locators: page-numbered regex hits in a PDF text layer (arXiv id or local file); --selftest. |
+| [`pdf-locator-grep.py`](pdf-locator-grep.py) | Pin page and equation locators: page-numbered regex hits in a PDF text layer, page-marked text dump, page renders (arXiv id or local file); --selftest. |
 | [`povm_moment_variance.py`](povm_moment_variance.py) | Finite-POVM measured moments, first-operator variance and noise; --selftest. |
 | [`review-artifact-snapshot.py`](review-artifact-snapshot.py) | Capture and check immutable review inputs while listing newly added artifacts. |
 | [`review-markup-clean.py`](review-markup-clean.py) | review markup cleaner: 共著 review 用の着色と著者間問答を LaTeX source から外す (投稿前清掃 + 清掃版どうしの diff 用)。 |
