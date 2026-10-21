@@ -1481,6 +1481,83 @@ class LaunchCommandCLI(Transport):
             os.environ.update({k:v for k,v in wiring.items() if v is not None})
 
 
+class EffortFlag(unittest.TestCase):
+    """--effort on a request to a role decides the worker's effort ahead of the owner's default and the requester's
+    CLAUDE_EFFORT, on all three surfaces (desktop, background, agent): the launch record, the start_session arguments,
+    the CLI line, the hand-off text and the title carry the same value. A live addressee whose known effort differs
+    is reported, not refused (an effort is switched without losing the context)."""
+    KEYS=('AGENT_BOARD_LAUNCH_DEFAULT','AGENT_BOARD_LAUNCH_CLI','AGENT_BOARD_LAUNCH_CONFIG_DIR','AGENT_BOARD_LAUNCH_EFFORT',
+          'AGENT_BOARD_LAUNCH_REMOTE_CONTROL','AGENT_BOARD_LAUNCH_SURFACE','AGENT_BOARD_LAUNCH_MODEL','AGENT_BOARD_DEFAULT_REVIEWER',
+          'CLAUDE_CODE_ENTRYPOINT','CLAUDE_EFFORT')
+    def setUp(self):
+        import os
+        Transport.setUp(self)   # the fixture board only: subclassing would run the transport tests again
+        self.wiring={k:os.environ.pop(k,None) for k in self.KEYS}
+    def tearDown(self):
+        import os
+        for k in self.KEYS: os.environ.pop(k,None)
+        os.environ.update({k:v for k,v in self.wiring.items() if v is not None})
+        Transport.tearDown(self)
+    def cli(self, *args, ok=True):
+        import sys
+        p=subprocess.run([sys.executable,str(board.ENGINE/'board.py'),*args],capture_output=True,text=True)
+        if ok: self.assertEqual(p.returncode,0,p.stderr)
+        return p
+    def post_args(self):
+        src=self.base/'eproj'
+        if not src.exists(): subprocess.run(['git','init','-q','-b','main',str(src)],check=True)
+        return ['--root',str(self.root),'--agent','claude','--session','claude-win-9','--source',str(src),'--policy','ordinary',
+                '--project','eproj','--summary','計算を検算する','--acceptance','検算の記録','--expect-model','claude-opus-5-5']
+    def rid(self, out): return next(l.split('=',1)[1] for l in out.splitlines() if l.startswith('event_id='))
+
+    def test_order(self):
+        import os
+        os.environ['CLAUDE_EFFORT']='medium'
+        self.assertEqual(board.launch_settings('claude-x','s')[1],'medium')            # the requester's own effort
+        os.environ['AGENT_BOARD_LAUNCH_EFFORT']='xhigh'
+        self.assertEqual(board.launch_settings('claude-x','s')[1],'xhigh')             # the owner's default beats it
+        self.assertEqual(board.launch_settings('claude-x','s','max')[1],'max')         # --effort beats both
+        os.environ.pop('AGENT_BOARD_LAUNCH_EFFORT'); os.environ.pop('CLAUDE_EFFORT')
+        self.assertEqual(board.launch_settings('claude-x','s')[1],'')                  # nothing known: no effort pinned
+
+    def test_three_surfaces(self):
+        import os
+        os.environ.update({'AGENT_BOARD_LAUNCH_EFFORT':'xhigh','CLAUDE_EFFORT':'medium'})
+        b=self.post_args()
+        # desktop: record, start_session arguments, title, hand-off (step 0 compares the record with this value)
+        out=self.cli('request',*b,'--thread','2026-01-01-eff-a','--to','claude','--to-session','role-eproj-a','--surface','desktop','--effort','max').stdout
+        rid=self.rid(out); args=json.loads((board.outbox_dir(self.root)/(rid+'.start_session.json')).read_text())
+        self.assertEqual(args['effort'],'max'); self.assertTrue(args['title'].endswith('Opus 5.5 max'),args['title'])
+        self.assertIn('must run on claude-opus-5-5 at max effort',args['prompt']); self.assertIn('with effort max',args['prompt'])
+        self.assertEqual(board.launch_record(self.root,rid)['effort'],'max'); self.assertIn('effort max',out)
+        # background: the CLI line and the hand-off file
+        out=self.cli('request',*b,'--thread','2026-01-01-eff-b','--to','claude','--to-session','role-eproj-b','--surface','background','--effort','low').stdout
+        rid=self.rid(out); self.assertIn('--model claude-opus-5-5 --effort low',out); self.assertNotIn('--effort xhigh',out)
+        self.assertIn('at low effort',(board.outbox_dir(self.root)/(rid+'.handoff.txt')).read_text())
+        self.assertEqual(board.launch_record(self.root,rid)['effort'],'low')
+        # agent: the record the claim check reads and the hand-off text the Agent prompt carries
+        out=self.cli('request',*b,'--thread','2026-01-01-eff-c','--to','claude','--to-session','role-eproj-c','--surface','agent','--effort','high').stdout
+        rid=self.rid(out); self.assertIn('effort high',out)
+        self.assertIn('at high effort',(board.outbox_dir(self.root)/(rid+'.handoff.txt')).read_text())
+        self.assertEqual(board.launch_record(self.root,rid)['effort'],'high')
+        # without --effort the owner's default still holds
+        out=self.cli('request',*b,'--thread','2026-01-01-eff-d','--to','claude','--to-session','role-eproj-d','--surface','desktop').stdout
+        self.assertEqual(board.launch_record(self.root,self.rid(out))['effort'],'xhigh')
+        # --preview shows the same arguments and posts nothing
+        out=self.cli('request',*b,'--thread','2026-01-01-eff-e','--to','claude','--to-session','role-eproj-e','--surface','desktop','--effort','high','--preview').stdout
+        self.assertIn('"effort": "high"',out); self.assertIn('Opus 5.5 high',out)
+        with board.snapshot(self.root,fresh=True) as snap: self.assertEqual(len([e for e in board.read(snap) if e['kind']=='request']),4)
+
+    def test_refusals_and_live_note(self):
+        p=self.cli('claim','--root',str(self.root),'--agent','claude','--session','role-x','--effort','high',ok=False)
+        self.assertNotEqual(p.returncode,0); self.assertIn('--effort is for request and handover only',p.stderr)
+        p=self.cli('request','--root',str(self.root),'--agent','claude','--session','s','--effort','huge',ok=False)
+        self.assertNotEqual(p.returncode,0); self.assertIn('invalid choice',p.stderr)
+        self.assertIn('--effort max',board.effort_note('xhigh','max'))
+        self.assertEqual(board.effort_note('max','max'),''); self.assertEqual(board.effort_note('xhigh',None),''); self.assertEqual(board.effort_note('','max'),'')
+        self.assertIn('effort = --effort',board.target_model_note('role-eproj-a',effort='max'))
+
+
 class ClaimModelCheck(unittest.TestCase):
     """A claim that does not match the request's launch record is refused: another model tier (the transcript decides,
     not the label in --session-name; --model-ok passes), and a subagent (Agent tool) claiming a request launched for a

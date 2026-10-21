@@ -429,8 +429,14 @@ python3 board_items.py list    --root <board>
   not apply and only `--launch` runs it: a role there may be a collaborator's, opened in the collaborator's own
   environment, and a worker started on the requester's machine would claim under it ([#role-any-agent](#role-any-agent)),
   so the requester launches only a role on its own side. The worker starts in the workspace directory.
-  Model = `--expect-model`, else `AGENT_BOARD_LAUNCH_MODEL`, else the requester's own model; effort =
-  `AGENT_BOARD_LAUNCH_EFFORT`, else the requester's `CLAUDE_EFFORT`; config dir = `AGENT_BOARD_LAUNCH_CONFIG_DIR`
+  Model = `--expect-model`, else `AGENT_BOARD_LAUNCH_MODEL`, else the requester's own model; effort = `--effort`
+  (`low` / `medium` / `high` / `xhigh` / `max`), else `AGENT_BOARD_LAUNCH_EFFORT`, else the requester's `CLAUDE_EFFORT`
+  (measured: without `--effort` a worker wanted at another effort than its requester's got the requester's in the
+  record, the arguments and the hand-off text, and the launch check refused the corrected `start_session` arguments).
+  The same value goes to the launch record, the `start_session` arguments, the CLI `--effort`, the hand-off text and
+  the title on every surface; a request for a worker of a given model and effort is written
+  `--expect-model <model> --effort <effort>`. On a request or handover to a live session, `--effort` only reports a
+  known effort that differs (switching an effort keeps the context, unlike a model); config dir = `AGENT_BOARD_LAUNCH_CONFIG_DIR`
   (the owner's wiring names a logged-in account: measured, a machine's default config dir was not logged in and the
   window opened on usage billing). Remote Control is off for the worker's session (`--settings` JSON outranks the
   account's settings file, which is left as it is): an account with `remoteControlAtStartup` otherwise lists every

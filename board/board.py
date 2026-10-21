@@ -29,7 +29,8 @@ NOTIFY_POLL_S=2     # watch: how often the local last-push note is looked at bet
 DEFAULT_REVIEWER_ENV='AGENT_BOARD_DEFAULT_REVIEWER'   # request: reviewer session id when --reviewer is absent; <project> expands
 LAUNCH_CONFIG_DIR_ENV='AGENT_BOARD_LAUNCH_CONFIG_DIR'  # request to a role: the CLI config dir the worker runs under (a logged-in account); owner wiring
 LAUNCH_MODEL_ENV='AGENT_BOARD_LAUNCH_MODEL'            # request to a role: default --model (else --expect-model, else the requester's own model)
-LAUNCH_EFFORT_ENV='AGENT_BOARD_LAUNCH_EFFORT'          # request to a role: default --effort (else the requester's CLAUDE_EFFORT)
+LAUNCH_EFFORT_ENV='AGENT_BOARD_LAUNCH_EFFORT'          # request to a role: the effort when --effort is not given (else the requester's CLAUDE_EFFORT)
+EFFORTS=('low','medium','high','xhigh','max')
 LAUNCH_CLI_ENV='AGENT_BOARD_LAUNCH_CLI'                # the CLI executable (default `claude`; tests point it at a stub)
 LAUNCH_DEFAULT_ENV='AGENT_BOARD_LAUNCH_DEFAULT'        # `1` = on an owner board, a request to a role starts the worker at once unless --no-launch (owner wiring)
 LAUNCH_REMOTE_CONTROL_ENV='AGENT_BOARD_LAUNCH_REMOTE_CONTROL'  # `1` = the worker keeps the account's remoteControlAtStartup (default: off for that session only)
@@ -570,25 +571,34 @@ def codex_target_model(to_session):
         return None
 
 
-def target_model_note(to_session, expect=None, agent=None):
+def effort_note(got, want):
+    """The tail added when the addressed live session's known effort is not the --effort asked for. Not a refusal,
+    unlike a model mismatch: an effort is switched without losing the context (desktop: set_session_effort)."""
+    if not want or not got or got.lower()==want.lower(): return ''
+    return f" effort は {got} で --effort {want} と違う = 送る前に相手の effort を {want} にする (desktop なら set_session_effort) か、 文面に書く。"
+
+
+def target_model_note(to_session, expect=None, agent=None, effort=None):
     """One line about the model the addressed session actually runs on, read before posting (never after).
 
     The title tag and the chip text do not decide a session's model; its transcript's last assistant turn does
     (layer-1 scripts/lib/session_model.py). A role id names a session that does not exist yet, so its model is
     whatever the app opens it with. With `expect` (a tier such as fable / opus, or a model-id substring), a
     known model that does not match refuses the post; an unknown model (another machine, no answer yet) is
-    reported and lets the post through. Rule: claude-config/conventions/multi-session-coordination.md#delegate-model-routing
+    reported and lets the post through. With `effort`, a live session's known effort (the desktop app's record, or
+    Codex's local state) that differs is reported. Rule: claude-config/conventions/multi-session-coordination.md#delegate-model-routing
     """
     if not to_session: return None
     if to_session.startswith(('role-','resident-')):
         return (f"宛先 {to_session} は役割 id = まだ無い session。 この request が出す起動の 1 行で開けば model と effort は固定"
-                f" (--expect-model か owner の既定、 無ければ起票元と同じ)。 手で開く窓 (chip・別の機械) では成り行き = hand-off 文の model の行が頼り。")
+                f" (model = --expect-model、 effort = --effort。 無ければ owner の既定、 それも無ければ起票元と同じ)。 手で開く窓 (chip・別の機械) では成り行き = hand-off 文の model の行が頼り。")
     if agent=='codex':
         got=codex_target_model(to_session)
         if not got:
             return f"宛先 codex/{to_session[:8]} の model はこの機の Codex の記録に無い (別の機の thread か、 まだ無い)。 仕事の難しさに合うかは送る前にしか直せない = 相手に model を聞くか文面に書く。"
-        model,effort,tid=got
-        line=f"宛先 codex/{tid[:8]} の実際の model = {model}{(' effort '+effort) if effort else ''} (Codex の手元の記録)。 仕事の難しさに合うか送る前に見る (規約 #delegate-model-routing)。"
+        model,got_effort,tid=got
+        line=(f"宛先 codex/{tid[:8]} の実際の model = {model}{(' effort '+got_effort) if got_effort else ''} (Codex の手元の記録)。 仕事の難しさに合うか送る前に見る (規約 #delegate-model-routing)。"
+              +effort_note(got_effort,effort))
         if expect and expect.lower() not in model.lower():
             raise ValueError(f"宛先の model が --expect-model {expect} と違う: {model}。 合う宛先に変える / 自分でやる / 本人に 1 行で聞く。 承知の上なら --expect-model を外して送る")
         return line
@@ -602,7 +612,8 @@ def target_model_note(to_session, expect=None, agent=None):
         if expect: return f"宛先 {to_session[:8]} の model はこの機の記録に無い (別の機の session か、 まだ応答が無い) = --expect-model {expect} は確かめられない。 送る前に相手の機で session-model.py を回すか、 相手に聞く。"
         return f"宛先 {to_session[:8]} の model はこの機の記録に無い (別の機の session か、 まだ応答が無い)。 仕事の難しさに合うかは送る前にしか直せない = 相手に model を聞くか文面に書く。"
     r=known[0]
-    line=f"宛先 {r['sessionId'][:8]} の実際の model = {r['model']} (tier {r['tier']}、 最後の応答 {r['model_at'][:16]}{', name=' + r['name'] if r.get('name') else ''})。 仕事の難しさに合うか送る前に見る (規約 #delegate-model-routing)。"
+    line=(f"宛先 {r['sessionId'][:8]} の実際の model = {r['model']} (tier {r['tier']}、 最後の応答 {r['model_at'][:16]}{', name=' + r['name'] if r.get('name') else ''})。 仕事の難しさに合うか送る前に見る (規約 #delegate-model-routing)。"
+          +effort_note(r.get('app_effort') or '',effort))
     if expect and expect.lower() not in (r['model'].lower(), r['tier'].lower()) and expect.lower() not in r['model'].lower():
         raise ValueError(f"宛先の model が --expect-model {expect} と違う: {r['model']} (tier {r['tier']})。 合う宛先に変える / 自分でやる / 本人に 1 行で聞く (名指しの宛先でも同じ)。 承知の上なら --expect-model を外して送る")
     return line
@@ -741,11 +752,13 @@ def own_model(session):
     except Exception: return ''
 
 
-def launch_settings(expect, session):
+def launch_settings(expect, session, effort=None):
     """(model, effort) a role's worker is started on: model = --expect-model, else the owner's default, else the
-    requester's own model; effort = the owner's default, else the requester's CLAUDE_EFFORT."""
+    requester's own model; effort = --effort, else the owner's default, else the requester's CLAUDE_EFFORT. Without
+    --effort a worker asked for at another effort than its requester's got the requester's in the record, the
+    start_session arguments and the hand-off text, and the launch check then refused the corrected arguments (measured)."""
     model=(expect or os.environ.get(LAUNCH_MODEL_ENV) or own_model(session) or '').strip()
-    effort=(os.environ.get(LAUNCH_EFFORT_ENV) or os.environ.get('CLAUDE_EFFORT') or '').strip()
+    effort=(effort or os.environ.get(LAUNCH_EFFORT_ENV) or os.environ.get('CLAUDE_EFFORT') or '').strip()
     return model,effort
 
 
@@ -774,7 +787,7 @@ def model_label(model, effort):
     return (name+(' '+effort if effort else '')).strip()
 
 
-def desktop_plan(root, role, request_id, spec, expect, session, title=None, project=None, summary=None, nested=False, policy=None):
+def desktop_plan(root, role, request_id, spec, expect, session, title=None, project=None, summary=None, nested=False, policy=None, effort=None):
     """The desktop app's start_session arguments for a role's worker (the worker is listed in the app, unlike a
     background CLI session). The board cannot call the app: the requesting Claude session calls start_session with
     these arguments. Returns (arguments, file). Title = the task first and the model last (measured: a title that
@@ -782,7 +795,7 @@ def desktop_plan(root, role, request_id, spec, expect, session, title=None, proj
     asks the requester to detach the worker once its model is right: a child's every turn end reaches the requester,
     which relayed the child's questions to the owner a second time (measured); the board's watch carries submit and
     blocker instead."""
-    model,effort=launch_settings(expect,session)
+    model,effort=launch_settings(expect,session,effort)
     text=handoff_text(root,role,request_id,spec,model,effort,surface='desktop',project=project,policy=policy)
     write_outbox(root,request_id+'.handoff.txt',text)
     name=role[len('role-'):] if role.startswith('role-') else role
@@ -843,17 +856,17 @@ def claim_model_check(a):
                          ' model is fine, claim again with --model-ok')
 
 
-def launch_plan(root, role, request_id, spec, expect, session, project=None, policy=None):
+def launch_plan(root, role, request_id, spec, expect, session, project=None, policy=None, effort=None):
     """The command that starts the addressed worker as a background CLI session with model, effort and config dir pinned.
 
     Returns (argv, env, shell line, hand-off file). Model = --expect-model, else the owner's default, else the
-    requester's own model (the chip's old default); effort = the owner's default, else the requester's; config dir =
+    requester's own model (the chip's old default); effort = --effort, else the owner's default, else the requester's; config dir =
     the owner's default (a logged-in account: measured, the default dir of one machine was not logged in and the
     banner showed usage billing). Remote Control is off for the worker's session unless LAUNCH_REMOTE_CONTROL_ENV=1:
     an account with remoteControlAtStartup otherwise lists every worker on the desktop app's Remote Control shelf,
     which reads as work sent to another machine (measured). The board does not start the worker itself unless
     --launch is given: the requester's shell does, with the hand-off text read from the file."""
-    model,effort=launch_settings(expect,session)
+    model,effort=launch_settings(expect,session,effort)
     cfg=os.path.expanduser((os.environ.get(LAUNCH_CONFIG_DIR_ENV) or '').strip())
     text=handoff_text(root,role,request_id,spec,model,effort,project=project,policy=policy)
     path=write_outbox(root,request_id+'.handoff.txt',text)
@@ -883,7 +896,7 @@ def announce_launch(a, ev, audience):
     if surface=='agent':
         # Work the owner does not watch, run as the requester's own subagent: no window to open, so only the record
         # (the claim check compares the subagent's model with it) and the hand-off text the Agent tool's prompt carries.
-        model,effort=launch_settings(a.expect_model,a.session)
+        model,effort=launch_settings(a.expect_model,a.session,a.effort)
         text=handoff_text(a.root,a.to_session,ev['event_id'],(a.reference or [None])[0],model,effort,project=a.project,policy=a.policy)
         hpath=write_outbox(a.root,ev['event_id']+'.handoff.txt',text)
         write_launch_record(a.root,ev['event_id'],role=a.to_session,model=model,effort=effort,surface='agent',requester=a.session)
@@ -896,7 +909,7 @@ def announce_launch(a, ev, audience):
         # Remote Control off is listed nowhere, and with it on it sits on the shelf shared with other machines = measured).
         nested=bool(getattr(a,'nested',False))
         args,spath=desktop_plan(a.root,a.to_session,ev['event_id'],(a.reference or [None])[0],a.expect_model,a.session,
-                                title=getattr(a,'title',None),project=a.project,summary=ev.get('summary'),nested=nested,policy=a.policy)
+                                title=getattr(a,'title',None),project=a.project,summary=ev.get('summary'),nested=nested,policy=a.policy,effort=a.effort)
         sm_cli=ENGINE.parent.parent/'claude-config'/'scripts'/'session-model.py'
         want=' / '.join(x for x in (args.get('model'),('effort '+args['effort']) if args.get('effort') else '') if x)
         print(f'→ 受け手を desktop app の session として起こす (本人の左の一覧に出る)。 起こすのは依頼元の Claude の start_session'
@@ -910,7 +923,7 @@ def announce_launch(a, ev, audience):
         return None
     # A role names a window nobody has opened: print the command that opens it with model, effort and account
     # pinned (measured: the chip opens on the parent's model, and a pasted hand-off ran on whatever the window had).
-    argv,env,line,hpath=launch_plan(a.root,a.to_session,ev['event_id'],(a.reference or [None])[0],a.expect_model,a.session,project=a.project,policy=a.policy)
+    argv,env,line,hpath=launch_plan(a.root,a.to_session,ev['event_id'],(a.reference or [None])[0],a.expect_model,a.session,project=a.project,policy=a.policy,effort=a.effort)
     if audience=='owner':
         print(f'→ 受け手を起こす (model・effort・account を固定、 貼り付け不要。 依頼元の shell でそのまま):\n  {line}')
     else:
@@ -1070,6 +1083,7 @@ def main():
     ap.add_argument('--to',choices=['claude','codex','human','other'])
     ap.add_argument('--to-session'); ap.add_argument('--role',choices=['assignee','reviewer'])
     ap.add_argument('--expect-model',help='request/handover: refuse to post when the addressed session\'s actual model (its transcript) is known and does not match this tier (fable/opus) or model-id substring')
+    ap.add_argument('--effort',choices=EFFORTS,help=f'request to a role: the effort its worker starts on, in the launch record, the start_session arguments, the CLI line, the hand-off text and the title (default: env {LAUNCH_EFFORT_ENV}, else the requester\'s CLAUDE_EFFORT); request/handover to a live session: report when its known effort differs')
     ap.add_argument('--summary'); ap.add_argument('--acceptance')
     ap.add_argument('--deliverable',action='append',default=[]); ap.add_argument('--reference',action='append',default=[])
     ap.add_argument('--review-target',action='append',default=[],help='request: a file the receiver reviews blind; refused '
@@ -1107,6 +1121,7 @@ def main():
     if not a.session and a.command!='sessions': ap.error('--session requires the actual native session ID')
     if a.thread and a.thread.startswith('today:'): a.thread=f"{view.dt.date.today():%Y-%m-%d}-{a.thread[6:]}"  # local date, any shell
     if a.include_closed and a.command != 'inbox': ap.error('--include-closed is for inbox only')
+    if a.effort and a.command not in {'request','handover'}: ap.error('--effort is for request and handover only')
     if a.command == 'show' and not a.request: ap.error('show requires --request')
     if a.all_boards:
         if a.command not in {'inbox','show'}: ap.error('--all-boards is for inbox / show')
@@ -1312,7 +1327,7 @@ def main():
     if a.command in {'request','handover'}:
         # The addressed session's model can only be matched to the work before sending (switching later costs
         # the context and cache); a title tag is a recommendation, so read the transcript instead.
-        note=target_model_note(a.to_session,a.expect_model,a.to)
+        note=target_model_note(a.to_session,a.expect_model,a.to,a.effort)
         if note: print(note)
     claim_model_check(a)   # a worker on another model than its request was launched for does not take the work (measured: the app started one on the requester's model)
     if a.preview:
