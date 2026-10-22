@@ -164,8 +164,10 @@ which takes the machine's Codex default (off): the board engine's worker subcomm
 `claim`, `note`, `blocker`, `finding`, `submit`, `release`, `handover`, `touch`, …; not `request`, `launch`, `accept`,
 `revise`) run outside the sandbox by a Codex rule that `codex-app-launch.py --allow-board-engine` installs when it is
 missing (layer-1 `claude-config/scripts/setup-codex-board-rule.py`; the owner chose it over turning network on for every
-Codex thread, 2026-10-21). The rule matches a lone command, so the hand-off asks for one board command at a time
-(measured: a command chained after another with `;` stayed sandboxed). Model = `--expect-model`, else
+Codex thread, 2026-10-21). The rule matches a plain lone command only, so the hand-off asks for one board command at a
+time with every value typed out (measured: a command chained after another with `;` stayed sandboxed, and so did a
+`claim` whose `--session-name` used `${CODEX_THREAD_ID:0:8}`; the same worker's plain `inbox --sync`, `claim` and
+`note` reached the board). Model = `--expect-model`, else
 `AGENT_BOARD_CODEX_MODEL`, else Codex's own `config.toml`; effort = `--effort`, else `AGENT_BOARD_CODEX_EFFORT`, else the
 same file; working directory = `--launch-cwd`, else the workspace; the thread's name in the app = `--title`, else the
 summary's first clause, then the model. The thread runs unattended (approval `never`), asks the requester's questions as

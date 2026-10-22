@@ -1062,8 +1062,10 @@ def codex_handoff_text(root, role, request_id, spec, f, project=None, policy=Non
     model and effort from Codex's local record (the launcher pins them; a text pasted into a window opened by hand runs
     on whatever that window has). The Codex app runs the thread, so the owner may watch it and talk to it there, but the
     requester reads the board: questions for the requester go to the board as a blocker. Board commands run one at a
-    time: the app's sandbox has no network, and the Codex rule that runs the board's commands outside it matches a lone
-    command only (measured: a push chained after another command with `;` stayed sandboxed)."""
+    time with their values typed out: the app's sandbox has no network, and the Codex rule that runs the board's commands
+    outside it matches a plain lone command only (measured: a push chained after another command with `;` stayed
+    sandboxed, and so did a claim whose --session-name used `${CODEX_THREAD_ID:0:8}`; the same worker's plain `inbox
+    --sync` and `note` reached the board)."""
     eng=Path(__file__).resolve(); launcher=codex_launcher(); m,e=f.get('model'),f.get('effort')
     scope=(f" --project {project}" if project else '')+(f" --policy {policy}" if policy else '')
     run=(f" This thread must run on {m}"+(f" at {e} effort" if e else '')+'.') if m else ''
@@ -1072,13 +1074,15 @@ def codex_handoff_text(root, role, request_id, spec, f, project=None, policy=Non
     return (f"You are the board worker for role `{role}`, request `{request_id}`, spec `{spec or '(the request itself)'}`; execute it yourself.{run}\n"
             +hold+
             f"1. `python3 {eng} inbox --root {root} --agent codex --session {role} --sync`; if the request is not visible, do not read the spec — say so in one line and stop.\n"
-            f"2. `python3 {eng} claim --root {root} --agent codex --session {role} --request {request_id}{scope} --session-name '<first 8 chars of $CODEX_THREAD_ID> ({m or '<model>'})' --summary '<one line>'`; if refused with *another live claim exists*, stop and say so in one line.\n"
+            f"2. `python3 {eng} claim --root {root} --agent codex --session {role} --request {request_id}{scope} --session-name '<the first 8 characters of your thread id, typed out> ({m or '<model>'})' --summary '<one line>'`"
+            " (read the thread id first with a separate `echo $CODEX_THREAD_ID`); if refused with *another live claim exists*, stop and say so in one line.\n"
             f"3. Do the work the spec asks for; when done, `submit` with the same --root, --agent, --session, --request{scope}, plus `--reply-to <your claim's event id>` and `--deliverable <path>` for each deliverable."
             " Write every `submit` and `note` summary in plain words: do not use labels made up during the work (option letters, item"
             " or finding numbers); if you keep one, say what it refers to right after it. Ask a question for the requester as a"
             " `blocker` on the board: the requester reads the board, not this window (the owner may also watch this window and"
-            " talk to you here). Run each board command on its own, not chained with `;`, `&&` or a pipe: a Codex rule runs"
-            " exactly those commands outside the sandbox, which has no network.\n"
+            " talk to you here). Run each board command on its own, with every value typed out: not chained with `;`, `&&` or a"
+            " pipe, and with no `$` expansion (`$VAR`, `${…}`, `$(…)`) in it. A Codex rule runs exactly such plain commands"
+            " outside the sandbox, which has no network; any other form stays inside and cannot reach the board.\n"
             + safety_stop_handoff_text())
 
 

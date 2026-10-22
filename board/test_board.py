@@ -1583,6 +1583,8 @@ class CodexLaunchCLI(Transport):
             self.assertIn('--agent codex --session role-qproj-table',hand); self.assertIn('check-self --model gpt-fixture --effort xhigh',hand)
             self.assertIn('blocker',hand)   # questions for the requester go to the board: the requester reads the board, not the app
             self.assertIn('Run each board command on its own',hand)
+            self.assertIn('no `$` expansion',hand)   # measured: a claim with ${CODEX_THREAD_ID:0:8} stayed in the sandbox
+            self.assertNotIn('chars of $CODEX_THREAD_ID>',hand)
             # --title names the thread (measured: it was ignored for a Codex role) and travels in details for `launch`
             outt=cli('request',*base,'--thread','2026-01-01-codex-t','--to','codex','--to-session','role-qproj-titled',
                      '--title','表の崩れの修正 (第 2 版)').stdout
