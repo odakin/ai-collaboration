@@ -6,6 +6,14 @@
 
 起動時の案内を整え、依頼元の検収に進む段階。次の起動時は生成した hand-off を [契約](board/CONTRACT.md#worker-handoff-text) と照合する。停止後の手順の正本は [共通規約](../claude-config/conventions/tool-call-robustness.md#api-safety-filter-on-main-response)。
 
+## 現在地：worker の effort の下限
+
+掲示板の `board.json` に `launch_effort_floor` を置くと、 Claude の役割 id 宛ての request と `launch --request` が
+下限より低い effort を 1 行で断り、 本人の発言そのまま (`--effort-quote`) があれば通して起動の記録に残す
+([契約](board/CONTRACT.md#launch-effort-floor))。 field の無い掲示板と Codex の役割は今までどおり。
+次 = 古い engine は未知の field の `board.json` を読めない = field を置いた掲示板を読む別の機械で、 次の pull の後に
+`board.py inbox` が通るかを見る。
+
 ## 現在地：役割 id 宛ての依頼と vendor
 
 役割 id (`role-…` / `resident-…`) 宛ての依頼は、 依頼に書いた agent に依らず、 その役割で開いた Claude・Codex

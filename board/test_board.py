@@ -1802,6 +1802,90 @@ class LaunchClaudeRole(EffortFlag):
         self.assertIn('--effort is for request, handover and launch only',p.stderr)
 
 
+class EffortFloor(EffortFlag):
+    """A board whose board.json sets launch_effort_floor refuses a Claude role's worker below it on `request` and
+    `launch --request`, in one line naming where the rule is, before anything is posted or written; at or above the
+    floor, and with no --effort when the default is at the floor, nothing changes. The owner's own words naming the
+    lower effort (--effort-quote) let it through and go to the launch record. A board without the field, and a Codex
+    role, are not checked."""
+    test_order = test_three_surfaces = test_refusals_and_live_note = None   # EffortFlag's tests run once, in EffortFlag
+    RULE='owner-notes/workers.md#effort-floor'
+    QUOTE='この確認は high の worker でよい'
+
+    def setUp(self):
+        super().setUp()
+        cfg=json.loads((self.root/'board.json').read_text()); cfg['launch_effort_floor']={'effort':'xhigh','rule':self.RULE}
+        (self.root/'board.json').write_text(json.dumps(cfg))
+        board.run(self.root,'commit','-q','-am','Set an effort floor'); board.run(self.root,'push','-q','origin','main')
+
+    def requests(self):
+        with board.snapshot(self.root,fresh=True) as snap: return len([e for e in board.read(snap) if e['kind']=='request'])
+
+    def refused(self, p, effort):
+        self.assertEqual(p.returncode,1,p.stdout+p.stderr); err=p.stderr.strip()
+        self.assertEqual(len(err.splitlines()),1,err)
+        for s in (f'effort {effort} ','下限 xhigh ',self.RULE,'--effort-quote'): self.assertIn(s,err)
+
+    def test_request_below_the_floor_is_refused(self):
+        import os
+        b=self.post_args()
+        req=lambda t,*x: self.cli('request',*b,'--thread',t,'--to','claude','--to-session','role-eproj-'+t[-1],*x,ok=False)
+        for t,surface,effort in (('2026-01-01-fl-a','desktop','low'),('2026-01-01-fl-b','background','medium'),
+                                 ('2026-01-01-fl-c','agent','high'),('2026-01-01-fl-d','desktop','high')):
+            self.refused(req(t,'--surface',surface,'--effort',effort),effort)
+        self.refused(req('2026-01-01-fl-e','--surface','desktop','--effort','high','--preview'),'high')
+        self.refused(req('2026-01-01-fl-f','--surface','desktop','--effort','high','--effort-quote','  '),'high')   # blank words are no words
+        os.environ['CLAUDE_EFFORT']='high'   # no --effort and no owner default: the requester's own effort would be the worker's
+        self.refused(req('2026-01-01-fl-g','--surface','desktop'),'high')
+        self.assertEqual(self.requests(),0); self.assertEqual(list(board.outbox_dir(self.root).glob('*.launch.json')),[])
+
+    def test_at_or_above_the_floor_is_unchanged(self):
+        import os
+        os.environ['AGENT_BOARD_LAUNCH_EFFORT']='xhigh'
+        b=self.post_args()
+        for t,x in (('2026-01-01-fu-a',('--effort','xhigh')),('2026-01-01-fu-b',('--effort','max','--reason','新しい極限を worker が導出する')),
+                    ('2026-01-01-fu-c',())):
+            out=self.cli('request',*b,'--thread',t,'--to','claude','--to-session','role-eproj-'+t[-1],'--surface','desktop',*x).stdout
+            self.assertNotIn('下限',out); self.assertEqual(board.launch_record(self.root,self.rid(out))['effort'],(x[1] if x else 'xhigh'))
+        # a Codex role is not checked (its effort scale and default come from Codex's own config)
+        self.cli('request',*b,'--thread','2026-01-01-fu-d','--to','codex','--to-session','role-eproj-cx','--effort','low','--launch-host','elsewhere')
+        self.assertEqual(self.requests(),4)
+
+    def test_owner_words_let_a_lower_effort_through(self):
+        b=self.post_args()
+        out=self.cli('request',*b,'--thread','2026-01-01-fq-a','--to','claude','--to-session','role-eproj-a','--surface','desktop',
+                     '--effort','high','--effort-quote',self.QUOTE).stdout
+        rec=board.launch_record(self.root,self.rid(out))
+        self.assertEqual((rec['effort'],rec['effort_quote']),('high',self.QUOTE)); self.assertIn(f'本人の名指し「{self.QUOTE}」',out)
+        self.assertIn('--effort high --effort-quote',out)   # the Remote Control fallback line carries the words too
+        self.assertIn('at high effort',(board.outbox_dir(self.root)/(self.rid(out)+'.handoff.txt')).read_text())
+        p=self.cli('claim','--root',str(self.root),'--agent','claude','--session','role-x','--effort-quote',self.QUOTE,ok=False)
+        self.assertIn('--effort-quote is for request and launch only',p.stderr)
+
+    def test_launch_existing_request(self):
+        rid=LaunchClaudeRole.incoming(self,'2026-01-01-fl-l')   # posted with no --effort and no default: nothing to refuse
+        base=('launch','--root',str(self.root),'--agent','claude','--session','claude-win-9','--request',rid,'--expect-model','claude-opus-5-5')
+        for surface in ('desktop','background'):
+            self.refused(self.cli(*base,'--surface',surface,'--effort','medium',ok=False),'medium')
+        self.assertIsNone(board.launch_record(self.root,rid))
+        out=self.cli(*base,'--surface','background','--effort','medium','--effort-quote',self.QUOTE).stdout
+        self.assertIn('--effort medium',out); self.assertEqual(board.launch_record(self.root,rid)['effort_quote'],self.QUOTE)
+        self.cli(*base,'--surface','desktop','--effort','xhigh'); self.assertNotIn('effort_quote',board.launch_record(self.root,rid))
+
+    def test_config(self):
+        import board_config as bc
+        ok={'board_format':1,'audience':'owner','encryption':'none'}
+        bc.validate({**ok,'launch_effort_floor':{'effort':'xhigh','rule':'x.md#y'}}); bc.validate({**ok,'launch_effort_floor':{'effort':'high'}})
+        for bad in ('xhigh',{'effort':'huge'},{'effort':'xhigh','by':'x'},{'effort':'xhigh','rule':3}):
+            with self.assertRaisesRegex(ValueError,'launch_effort_floor'): bc.validate({**ok,'launch_effort_floor':bad})
+        # a board without the field (the engine's default, a collaborators board) refuses nothing
+        board.check_effort_floor(ok,'low',None)
+        board.check_effort_floor({'board_format':1,'audience':'collaborators','encryption':'none','sources':['p']},'low',None)
+        board.check_effort_floor({**ok,'launch_effort_floor':{'effort':'xhigh'}},'',None)   # no known effort: nothing to compare
+        with self.assertRaisesRegex(ValueError,'board.json の launch_effort_floor'):   # no rule written: the field is named
+            board.check_effort_floor({**ok,'launch_effort_floor':{'effort':'xhigh'}},'high',None)
+
+
 class ClaimModelCheck(unittest.TestCase):
     """A claim that does not match the request's launch record is refused: another model tier (the transcript decides,
     not the label in --session-name; --model-ok passes), and a subagent (Agent tool) claiming a request launched for a

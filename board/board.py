@@ -31,7 +31,7 @@ DEFAULT_REVIEWER_ENV='AGENT_BOARD_DEFAULT_REVIEWER'   # request: reviewer sessio
 LAUNCH_CONFIG_DIR_ENV='AGENT_BOARD_LAUNCH_CONFIG_DIR'  # request to a role: the CLI config dir the worker runs under (a logged-in account); owner wiring
 LAUNCH_MODEL_ENV='AGENT_BOARD_LAUNCH_MODEL'            # request to a role: default --model (else --expect-model, else the requester's own model)
 LAUNCH_EFFORT_ENV='AGENT_BOARD_LAUNCH_EFFORT'          # request to a role: the effort when --effort is not given (else the requester's CLAUDE_EFFORT)
-EFFORTS=('low','medium','high','xhigh','max')
+EFFORTS=bc.EFFORTS                                      # lowest first (a board's launch_effort_floor is one of them)
 LAUNCH_CLI_ENV='AGENT_BOARD_LAUNCH_CLI'                # the CLI executable (default `claude`; tests point it at a stub)
 LAUNCH_DEFAULT_ENV='AGENT_BOARD_LAUNCH_DEFAULT'        # `1` = on an owner board, a request to a role starts the worker at once unless --no-launch (owner wiring)
 LAUNCH_REMOTE_CONTROL_ENV='AGENT_BOARD_LAUNCH_REMOTE_CONTROL'  # `1` = the worker keeps the account's remoteControlAtStartup (default: off for that session only); `follow` = the same, set by the fallback line for a requester the owner drives through Remote Control (the worker follows the requester's exposure)
@@ -800,8 +800,27 @@ def launch_settings(expect, session, effort=None):
     --effort a worker asked for at another effort than its requester's got the requester's in the record, the
     start_session arguments and the hand-off text, and the launch check then refused the corrected arguments (measured)."""
     model=(expect or os.environ.get(LAUNCH_MODEL_ENV) or own_model(session) or '').strip()
-    effort=(effort or os.environ.get(LAUNCH_EFFORT_ENV) or os.environ.get('CLAUDE_EFFORT') or '').strip()
-    return model,effort
+    return model,launch_effort(effort)
+
+
+def launch_effort(effort=None):
+    """The effort a role's worker is started on (launch_settings' second half, without reading any transcript)."""
+    return (effort or os.environ.get(LAUNCH_EFFORT_ENV) or os.environ.get('CLAUDE_EFFORT') or '').strip()
+
+
+def check_effort_floor(cfg, effort, quote):
+    """A Claude role's worker asked for below the board's `launch_effort_floor` (board.json; absent = no floor) is
+    refused in one line naming where the rule is written, before anything is written or posted. The board reads the
+    floor from its own config, so every entry path meets it (measured: requesters also call the engine directly,
+    skipping a forwarder's wiring). The owner's own words naming that effort, verbatim (--effort-quote), let it
+    through; they go to the launch record. Without a known effort nothing is refused."""
+    floor=(cfg.get('launch_effort_floor') or {}).get('effort'); e=(effort or '').strip().lower()
+    if floor not in EFFORTS or e not in EFFORTS or EFFORTS.index(e)>=EFFORTS.index(floor): return
+    rule=((cfg.get('launch_effort_floor') or {}).get('rule') or '').strip() or f'{bc.CONFIG} の launch_effort_floor'
+    if not ' '.join((quote or '').split()):
+        raise ValueError(f"worker の effort {e} はこの掲示板の下限 {floor} より低い = 起こさない (規則 = {rule})。"
+                         f" --effort {floor} 以上で出し直す。 本人がこの effort を名指したときだけ --effort-quote '<本人の発言そのまま>' を付けて通す")
+    print(f"ℹ️ 下限 {floor} より低い effort {e} で起こす = 本人の名指し「{' '.join(quote.split())}」 (起動の記録に残す)")
 
 
 def write_outbox(root, name, text):
@@ -832,7 +851,7 @@ def model_label(model, effort):
 STAY_NESTED=('。 worker は依頼元の下に子のまま並ぶ (既定 = 一覧の上の段に独立させない)。 子の turn の終わりの知らせは依頼元に届くが、 依頼元が動くのは掲示板の提出と blocker だけで、 子が本人に出す問いは取り次がない (本人は worker の窓で答える)。 独立させるなら --detach')
 
 
-def remote_control_fallback(root, request_id, session, model, effort, worktree=False):
+def remote_control_fallback(root, request_id, session, model, effort, worktree=False, effort_quote=None):
     """The line a requester runs when start_session is refused because the owner drives it through Remote Control (the
     app starts sessions only for instructions typed in the desktop app = measured). The worker then starts as a
     background CLI session with Remote Control on, under the same config dir, so it is listed where the owner reads (the
@@ -844,13 +863,13 @@ def remote_control_fallback(root, request_id, session, model, effort, worktree=F
     line=(env+f'python3 {shlex.quote(str(ENGINE/"board.py"))} launch --root {shlex.quote(str(root))} --agent claude'
           +(f' --session {shlex.quote(session)}' if session else '')+f' --request {request_id} --surface background'
           +(f' --expect-model {shlex.quote(model)}' if model else '')+(f' --effort {shlex.quote(effort)}' if effort else '')
-          +(' --worktree' if worktree else '')+' --launch')
+          +(f' --effort-quote {shlex.quote(effort_quote)}' if effort_quote else '')+(' --worktree' if worktree else '')+' --launch')
     return ('  start_session が「desktop アプリで打った指示からしか起こせない」 と断られたら (本人が Remote Control から操作中)、'
             ' 代わりにこの 1 行 = Remote Control つきの CLI の背景 session (本人のスマホの一覧に出る。 依頼元の子にはならない。'
             ' 依頼元と同じ account に載る = 依頼元が Remote Control に載っているときだけ使う):\n  '+line)
 
 
-def desktop_plan(root, role, request_id, spec, expect, session, title=None, project=None, summary=None, detach=False, policy=None, effort=None, reason=None, worktree=False, source=None):
+def desktop_plan(root, role, request_id, spec, expect, session, title=None, project=None, summary=None, detach=False, policy=None, effort=None, reason=None, worktree=False, source=None, effort_quote=None):
     """The desktop app's start_session arguments for a role's worker (the worker is listed in the app, unlike a
     background CLI session). The board cannot call the app: the requesting Claude session calls start_session with
     these arguments. Returns (arguments, file). Title = the task first and the model last (measured: a title that
@@ -877,7 +896,7 @@ def desktop_plan(root, role, request_id, spec, expect, session, title=None, proj
     path=write_outbox(root,request_id+'.start_session.json',json.dumps(args,ensure_ascii=False,indent=1))
     write_launch_record(root,request_id,role=role,spec=spec,model=model,effort=effort,surface='desktop',title=args['title'],
                         name=name,requester=session,detach=bool(detach),**({'reason':reason} if reason else {}),
-                        **({'worktree':True} if worktree else {}))
+                        **({'effort_quote':effort_quote} if effort_quote else {}),**({'worktree':True} if worktree else {}))
     return args,path
 
 
@@ -932,7 +951,7 @@ def launch_cli_settings(rc_off, worktree=False):
     return json.dumps(s) if s else ''
 
 
-def launch_plan(root, role, request_id, spec, expect, session, project=None, policy=None, effort=None, reason=None, worktree=False, source=None):
+def launch_plan(root, role, request_id, spec, expect, session, project=None, policy=None, effort=None, reason=None, worktree=False, source=None, effort_quote=None):
     """The command that starts the addressed worker as a background CLI session with model, effort and config dir pinned.
 
     Returns (argv, env, shell line, hand-off file). Model = --expect-model, else the owner's default, else the
@@ -948,7 +967,8 @@ def launch_plan(root, role, request_id, spec, expect, session, project=None, pol
     text=handoff_text(root,role,request_id,spec,model,effort,project=project,policy=policy,reason=reason,worktree=worktree,source=source)
     path=write_outbox(root,request_id+'.handoff.txt',text)
     write_launch_record(root,request_id,role=role,spec=spec,model=model,effort=effort,surface='background',requester=session,
-                        **({'reason':reason} if reason else {}),**({'worktree':True} if worktree else {}))
+                        **({'reason':reason} if reason else {}),**({'effort_quote':effort_quote} if effort_quote else {}),
+                        **({'worktree':True} if worktree else {}))
     cli=os.environ.get(LAUNCH_CLI_ENV) or 'claude'
     rc_off=os.environ.get(LAUNCH_REMOTE_CONTROL_ENV,'').strip() not in ('1','follow')
     settings=launch_cli_settings(rc_off,worktree)
@@ -982,7 +1002,7 @@ def announce_launch(a, ev, audience):
         text=handoff_text(a.root,a.to_session,ev['event_id'],(a.reference or [None])[0],model,effort,project=a.project,policy=a.policy,reason=a.reason,source=a.source)
         hpath=write_outbox(a.root,ev['event_id']+'.handoff.txt',text)
         write_launch_record(a.root,ev['event_id'],role=a.to_session,model=model,effort=effort,surface='agent',requester=a.session,
-                            **({'reason':a.reason} if a.reason else {}))
+                            **({'reason':a.reason} if a.reason else {}),**({'effort_quote':a.effort_quote} if a.effort_quote else {}))
         print(f'→ 受け手は依頼元の Agent tool (subagent) で起こす = app の一覧に出ない (本人が見ない手元の仕事だけ)。'
               f' model {model or "?"} / effort {effort or "?"} を Agent の引数に、 prompt は hand-off 文 = {hpath}。'
               ' 本人が見る・話しかける worker なら --surface desktop で出し直す')
@@ -993,7 +1013,7 @@ def announce_launch(a, ev, audience):
         detach=bool(getattr(a,'detach',False))
         args,spath=desktop_plan(a.root,a.to_session,ev['event_id'],(a.reference or [None])[0],a.expect_model,a.session,
                                 title=getattr(a,'title',None),project=a.project,summary=ev.get('summary'),detach=detach,policy=a.policy,effort=a.effort,reason=a.reason,
-                                worktree=getattr(a,'worktree',False),source=a.source)
+                                worktree=getattr(a,'worktree',False),source=a.source,effort_quote=a.effort_quote)
         sm_cli=ENGINE.parent.parent/'claude-config'/'scripts'/'session-model.py'
         want=' / '.join(x for x in (args.get('model'),('effort '+args['effort']) if args.get('effort') else '') if x)
         print(f'→ 受け手を desktop app の session として起こす (本人の左の一覧に出る)。 起こすのは依頼元の Claude の start_session'
@@ -1003,13 +1023,13 @@ def announce_launch(a, ev, audience):
               ' の順で直し (worker は step 0 で止まって 1 行返す)、 記録が合ってから go を送る。 本人に「起きた」 と言うのはその後'
               +('。 記録が合ったら detach_session(<local_…>) = 一覧の上の段に独立させる (--detach の指定。 子の turn の終わりの知らせが'
                 ' 依頼元に来なくなる。 提出と blocker は掲示板の watch で届く)' if detach else STAY_NESTED))
-        print(remote_control_fallback(a.root,ev['event_id'],a.session,args.get('model'),args.get('effort'),getattr(a,'worktree',False)))
+        print(remote_control_fallback(a.root,ev['event_id'],a.session,args.get('model'),args.get('effort'),getattr(a,'worktree',False),a.effort_quote))
         if getattr(a,'launch',False): print('  (--launch は CLI の起動だけ = desktop の session は依頼元が start_session で起こす)')
         return None
     # A role names a window nobody has opened: print the command that opens it with model, effort and account
     # pinned (measured: the chip opens on the parent's model, and a pasted hand-off ran on whatever the window had).
     argv,env,line,hpath=launch_plan(a.root,a.to_session,ev['event_id'],(a.reference or [None])[0],a.expect_model,a.session,project=a.project,policy=a.policy,effort=a.effort,reason=a.reason,
-                                    worktree=getattr(a,'worktree',False),source=a.source)
+                                    worktree=getattr(a,'worktree',False),source=a.source,effort_quote=a.effort_quote)
     if audience=='owner':
         print(f'→ 受け手を起こす (model・effort・account を固定、 貼り付け不要。 依頼元の shell でそのまま):\n  {line}')
     else:
@@ -1276,10 +1296,11 @@ def launch_claude_role(a, req, events):
     with nothing posted. Without it the receiving side wrote its card by hand, and neither its model nor its effort was
     checked against anything (measured: a co-author's prose review went out as a top-tier, max-effort card). Model and
     effort = --expect-model / --effort, else the owner's defaults, else this session's. Refused once the work has a
-    receiver (a second window for the same request)."""
+    receiver (a second window for the same request), and below the board's effort floor (check_effort_floor)."""
     same=[e for e in events if (e['project']['key'],e['thread_id'])==(req['project']['key'],req['thread_id'])]
     st=reduce_workflow(same,view.now_utc()).get('status')
     if st not in ('requested','stale'): raise ValueError(f'この依頼は {st} = 受け手はもう居る (か終わった)。 起こさない')
+    check_effort_floor(bc.load(a.root),launch_effort(a.effort),a.effort_quote)
     role=req['assignee']['session_id']
     surface=(a.surface or os.environ.get(LAUNCH_SURFACE_ENV)
              or ('desktop' if os.environ.get('CLAUDE_CODE_ENTRYPOINT')=='claude-desktop' else 'background')).strip()
@@ -1290,7 +1311,8 @@ def launch_claude_role(a, req, events):
     poster=(req.get('actor') or {}).get('session_id') or '?'
     if surface=='desktop':
         args,spath=desktop_plan(a.root,role,a.request,spec,a.expect_model,a.session,title=a.title,project=project,
-                                summary=req.get('summary'),detach=a.detach,policy=policy,effort=a.effort,reason=a.reason,worktree=a.worktree,source=getattr(a,'source',None))
+                                summary=req.get('summary'),detach=a.detach,policy=policy,effort=a.effort,reason=a.reason,worktree=a.worktree,source=getattr(a,'source',None),
+                                effort_quote=a.effort_quote)
         args['background']=(f'Board request {a.request} for role {role}, posted by {poster} and opened here by session'
                             f' {(a.session or "")[:8]}. The request and its spec are the task; report through the board (claim,'
                             ' a note at each milestone, submit). The poster reviews the submission on the board.')
@@ -1302,7 +1324,7 @@ def launch_claude_role(a, req, events):
               +('。 合ったら detach_session (--detach の指定)' if a.detach else STAY_NESTED))
         return
     argv,env,line,hpath=launch_plan(a.root,role,a.request,spec,a.expect_model,a.session,project=project,policy=policy,
-                                    effort=a.effort,reason=a.reason,worktree=a.worktree,source=getattr(a,'source',None))
+                                    effort=a.effort,reason=a.reason,worktree=a.worktree,source=getattr(a,'source',None),effort_quote=a.effort_quote)
     print(f'→ 既にある依頼 {a.request} の worker を起こす 1 行 (掲示板には何も書いていない):\n  {line}')
     if a.launch: print('→ 起動した: '+launch(argv,env,cwd=bc.workspace(a.root)).replace('\n','\n  '))
 
@@ -1460,6 +1482,9 @@ def main():
     ap.add_argument('--reason',help='request to a role / launch --request for a Claude role: why its worker needs the top tier or max'
                     ' effort (what it must derive or judge); kept in the launch record and the hand-off line. The desktop launch'
                     ' check asks for it on machines that turn the premium gate on (claude-config multi-session-coordination.md#premium-launch-reason)')
+    ap.add_argument('--effort-quote',help='request to a role / launch --request for a Claude role: the board owner\'s own words naming'
+                    ' an effort below the board\'s launch_effort_floor (board.json), verbatim; without them such an effort is refused.'
+                    ' Kept in the launch record')
     ap.add_argument('--summary'); ap.add_argument('--acceptance')
     ap.add_argument('--deliverable',action='append',default=[]); ap.add_argument('--reference',action='append',default=[])
     ap.add_argument('--review-target',action='append',default=[],help='request: a file the receiver reviews blind; refused '
@@ -1507,6 +1532,7 @@ def main():
     if a.effort and a.command not in {'request','handover','launch'}: ap.error('--effort is for request, handover and launch only')
     if a.detach and a.nested: ap.error('--detach and --nested contradict (nested is the default)')
     if a.reason and a.command not in {'request','launch'}: ap.error('--reason is for request and launch only')
+    if a.effort_quote and a.command not in {'request','launch'}: ap.error('--effort-quote is for request and launch only')
     if a.command == 'show' and not a.request: ap.error('show requires --request')
     if a.all_boards:
         if a.command not in {'inbox','show'}: ap.error('--all-boards is for inbox / show')
@@ -1651,6 +1677,8 @@ def main():
         inbox_show(a,a.root); return
     # ---- posting
     cfg=bc.load(a.root)
+    if a.command=='request' and a.to=='claude' and (a.to_session or '').startswith('role-'):
+        check_effort_floor(cfg,launch_effort(a.effort),a.effort_quote)   # before the board is fetched or anything is written
     if cfg['audience']=='collaborators':
         # A board for one project's collaborators: its project and checkout are the defaults, and the only choice.
         if not a.policy: a.policy='ordinary'

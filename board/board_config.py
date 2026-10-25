@@ -8,7 +8,8 @@ board.json (format 1):
 
     {"board_format": 1, "audience": "owner" | "collaborators", "encryption": "git-crypt" | "none",
      "branch": "main", "sources": ["<project key>", ...], "readable": ["<checkout>", ...], "name": "...",
-     "labels": {"codex": "..."}, "description": "..."}
+     "labels": {"codex": "..."}, "description": "...",
+     "launch_effort_floor": {"effort": "low" | "medium" | "high" | "xhigh" | "max", "rule": "<where the rule is written>"}}
 
 - `audience: owner` — only the owner reads it; any source may post (still subject to source classification).
 - `audience: collaborators` — the collaborators of the listed `sources` read it. Only those projects may post,
@@ -17,6 +18,9 @@ board.json (format 1):
   posting from them or touching their files does not.
 - `encryption: git-crypt` — every event blob must be ciphertext before push; `none` — the repository's private
   visibility is the only boundary.
+- `launch_effort_floor` (optional) — the lowest effort a Claude role's worker is started on from this board:
+  `request` and `launch --request` refuse a lower one in one line naming `rule`, unless `--effort-quote` carries the
+  owner's own words naming that effort. Absent = no floor (the engine's default).
 """
 from __future__ import annotations
 
@@ -32,7 +36,8 @@ CONFIG = 'board.json'
 GITCRYPT_MAGIC = b'\x00GITCRYPT'
 AUDIENCES = {'owner', 'collaborators'}
 ENCRYPTIONS = {'git-crypt', 'none'}
-FIELDS = {'board_format', 'name', 'audience', 'encryption', 'branch', 'sources', 'readable', 'labels', 'description'}
+FIELDS = {'board_format', 'name', 'audience', 'encryption', 'branch', 'sources', 'readable', 'labels', 'description', 'launch_effort_floor'}
+EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')   # a worker's reasoning effort, lowest first
 KEY_RE = re.compile(r'[a-z0-9][a-z0-9-]{1,63}')
 
 
@@ -99,6 +104,10 @@ def validate(cfg: dict) -> dict:
         problems.append('readable is for collaborators boards')
     if not isinstance(cfg.get('branch', 'main'), str): problems.append('branch must be a string')
     if not isinstance(cfg.get('labels', {}), dict): problems.append('labels must be an object')
+    floor = cfg.get('launch_effort_floor')
+    if floor is not None and not (isinstance(floor, dict) and set(floor) <= {'effort', 'rule'} and floor.get('effort') in EFFORTS
+                                  and isinstance(floor.get('rule', ''), str)):
+        problems.append(f'launch_effort_floor is {{"effort": one of {list(EFFORTS)}, "rule": "<where the rule is written>"}}')
     if problems:
         raise ValueError(f'{CONFIG}: ' + '; '.join(problems))
     return {'branch': 'main', 'labels': {}, **cfg}

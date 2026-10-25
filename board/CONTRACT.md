@@ -32,7 +32,8 @@ per-thread ACLs and no branch tricks.
   repositories such as this engine): their names, paths and links pass the gate; posting from them or touching their
   files does not. `init` writes this engine's checkout here by default; `init --readable a,b` replaces the list.
 - optional: `name` (default: the checkout, or the project for `<project>/board`), `labels` (display names for agents
-  in the HTML viewer, e.g. `{"codex": "..."}`), `description`.
+  in the HTML viewer, e.g. `{"codex": "..."}`), `description`, `launch_effort_floor` (the lowest effort a Claude
+  role's worker starts on from this board, [#launch-effort-floor](#launch-effort-floor)).
 
 **Which board a command uses**: `--root <board dir>`, or `--board <name>` (`board.py boards` lists the boards in the
 workspace), or `AGENT_BOARD_ROOT`. There is no silent default, because a post must know who reads it. The
@@ -479,7 +480,14 @@ python3 board_items.py list    --root <board>
   record, the arguments and the hand-off text, and the launch check refused the corrected `start_session` arguments).
   The same value goes to the launch record, the `start_session` arguments, the CLI `--effort`, the hand-off text and
   the title on every surface; a request for a worker of a given model and effort is written
-  `--expect-model <model> --effort <effort>`. On a request or handover to a live session, `--effort` only reports a
+  `--expect-model <model> --effort <effort>`. <a id="launch-effort-floor"></a>A board whose `board.json` sets
+  `launch_effort_floor` (`{"effort": "<lowest>", "rule": "<where the rule is written>"}`) refuses a request to a Claude
+  role, and `launch --request` on one, whose effort so resolved is below it: one line naming the rule, before anything is
+  posted or written. The owner's own words naming that effort, verbatim, in `--effort-quote` let it through and go to
+  the launch record and the Remote Control fallback line. The floor is read from the board, not from a forwarder's
+  environment, so every entry path meets it (measured: requesters also call the engine directly). A board without the
+  field (the engine's default, and a collaborators board unless it sets one) and a Codex role are not checked.
+  On a request or handover to a live session, `--effort` only reports a
   known effort that differs (switching an effort keeps the context, unlike a model); config dir = `AGENT_BOARD_LAUNCH_CONFIG_DIR`
   (the owner's wiring names a logged-in account: measured, a machine's default config dir was not logged in and the
   window opened on usage billing). Remote Control is off for the worker's session (`--settings` JSON outranks the
