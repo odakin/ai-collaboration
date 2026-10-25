@@ -400,6 +400,10 @@ python3 board.py untouch --root <board> --agent claude --policy ordinary --proje
 
 - `touch` / `untouch` post one `note` whose `touches` restates the session's whole set in that thread (`(none)` =
   holds nothing). `untouch` without `--path` releases everything and prints the next holder (message it if alive).
+- ⚠️ `today:<slug>` expands to the date of each call, so a session that declares before midnight and releases after
+  it sends `untouch` to the next day's thread: the release lands on a thread where it holds nothing, and the
+  declaration keeps holding until `--hours` runs out (measured). Release with the dated thread id that `touch`
+  printed, and check with `touching --thread <that id>` that the session's line is gone.
 - Paths are relative to the workspace (absolute and `~` paths also work), symlinks resolved, so one file has one
   name. A directory covers its files. The `--path` verdict reads the whole board. A declaration older than `--hours`
   (default 12) stops holding.
