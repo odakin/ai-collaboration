@@ -24,8 +24,8 @@
   inspire-bibliography.py whois "存在しないかもしれない氏名" --control "実在が確実な氏名"
 
   # 論文を引く論文の和集合 (erratum を出す論文が複数あるときの下流 sweep の入力)
-  inspire-bibliography.py citing 2307.05932 2307.12230        # arXiv id か INSPIRE の recid
-  inspire-bibliography.py citing 2676350 --json citing.json
+  inspire-bibliography.py citing 1207.7214 1207.7235          # arXiv id か INSPIRE の recid
+  inspire-bibliography.py citing <recid> --json citing.json
   # 出力 = 1 本ずつ「どの入力を引くか」、 種類 (article / conference paper / thesis)、 DOI、
   #   INSPIRE が保管する file (出版社の OA PDF のことがある = 出版社のサイトが curl に HTML を返すときの入手先)。
   # 末尾の数 = 入力ごとの件数 / 和集合 / 2 つ以上を引く本 (重複) / 入力どうしの相互引用 / 下流 (和集合 − 相互引用)。

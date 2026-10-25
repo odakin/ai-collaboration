@@ -3,8 +3,8 @@
 
 使い方
 ------
-  pdf-citation-contexts.py paper.pdf --ref 'PLB=2307\\.12230|138218' --ref 'PRD=2307\\.05932|076001'
-  pdf-citation-contexts.py paper.pdf --ref '2307\\.12230' --keywords 'σred|σsum|M_?ψ' --context 400
+  pdf-citation-contexts.py paper.pdf --ref 'ATLAS=1207\\.7214' --ref 'CMS=1207\\.7235'
+  pdf-citation-contexts.py paper.pdf --ref '1207\\.7214' --keywords 'signal strength|μ =' --context 400
   pdf-citation-contexts.py paper.pdf --ref ... --json out.json
 
   --ref NAME=REGEX  文献表の 1 項目を特定する正規表現 (arXiv id・DOI・誌名巻号・題の一部)。 NAME= は省略可、 何回でも
@@ -154,11 +154,11 @@ def selftest() -> int:
         "References",
         "[3] A. Author, First paper, J. One 1 (2020) 1.",
         "[4] B. Writer, A second",
-        "paper, Phys. Lett. B 846 (2023) 138218 [2307.12230].",
+        "paper, Phys. Lett. B 716 (2012) 1 [1207.7214].",
         "[5] C. Other, Third, J. Two 2 (2021) 3.",
         "24. D. Style, Numbered with a dot, arXiv:2401.00001",
     ]
-    pat = re.compile(r"2307\.12230")
+    pat = re.compile(r"1207\.7214")
     labs = find_ref_labels(lines, pat)
     # foil for the bug this tool fixes: the match is on the 2nd line of entry [4]; the next entry is [5].
     # A window that also looks *after* the matched line picks 5.
@@ -169,7 +169,7 @@ def selftest() -> int:
         "Wave packets were studied before [1, 3-5]. See also Ref. [7] and [40].\nA later remark [4].",
         "\n".join(lines),
     ]
-    res = analyze(pages, [("X", r"2307\.12230")], context=40)
+    res = analyze(pages, [("X", r"1207\.7214")], context=40)
     cites = res["refs"]["X"]["citations"]["4"]
     check("citations of [4] (range, single, list entry)", [(c["page"], c["group"], c["ref_list"]) for c in cites],
           [(1, "[1, 3-5]", False), (1, "[4]", False), (2, "[4]", True)])
@@ -193,7 +193,7 @@ def selftest() -> int:
                     pg.insert_text((72, 72 + 14 * i), ln, fontsize=10)
             doc.save(pdf)
             doc.close()
-            res_pdf = analyze(read_pages(pdf), [("X", r"2307\.12230")], context=40)
+            res_pdf = analyze(read_pages(pdf), [("X", r"1207\.7214")], context=40)
             got = [(c["page"], c["ref_list"]) for c in res_pdf["refs"]["X"]["citations"].get("4", [])]
             check("PDF round trip", got, [(1, False), (1, False), (2, True)])
 
