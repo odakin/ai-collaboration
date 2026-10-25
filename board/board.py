@@ -421,7 +421,9 @@ def _post_fetch(root, event, rel, *, before_push=None, landed=None):
             fetched(root,sha); repo.notify(sha); repo.fast_forward(sha,cfg['audience'])
             if landed is not None: landed[:]=same+[event]
             return event['event_id']
-    raise ValueError('posting failed after three attempts; use retry with the saved --event-id')
+    raise ValueError(f"posting failed after three attempts; post it again with `retry --event-id {event['event_id']}` "
+                     'and the same --agent, --session and --policy, plus --project (or --source) as in this command '
+                     '(retry checks the source before it reads the saved event)')
 
 
 def _post_clone(root, event, rel, *, before_push=None, landed=None):
@@ -457,7 +459,9 @@ def _post_clone(root, event, rel, *, before_push=None, landed=None):
             # Reset only this disposable checkout, then revalidate the transition
             # against the winner. A concurrent claim cannot sneak through rebase.
             run(dest,'reset','--hard',f'origin/{branch}')
-        raise ValueError('posting failed after three attempts; use retry with the saved --event-id')
+        raise ValueError(f"posting failed after three attempts; post it again with `retry --event-id {event['event_id']}` "
+                     'and the same --agent, --session and --policy, plus --project (or --source) as in this command '
+                     '(retry checks the source before it reads the saved event)')
 
 
 def _session_model():
