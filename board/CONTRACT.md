@@ -33,7 +33,8 @@ per-thread ACLs and no branch tricks.
   files does not. `init` writes this engine's checkout here by default; `init --readable a,b` replaces the list.
 - optional: `name` (default: the checkout, or the project for `<project>/board`), `labels` (display names for agents
   in the HTML viewer, e.g. `{"codex": "..."}`), `description`, `launch_effort_floor` (the lowest effort a Claude
-  role's worker starts on from this board, [#launch-effort-floor](#launch-effort-floor)).
+  role's worker starts on from this board, [#launch-effort-floor](#launch-effort-floor)), `launch_model_allow` (the
+  model tiers a Claude role's worker starts on from this board, [#launch-model-allow](#launch-model-allow)).
 
 **Which board a command uses**: `--root <board dir>`, or `--board <name>` (`board.py boards` lists the boards in the
 workspace), or `AGENT_BOARD_ROOT`. There is no silent default, because a post must know who reads it. The
@@ -487,6 +488,14 @@ python3 board_items.py list    --root <board>
   the launch record and the Remote Control fallback line. The floor is read from the board, not from a forwarder's
   environment, so every entry path meets it (measured: requesters also call the engine directly). A board without the
   field (the engine's default, and a collaborators board unless it sets one) and a Codex role are not checked.
+  <a id="launch-model-allow"></a>A board whose `board.json` sets `launch_model_allow` (`{"tiers": ["<tier>", ...],
+  "rule": "<where the rule is written>"}`, tiers = `fable` / `opus` / `sonnet` / `haiku`, Mythos counting as `fable`)
+  refuses, at the same two entry points, a Claude role's worker whose model so resolved (`--expect-model`, else the
+  owner's default, else the requester's own model) is on a tier it does not list: one line naming the rule, before
+  anything is posted or written. The owner's own words naming that model, verbatim, in `--model-quote` let it through
+  and go to the launch record and the Remote Control fallback line. Use it for a period in which the owner wants every
+  worker on one tier (for example while a model comparison is being scored); a board without the field allows every
+  tier, a worker with no known model and a Codex role are not checked.
   On a request or handover to a live session, `--effort` only reports a
   known effort that differs (switching an effort keeps the context, unlike a model); config dir = `AGENT_BOARD_LAUNCH_CONFIG_DIR`
   (the owner's wiring names a logged-in account: measured, a machine's default config dir was not logged in and the

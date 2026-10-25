@@ -1886,6 +1886,89 @@ class EffortFloor(EffortFlag):
             board.check_effort_floor({**ok,'launch_effort_floor':{'effort':'xhigh'}},'high',None)
 
 
+class ModelAllow(EffortFlag):
+    """A board whose board.json sets launch_model_allow refuses a Claude role's worker on a tier it does not list, on
+    `request` (all three surfaces) and `launch --request`, in one line naming where the rule is, before anything is
+    posted or written; a listed tier changes nothing. The owner's own words naming that model (--model-quote) let it
+    through and go to the launch record (and the Remote Control fallback line). A board without the field, a worker
+    with no known model, and a Codex role are not checked."""
+    test_order = test_three_surfaces = test_refusals_and_live_note = None   # EffortFlag's tests run once, in EffortFlag
+    RULE='owner-notes/workers.md#opus-only'
+    QUOTE='この導出は Fable Max でやって'
+
+    def setUp(self):
+        super().setUp()
+        cfg=json.loads((self.root/'board.json').read_text()); cfg['launch_model_allow']={'tiers':['opus'],'rule':self.RULE}
+        (self.root/'board.json').write_text(json.dumps(cfg))
+        board.run(self.root,'commit','-q','-am','Allow Opus only'); board.run(self.root,'push','-q','origin','main')
+
+    def requests(self):
+        with board.snapshot(self.root,fresh=True) as snap: return len([e for e in board.read(snap) if e['kind']=='request'])
+
+    def post_fable(self):
+        return [x if x!='claude-opus-5-5' else 'claude-fable-5-1' for x in self.post_args()]
+
+    def refused(self, p, model):
+        self.assertEqual(p.returncode,1,p.stdout+p.stderr); err=p.stderr.strip()
+        self.assertEqual(len(err.splitlines()),1,err)
+        for s in (f'model {model} ','(opus)',self.RULE,'--model-quote'): self.assertIn(s,err)
+
+    def test_unlisted_tier_is_refused(self):
+        import os
+        b=self.post_fable()
+        req=lambda t,*x: self.cli('request',*b,'--thread',t,'--to','claude','--to-session','role-eproj-'+t[-1],*x,ok=False)
+        for t,surface in (('2026-01-01-ma-a','desktop'),('2026-01-01-ma-b','background'),('2026-01-01-ma-c','agent')):
+            self.refused(req(t,'--surface',surface,'--effort','xhigh','--reason','worker が導出する'),'claude-fable-5-1')
+        self.refused(req('2026-01-01-ma-d','--surface','desktop','--effort','xhigh','--model-quote','  '),'claude-fable-5-1')   # blank words are no words
+        # no --expect-model: the owner's default decides, and it is refused the same way
+        b2=[x for i,x in enumerate(self.post_args()) if x!='--expect-model' and self.post_args()[i-1]!='--expect-model']
+        os.environ['AGENT_BOARD_LAUNCH_MODEL']='claude-fable-5-1'
+        self.refused(self.cli('request',*b2,'--thread','2026-01-01-ma-e','--to','claude','--to-session','role-eproj-e','--surface','desktop',
+                              '--effort','xhigh',ok=False),'claude-fable-5-1')
+        self.assertEqual(self.requests(),0); self.assertEqual(list(board.outbox_dir(self.root).glob('*.launch.json')),[])
+
+    def test_listed_tier_is_unchanged(self):
+        b=self.post_args()
+        for t,surface in (('2026-01-01-mu-a','desktop'),('2026-01-01-mu-b','background')):
+            out=self.cli('request',*b,'--thread',t,'--to','claude','--to-session','role-eproj-'+t[-1],'--surface',surface,'--effort','xhigh').stdout
+            self.assertNotIn('掲示板が起こす model',out)
+            rec=board.launch_record(self.root,self.rid(out)); self.assertEqual(rec['model'],'claude-opus-5-5'); self.assertNotIn('model_quote',rec)
+        # a Codex role is not checked (its models are not Claude tiers)
+        self.cli('request',*b[:-2],'--thread','2026-01-01-mu-c','--to','codex','--to-session','role-eproj-cx','--expect-model','gpt-x','--launch-host','elsewhere')
+        self.assertEqual(self.requests(),3)
+
+    def test_owner_words_let_another_model_through(self):
+        b=self.post_fable()
+        out=self.cli('request',*b,'--thread','2026-01-01-mq-a','--to','claude','--to-session','role-eproj-a','--surface','desktop',
+                     '--effort','xhigh','--reason','worker が導出する','--model-quote',self.QUOTE).stdout
+        rec=board.launch_record(self.root,self.rid(out))
+        self.assertEqual((rec['model'],rec['model_quote']),('claude-fable-5-1',self.QUOTE)); self.assertIn(f'本人の名指し「{self.QUOTE}」',out)
+        self.assertIn('--model-quote',out)   # the Remote Control fallback line carries the words too
+        p=self.cli('claim','--root',str(self.root),'--agent','claude','--session','role-x','--model-quote',self.QUOTE,ok=False)
+        self.assertIn('--model-quote is for request and launch only',p.stderr)
+
+    def test_launch_existing_request(self):
+        rid=LaunchClaudeRole.incoming(self,'2026-01-01-ma-l')
+        base=('launch','--root',str(self.root),'--agent','claude','--session','claude-win-9','--request',rid,'--effort','xhigh','--reason','worker が導出する')
+        for surface in ('desktop','background'):
+            self.refused(self.cli(*base,'--surface',surface,'--expect-model','claude-fable-5-1',ok=False),'claude-fable-5-1')
+        self.assertIsNone(board.launch_record(self.root,rid))
+        self.cli(*base,'--surface','background','--expect-model','claude-fable-5-1','--model-quote',self.QUOTE)
+        self.assertEqual(board.launch_record(self.root,rid)['model_quote'],self.QUOTE)
+
+    def test_config(self):
+        import board_config as bc
+        ok={'board_format':1,'audience':'owner','encryption':'none'}
+        bc.validate({**ok,'launch_model_allow':{'tiers':['opus'],'rule':'x.md#y'}}); bc.validate({**ok,'launch_model_allow':{'tiers':['opus','sonnet']}})
+        for bad in ('opus',{'tiers':[]},{'tiers':'opus'},{'tiers':['opus'],'by':'x'},{'tiers':['opus'],'rule':3},{'tiers':['']}):
+            with self.assertRaisesRegex(ValueError,'launch_model_allow'): bc.validate({**ok,'launch_model_allow':bad})
+        board.check_model_allow(ok,'claude-fable-5-1',None)                                  # no field: every tier
+        board.check_model_allow({**ok,'launch_model_allow':{'tiers':['opus']}},'',None)       # no known model: nothing to compare
+        board.check_model_allow({**ok,'launch_model_allow':{'tiers':['opus']}},'claude-opus-5-5',None)
+        with self.assertRaisesRegex(ValueError,'board.json の launch_model_allow'):         # no rule written: the field is named
+            board.check_model_allow({**ok,'launch_model_allow':{'tiers':['opus']}},'claude-fable-5-1',None)
+
+
 class ClaimModelCheck(unittest.TestCase):
     """A claim that does not match the request's launch record is refused: another model tier (the transcript decides,
     not the label in --session-name; --model-ok passes), and a subagent (Agent tool) claiming a request launched for a
