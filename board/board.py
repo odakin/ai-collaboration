@@ -1398,6 +1398,17 @@ def reviewer_for(a, cfg):
     return r
 
 
+def thread_id_arg(thread, project):
+    """--thread as given -> the thread id. Output shows threads as <project>/<thread id>; pasting that form looked up a
+    thread that never exists and reported that nobody declares anything (measured). A thread id has no '/': this
+    command's own project prefix is dropped (with a note), any other '/' is refused."""
+    if '/' not in thread: return thread
+    if project and thread.startswith(project+'/') and '/' not in thread[len(project)+1:]:
+        print(f'ℹ️ --thread {thread}: the project prefix is dropped (thread id = {thread[len(project)+1:]})',file=sys.stderr)
+        return thread[len(project)+1:]
+    raise ValueError(f'--thread takes the thread id without the project (output shows <project>/<thread id>): {thread}')
+
+
 def outbox_dir(root):
     """Where an attempted post is kept for `retry`: never inside a tracked tree."""
     root=Path(root)
@@ -1572,6 +1583,9 @@ def main():
     if not a.session and a.agent=='claude': a.session=os.environ.get('CLAUDE_CODE_SESSION_ID')  # native UUID the harness exports (desktop + CLI)
     if not a.session and a.command!='sessions': ap.error('--session requires the actual native session ID')
     if a.thread and a.thread.startswith('today:'): a.thread=f"{view.dt.date.today():%Y-%m-%d}-{a.thread[6:]}"  # local date, any shell
+    if a.thread and '/' in a.thread:
+        try: a.thread=thread_id_arg(a.thread,a.project)
+        except ValueError as e: ap.error(str(e))
     if a.include_closed and a.command != 'inbox': ap.error('--include-closed is for inbox only')
     if a.effort and a.command not in {'request','handover','launch'}: ap.error('--effort is for request, handover and launch only')
     if a.detach and a.nested: ap.error('--detach and --nested contradict (nested is the default)')

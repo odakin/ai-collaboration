@@ -552,6 +552,11 @@ class Touches(unittest.TestCase):
         ev=[self.tn(0,'sA',['r/x.md'],hours_ago=13),self.tn(1,'sB',['r/x.md'])]
         st=board.touch_state(ev,NOW+dt.timedelta(seconds=30),12)
         self.assertEqual(board.touch_owner(st,'r/x.md')['who'],('claude','sB'))
+    def test_thread_arg_drops_own_project_prefix_and_refuses_other_slashes(self):
+        self.assertEqual(board.thread_id_arg('2026-10-03-wrap','example'),'2026-10-03-wrap')
+        self.assertEqual(board.thread_id_arg('example/2026-10-03-wrap','example'),'2026-10-03-wrap')   # as the output shows it
+        for bad,proj in (('other/2026-10-03-wrap','example'),('example/a/b','example'),('example/2026-10-03-wrap',None)):
+            with self.assertRaises(ValueError): board.thread_id_arg(bad,proj)
     def test_thread_filter_narrows_listing_only(self):
         ev=[self.tn(0,'sA',['r/x.md'],thread='2026-10-02-other'),self.tn(1,'sB',['r/y.md'])]
         self.assertEqual(set(board.touch_state(ev,NOW+dt.timedelta(seconds=30),12,thread='2026-10-03-wrap')),{('claude','sB')})

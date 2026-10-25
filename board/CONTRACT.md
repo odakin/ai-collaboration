@@ -404,6 +404,9 @@ python3 board.py untouch --root <board> --agent claude --policy ordinary --proje
   it sends `untouch` to the next day's thread: the release lands on a thread where it holds nothing, and the
   declaration keeps holding until `--hours` runs out (measured). Release with the dated thread id that `touch`
   printed, and check with `touching --thread <that id>` that the session's line is gone.
+- `--thread` takes the thread id alone. Output shows threads as `<project>/<thread id>`; pasting that form used to
+  look up a thread that never exists and report that nobody declares anything (measured). Now the command's own
+  `--project` prefix is dropped with a note, and any other `/` is refused.
 - Paths are relative to the workspace (absolute and `~` paths also work), symlinks resolved, so one file has one
   name. A directory covers its files. The `--path` verdict reads the whole board. A declaration older than `--hours`
   (default 12) stops holding.
