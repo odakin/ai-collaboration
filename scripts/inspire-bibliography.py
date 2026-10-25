@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""INSPIRE-HEP からの書誌・業績統計の照合 (審査・査読で申請書/論文の自己申告を機械で裏取りする): 引用文献リストの現物確認 (arXiv id → 題・著者順・誌名巻号・被引用)、著者統計 (BAI → 誌上掲載数・総被引用・h 指数・未出版 preprint・所属履歴)、名前 → BAI 解決、null 報告前の positive control。--selftest 内蔵 (network 不要)。
+"""INSPIRE-HEP からの書誌・業績統計の照合 (審査・査読で申請書/論文の自己申告を機械で裏取りする): 引用文献リストの現物確認 (arXiv id → 題・著者順・誌名巻号・被引用)、著者統計 (BAI → 誌上掲載数・総被引用・h 指数・未出版 preprint・所属履歴)、名前 → BAI 解決、null 報告前の positive control、論文を引く論文の和集合 (citing = erratum の下流 sweep の入力、重複と相互引用を分けて数え、INSPIRE が保管する出版社の PDF の URL も出す)。--selftest 内蔵 (network 不要)。
 
 なぜ層1 にあるか
 ----------------
@@ -22,6 +22,14 @@
 
   # null を報告する前の positive control (検索機構が生きていることの確認)
   inspire-bibliography.py whois "存在しないかもしれない氏名" --control "実在が確実な氏名"
+
+  # 論文を引く論文の和集合 (erratum を出す論文が複数あるときの下流 sweep の入力)
+  inspire-bibliography.py citing 2307.05932 2307.12230        # arXiv id か INSPIRE の recid
+  inspire-bibliography.py citing 2676350 --json citing.json
+  # 出力 = 1 本ずつ「どの入力を引くか」、 種類 (article / conference paper / thesis)、 DOI、
+  #   INSPIRE が保管する file (出版社の OA PDF のことがある = 出版社のサイトが curl に HTML を返すときの入手先)。
+  # 末尾の数 = 入力ごとの件数 / 和集合 / 2 つ以上を引く本 (重複) / 入力どうしの相互引用 / 下流 (和集合 − 相互引用)。
+  # ⚠️ INSPIRE に載らないもの (手元の未発表の原稿・INSPIRE が拾っていない学位論文) は出ない = 別に grep する。
 
 ⚠️ 数え方の罠 (2026-09-08 実測、これを外すと自己申告と食い違う)
 ----------------------------------------------------------------
@@ -183,7 +191,113 @@ AUTHOR_FIELDS = [
 ]
 
 
+CITING_FIELDS = [
+    "control_number",
+    "titles.title",
+    "authors.full_name",
+    "publication_info",
+    "arxiv_eprints.value",
+    "document_type",
+    "dois.value",
+    "documents.url",
+    "urls.value",
+]
+
+
+def citing_union(inputs, hits_by_input):
+    """inputs = [(label, recid)], hits_by_input = {label: [metadata, ...]} → (rows, summary).
+
+    rows = {recid: {"meta": m, "cites": [label, ...], "is_input": bool}} (network を触らない = selftest で回す)。
+    「相互引用」 = 引く側の record が入力そのもの (訂正する論文どうしが互いを引く場合)。
+    """
+    input_recids = {int(r) for _, r in inputs if r is not None}
+    rows = {}
+    for label, _ in inputs:
+        for m in hits_by_input.get(label, []):
+            rid = int(m["control_number"])
+            row = rows.setdefault(rid, {"meta": m, "cites": [], "is_input": rid in input_recids})
+            if label not in row["cites"]:
+                row["cites"].append(label)
+    per_input = {label: len(hits_by_input.get(label, [])) for label, _ in inputs}
+    summary = {
+        "per_input": per_input,
+        "sum": sum(per_input.values()),
+        "union": len(rows),
+        "multi": sorted(r for r, row in rows.items() if len(row["cites"]) > 1),
+        "mutual": sorted(r for r, row in rows.items() if row["is_input"]),
+    }
+    summary["downstream"] = summary["union"] - len(summary["mutual"])
+    return rows, summary
+
+
+def resolve_recid(token):
+    """数字だけなら INSPIRE の recid、 それ以外は arXiv id として引く。 見つからなければ None。"""
+    if token.isdigit():
+        return int(token)
+    hits = literature(f"arxiv:{token}", ["control_number"], size=1)["hits"]["hits"]
+    return int(hits[0]["metadata"]["control_number"]) if hits else None
+
+
+def fetch_citing(recid, sleep=0.5):
+    recs, page = [], 1
+    while True:
+        d = literature(f"refersto:recid:{recid}", CITING_FIELDS, size=250, page=page)
+        hits = d["hits"]["hits"]
+        recs += [h["metadata"] for h in hits]
+        if len(hits) < 250:
+            return recs
+        page += 1
+        time.sleep(sleep)
+
+
 # --------------------------------------------------------------------- actions
+
+def cmd_citing(args):
+    inputs = []
+    for tok in args.ids:
+        rid = resolve_recid(tok)
+        if rid is None:
+            print(f"{tok}: NOT FOUND on INSPIRE")
+            return 1
+        inputs.append((tok, rid))
+        time.sleep(args.sleep)
+    hits = {}
+    for label, rid in inputs:
+        hits[label] = fetch_citing(rid, args.sleep)
+        time.sleep(args.sleep)
+    rows, s = citing_union(inputs, hits)
+    for rid, row in sorted(rows.items(), key=lambda kv: (kv[1]["meta"].get("arxiv_eprints") or [{}])[0].get("value", "~")):
+        m = row["meta"]
+        arx = (m.get("arxiv_eprints") or [{}])[0].get("value", "-")
+        au = [a["full_name"] for a in m.get("authors", []) or []]
+        au_s = "; ".join(au[:3]) + (" et al." if len(au) > 3 else "")
+        doc = ",".join(m.get("document_type") or [])
+        tag = " [入力どうしの相互引用]" if row["is_input"] else ""
+        print(f"recid {rid}  arXiv:{arx}  ({doc}){tag}")
+        print(f"    {m['titles'][0]['title'][:90]}")
+        print(f"    {au_s}  |  {format_pubs(m, True) or '-'}")
+        print(f"    引く入力: {', '.join(row['cites'])}")
+        dois = sorted({d.get('value') for d in m.get('dois', []) or [] if d.get('value')})
+        files = [d.get("url") for d in m.get("documents", []) or [] if d.get("url")]
+        urls = [u.get("value") for u in m.get("urls", []) or [] if u.get("value")]
+        if dois:
+            print(f"    DOI: {', '.join(dois)}")
+        if files:
+            print(f"    INSPIRE が保管する file: {', '.join(files)}")
+        if urls:
+            print(f"    URL: {', '.join(urls)}")
+    print()
+    for label, rid in inputs:
+        print(f"{label} (recid {rid}) を引く: {s['per_input'][label]} 件")
+    print(f"合計 {s['sum']} 件 / 和集合 {s['union']} 本 / 2 つ以上を引く本 {len(s['multi'])} / "
+          f"入力どうしの相互引用 {len(s['mutual'])} / 下流 {s['downstream']} 本")
+    if args.json:
+        out = {"inputs": [{"label": l, "recid": r} for l, r in inputs], "summary": s,
+               "rows": {str(r): {"cites": row["cites"], "is_input": row["is_input"], "meta": row["meta"]} for r, row in rows.items()}}
+        json.dump(out, open(args.json, "w"), indent=1, ensure_ascii=False)
+        print(f"wrote {args.json}")
+    return 0
+
 
 def cmd_refs(args):
     ids = args.ids
@@ -372,12 +486,26 @@ def selftest():
     check("pub_year", pub_year(m), 2025)
     check("pub_year none", pub_year({"publication_info": []}), None)
 
+    # citing の和集合: A を引く 3 本 + B を引く 3 本、 うち 1 本は両方を引き、 A と B は互いを引く
+    rec = lambda n: {"control_number": n, "titles": [{"title": f"t{n}"}]}  # noqa: E731
+    inputs = [("A", 100), ("B", 200)]
+    hits = {"A": [rec(200), rec(1), rec(2)], "B": [rec(100), rec(2), rec(3)]}
+    rows, s = citing_union(inputs, hits)
+    check("citing sum", s["sum"], 6)
+    check("citing union", s["union"], 5)
+    check("citing multi", s["multi"], [2])
+    check("citing mutual", s["mutual"], [100, 200])
+    check("citing downstream", s["downstream"], 3)
+    check("citing cites of 2", rows[2]["cites"], ["A", "B"])
+    # foil: 重複を数え落とすと和集合 = 合計になる (= 素朴に 2 つの件数を足した値と区別がつくこと)
+    check("citing union != naive sum", s["union"] != s["sum"], True)
+
     if fails:
         print("SELFTEST FAILED")
         for f in fails:
             print("  -", f)
         return 1
-    print("selftest OK (会議録除外 / h 指数 / 誌名照合 / 掲載年、 network 不要)")
+    print("selftest OK (会議録除外 / h 指数 / 誌名照合 / 掲載年 / citing の和集合、 network 不要)")
     return 0
 
 
@@ -409,6 +537,12 @@ def main(argv=None):
     w.add_argument("name")
     w.add_argument("--control", help="null 報告前の positive control に使う実在が確実な氏名")
     w.set_defaults(func=cmd_whois)
+
+    c = sub.add_parser("citing", help="論文を引く論文の和集合 (複数の論文の refersto、 重複と相互引用を分けて数える)")
+    c.add_argument("ids", nargs="+", help="arXiv id か INSPIRE の recid")
+    c.add_argument("--json", help="結果を JSON で保存")
+    c.add_argument("--sleep", type=float, default=0.5)
+    c.set_defaults(func=cmd_citing)
 
     args = ap.parse_args(argv)
     if args.selftest:
