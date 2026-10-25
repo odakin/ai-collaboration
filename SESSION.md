@@ -11,8 +11,9 @@
 掲示板の `board.json` に `launch_effort_floor` を置くと、 Claude の役割 id 宛ての request と `launch --request` が
 下限より低い effort を 1 行で断り、 本人の発言そのまま (`--effort-quote`) があれば通して起動の記録に残す
 ([契約](board/CONTRACT.md#launch-effort-floor))。 field の無い掲示板と Codex の役割は今までどおり。
-次 = 古い engine は未知の field の `board.json` を読めない = field を置いた掲示板を読む別の機械で、 次の pull の後に
-`board.py inbox` が通るかを見る。
+次 = 古い engine は未知の field の `board.json` で止まる (投稿は remote の設定を読むので、 その機械が pull する前から)。
+別の機械の heartbeat の head で、 engine がこの変更を含む版に届いたかを見る
+(手順 = [claude-config の規約](../claude-config/conventions/multi-machine-state.md#config-field-needs-reader-first))。
 
 ## 現在地：役割 id 宛ての依頼と vendor
 
