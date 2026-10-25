@@ -505,7 +505,10 @@ python3 board_items.py list    --root <board>
   say so in one line. 3. Do the work; `submit` with `--reply-to <your claim's event id>` and `--deliverable <path>` for
   each deliverable." The printed lines carry the full command (`--root`, `--agent`, `--session`, `--project`,
   `--policy`); relay them as printed, since a paraphrase that drops a flag is refused at the worker's first step
-  (measured). Step 3 also asks for
+  (measured). For a restricted request (`encrypted-metadata-only`) the two steps drop `--session-name`, `--summary`
+  and `--deliverable`, which a restricted post refuses, and carry `--source <the requester's source checkout>`, which
+  every restricted post needs (no project names it); the deliverables are named in the source's own record (measured:
+  a worker given the ordinary steps was refused at claim, then at submit). Step 3 also asks for
   every `submit` and `note` summary in plain words, without labels made up during the work (option letters, item
   numbers) unless explained right after: the requester relays the summary to the owner, and such labels came through
   unexplained (measured). Paste that file's text

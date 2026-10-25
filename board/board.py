@@ -733,7 +733,21 @@ def safety_stop_handoff_text():
         "#api-safety-filter-on-main-response.\n")
 
 
-def handoff_text(root, role, request_id, spec, model, effort, surface='background', project=None, policy=None, reason=None, worktree=False):
+def restricted_handoff_parts(policy, source, session_name):
+    """The parts of the claim and submit steps that differ for a restricted request (encrypted-metadata-only): the board
+    refuses --summary, --session-name and --deliverable on its posts, and a restricted request names no project to find
+    the source checkout from, so every post needs --source (measured: a worker given the ordinary steps was refused at
+    claim, and once those were patched by hand, again at submit for --deliverable). Returns (source flag, claim tail,
+    submit tail, restricted)."""
+    if policy!='encrypted-metadata-only':
+        return ('',f" --session-name '{session_name}' --summary '<one line>'",
+                " plus `--reply-to <your claim's event id>` and `--deliverable <path>` for each deliverable.",False)
+    src=f" --source {Path(source).resolve()}" if source else ' --source <the source checkout the requester named>'
+    return (src,'',(" plus `--reply-to <your claim's event id>` only: a restricted post refuses --summary, --session-name"
+                    " and --deliverable, so name the deliverables in the source's own record, not on the board."),True)
+
+
+def handoff_text(root, role, request_id, spec, model, effort, surface='background', project=None, policy=None, reason=None, worktree=False, source=None):
     """What a worker window starts from (CONTRACT.md#worker-handoff-text): role, request, spec, the model and effort it
     must run on, and the first two steps. Written to a file and passed to the CLI whole, so quoting never bites.
     A desktop window gets a step 0: the app starts it on the requester's model when the asked one is higher, and on
@@ -765,11 +779,13 @@ def handoff_text(root, role, request_id, spec, model, effort, surface='backgroun
           " yourself; name the branch in the submit." if worktree else
           " Work in the repository's own working tree on its main branch: do not call EnterWorktree or create a branch;"
           " commit by explicit paths and push to main.")
+    src,claim_tail,submit_tail,restricted=restricted_handoff_parts(policy,source,f"<your native session id, 8 chars> ({model or '<model>'})")
+    if restricted: plain=''
     return (f"You are the board worker for role `{role}`, request `{request_id}`, spec `{spec or '(the request itself)'}`; execute it yourself.{run}{tree}\n"
             +hold+
             f"1. `python3 {eng} inbox --root {root} --agent claude --session {role} --sync`; if the request is not visible, do not read the spec — ask the requester or `watch`.\n"
-            f"2. `python3 {eng} claim --root {root} --agent claude --session {role} --request {request_id}{scope} --session-name '<your native session id, 8 chars> ({model or '<model>'})' --summary '<one line>'`; if refused with *another live claim exists*, stop and say so in one line.\n"
-            f"3. Do the work the spec asks for; when done, `submit` with the same --root, --session, --request{scope}, plus `--reply-to <your claim's event id>` and `--deliverable <path>` for each deliverable.{plain}{ask}\n" + safety_stop_handoff_text())
+            f"2. `python3 {eng} claim --root {root} --agent claude --session {role} --request {request_id}{scope}{src}{claim_tail}`; if refused with *another live claim exists*, stop and say so in one line.\n"
+            f"3. Do the work the spec asks for; when done, `submit` with the same --root, --session, --request{scope}{src},{submit_tail}{plain}{ask}\n" + safety_stop_handoff_text())
 
 
 def own_model(session):
@@ -834,7 +850,7 @@ def remote_control_fallback(root, request_id, session, model, effort, worktree=F
             ' 依頼元と同じ account に載る = 依頼元が Remote Control に載っているときだけ使う):\n  '+line)
 
 
-def desktop_plan(root, role, request_id, spec, expect, session, title=None, project=None, summary=None, detach=False, policy=None, effort=None, reason=None, worktree=False):
+def desktop_plan(root, role, request_id, spec, expect, session, title=None, project=None, summary=None, detach=False, policy=None, effort=None, reason=None, worktree=False, source=None):
     """The desktop app's start_session arguments for a role's worker (the worker is listed in the app, unlike a
     background CLI session). The board cannot call the app: the requesting Claude session calls start_session with
     these arguments. Returns (arguments, file). Title = the task first and the model last (measured: a title that
@@ -844,7 +860,7 @@ def desktop_plan(root, role, request_id, spec, expect, session, title=None, proj
     reaching the requester; the requester does not relay a child's questions to the owner either way (relayed, they
     reached the owner twice, measured), and the board's watch carries submit and blocker."""
     model,effort=launch_settings(expect,session,effort)
-    text=handoff_text(root,role,request_id,spec,model,effort,surface='desktop',project=project,policy=policy,reason=reason,worktree=worktree)
+    text=handoff_text(root,role,request_id,spec,model,effort,surface='desktop',project=project,policy=policy,reason=reason,worktree=worktree,source=source)
     write_outbox(root,request_id+'.handoff.txt',text)
     name=role[len('role-'):] if role.startswith('role-') else role
     if project and name.startswith(project+'-'): name=name[len(project)+1:]
@@ -916,7 +932,7 @@ def launch_cli_settings(rc_off, worktree=False):
     return json.dumps(s) if s else ''
 
 
-def launch_plan(root, role, request_id, spec, expect, session, project=None, policy=None, effort=None, reason=None, worktree=False):
+def launch_plan(root, role, request_id, spec, expect, session, project=None, policy=None, effort=None, reason=None, worktree=False, source=None):
     """The command that starts the addressed worker as a background CLI session with model, effort and config dir pinned.
 
     Returns (argv, env, shell line, hand-off file). Model = --expect-model, else the owner's default, else the
@@ -929,7 +945,7 @@ def launch_plan(root, role, request_id, spec, expect, session, project=None, pol
     requester's shell does, with the hand-off text read from the file."""
     model,effort=launch_settings(expect,session,effort)
     cfg=os.path.expanduser((os.environ.get(LAUNCH_CONFIG_DIR_ENV) or '').strip())
-    text=handoff_text(root,role,request_id,spec,model,effort,project=project,policy=policy,reason=reason,worktree=worktree)
+    text=handoff_text(root,role,request_id,spec,model,effort,project=project,policy=policy,reason=reason,worktree=worktree,source=source)
     path=write_outbox(root,request_id+'.handoff.txt',text)
     write_launch_record(root,request_id,role=role,spec=spec,model=model,effort=effort,surface='background',requester=session,
                         **({'reason':reason} if reason else {}),**({'worktree':True} if worktree else {}))
@@ -963,7 +979,7 @@ def announce_launch(a, ev, audience):
         # Work the owner does not watch, run as the requester's own subagent: no window to open, so only the record
         # (the claim check compares the subagent's model with it) and the hand-off text the Agent tool's prompt carries.
         model,effort=launch_settings(a.expect_model,a.session,a.effort)
-        text=handoff_text(a.root,a.to_session,ev['event_id'],(a.reference or [None])[0],model,effort,project=a.project,policy=a.policy,reason=a.reason)
+        text=handoff_text(a.root,a.to_session,ev['event_id'],(a.reference or [None])[0],model,effort,project=a.project,policy=a.policy,reason=a.reason,source=a.source)
         hpath=write_outbox(a.root,ev['event_id']+'.handoff.txt',text)
         write_launch_record(a.root,ev['event_id'],role=a.to_session,model=model,effort=effort,surface='agent',requester=a.session,
                             **({'reason':a.reason} if a.reason else {}))
@@ -977,7 +993,7 @@ def announce_launch(a, ev, audience):
         detach=bool(getattr(a,'detach',False))
         args,spath=desktop_plan(a.root,a.to_session,ev['event_id'],(a.reference or [None])[0],a.expect_model,a.session,
                                 title=getattr(a,'title',None),project=a.project,summary=ev.get('summary'),detach=detach,policy=a.policy,effort=a.effort,reason=a.reason,
-                                worktree=getattr(a,'worktree',False))
+                                worktree=getattr(a,'worktree',False),source=a.source)
         sm_cli=ENGINE.parent.parent/'claude-config'/'scripts'/'session-model.py'
         want=' / '.join(x for x in (args.get('model'),('effort '+args['effort']) if args.get('effort') else '') if x)
         print(f'→ 受け手を desktop app の session として起こす (本人の左の一覧に出る)。 起こすのは依頼元の Claude の start_session'
@@ -993,7 +1009,7 @@ def announce_launch(a, ev, audience):
     # A role names a window nobody has opened: print the command that opens it with model, effort and account
     # pinned (measured: the chip opens on the parent's model, and a pasted hand-off ran on whatever the window had).
     argv,env,line,hpath=launch_plan(a.root,a.to_session,ev['event_id'],(a.reference or [None])[0],a.expect_model,a.session,project=a.project,policy=a.policy,effort=a.effort,reason=a.reason,
-                                    worktree=getattr(a,'worktree',False))
+                                    worktree=getattr(a,'worktree',False),source=a.source)
     if audience=='owner':
         print(f'→ 受け手を起こす (model・effort・account を固定、 貼り付け不要。 依頼元の shell でそのまま):\n  {line}')
     else:
@@ -1057,7 +1073,7 @@ def parse_codex_details(text):
     return {m.group(1):m.group(2).strip() for m in re.finditer(r'(?m)^launch-([a-z-]+):[ \t]*(.*)$',text or '')}
 
 
-def codex_handoff_text(root, role, request_id, spec, f, project=None, policy=None):
+def codex_handoff_text(root, role, request_id, spec, f, project=None, policy=None, source=None):
     """What a Codex worker thread starts from: the Codex counterpart of handoff_text. Step 0 reads this thread's own
     model and effort from Codex's local record (the launcher pins them; a text pasted into a window opened by hand runs
     on whatever that window has). The Codex app runs the thread, so the owner may watch it and talk to it there, but the
@@ -1069,16 +1085,19 @@ def codex_handoff_text(root, role, request_id, spec, f, project=None, policy=Non
     eng=Path(__file__).resolve(); launcher=codex_launcher(); m,e=f.get('model'),f.get('effort')
     scope=(f" --project {project}" if project else '')+(f" --policy {policy}" if policy else '')
     run=(f" This thread must run on {m}"+(f" at {e} effort" if e else '')+'.') if m else ''
+    src,claim_tail,submit_tail,restricted=restricted_handoff_parts(policy,source,f"<the first 8 characters of your thread id, typed out> ({m or '<model>'})")
     hold=(f"0. First run `python3 {launcher} check-self --model {m}"+(f" --effort {e}" if e else '')+"`: if it does not print ✅,"
           " stop at once without reading the request or its materials and say so in one line.\n") if m else ''
     return (f"You are the board worker for role `{role}`, request `{request_id}`, spec `{spec or '(the request itself)'}`; execute it yourself.{run}\n"
             +hold+
             f"1. `python3 {eng} inbox --root {root} --agent codex --session {role} --sync`; if the request is not visible, do not read the spec — say so in one line and stop.\n"
-            f"2. `python3 {eng} claim --root {root} --agent codex --session {role} --request {request_id}{scope} --session-name '<the first 8 characters of your thread id, typed out> ({m or '<model>'})' --summary '<one line>'`"
-            " (read the thread id first with a separate `echo $CODEX_THREAD_ID`); if refused with *another live claim exists*, stop and say so in one line.\n"
-            f"3. Do the work the spec asks for; when done, `submit` with the same --root, --agent, --session, --request{scope}, plus `--reply-to <your claim's event id>` and `--deliverable <path>` for each deliverable."
-            " Write every `submit` and `note` summary in plain words: do not use labels made up during the work (option letters, item"
-            " or finding numbers); if you keep one, say what it refers to right after it. Ask a question for the requester as a"
+            f"2. `python3 {eng} claim --root {root} --agent codex --session {role} --request {request_id}{scope}{src}{claim_tail}`"
+            +('' if restricted else " (read the thread id first with a separate `echo $CODEX_THREAD_ID`)")
+            +"; if refused with *another live claim exists*, stop and say so in one line.\n"
+            f"3. Do the work the spec asks for; when done, `submit` with the same --root, --agent, --session, --request{scope}{src},{submit_tail}"
+            +('' if restricted else " Write every `submit` and `note` summary in plain words: do not use labels made up during the work (option letters, item"
+            " or finding numbers); if you keep one, say what it refers to right after it.")
+            +" Ask a question for the requester as a"
             " `blocker` on the board: the requester reads the board, not this window (the owner may also watch this window and"
             " talk to you here). Run each board command on its own, with every value typed out: not chained with `;`, `&&` or a"
             " pipe, and with no `$` expansion (`$VAR`, `${…}`, `$(…)`) in it. A Codex rule runs exactly such plain commands"
@@ -1090,7 +1109,7 @@ def codex_launcher():
     return Path(os.environ.get(CODEX_LAUNCHER_ENV) or ENGINE.parent.parent/'claude-config'/'scripts'/'codex-app-launch.py')
 
 
-def codex_plan(root, role, request_id, spec, f, project=None, policy=None, title=None):
+def codex_plan(root, role, request_id, spec, f, project=None, policy=None, title=None, source=None):
     """(argv, shell line, hand-off file) that start the worker through the launcher (claude-config
     scripts/codex-app-launch.py): a thread with model, effort, sandbox and working directory pinned, whose hand-off is
     queued and run by the Codex app, so the owner sees its progress and can talk to it there (measured: a `codex exec`
@@ -1098,7 +1117,7 @@ def codex_plan(root, role, request_id, spec, f, project=None, policy=None, title
     the board's cache and checkout writable, and the board engine's worker subcommands allowed outside the sandbox by a
     Codex rule (the app's sandbox has no network); network on for the daemon fallback (approval never: it runs
     unattended). The thread's name = the request's --title (else the summary's first clause) and the model."""
-    text=codex_handoff_text(root,role,request_id,spec,f,project=project,policy=policy)
+    text=codex_handoff_text(root,role,request_id,spec,f,project=project,policy=policy,source=source)
     hpath=write_outbox(root,request_id+'.handoff.txt',text)
     rec=write_launch_record(root,request_id,role=role,spec=spec,model=f.get('model'),effort=f.get('effort'),surface='codex-app',
                             launch_host=f.get('host'),cwd=f.get('cwd'))
@@ -1142,14 +1161,14 @@ def codex_announce(a, ev, audience):
     (argv, env) when it starts on this machine (None when another machine launches it, or for the headless line)."""
     f=codex_fields(a); rid=ev['event_id']; spec=(a.reference or [None])[0]
     if f['surface']=='background':
-        text=codex_handoff_text(a.root,a.to_session,rid,spec,f,project=a.project,policy=a.policy)
+        text=codex_handoff_text(a.root,a.to_session,rid,spec,f,project=a.project,policy=a.policy,source=a.source)
         hpath=write_outbox(a.root,rid+'.handoff.txt',text)
         write_launch_record(a.root,rid,role=a.to_session,spec=spec,model=f.get('model'),effort=f.get('effort'),surface='background',
                             launch_host=f['host'],cwd=f['cwd'],headless_reason=f.get('headless-reason'))
         print('→ 受け手を headless の codex exec で起こす (理由 = '+f.get('headless-reason','')+')。 Codex アプリのどこにも出ない。'
               ' 依頼元の shell でそのまま (理由は CODEX_EXEC_REASON で起動の検査に渡る):\n  '+codex_headless_line(a.root,rid,f,hpath))
         return None
-    argv,line,hpath=codex_plan(a.root,a.to_session,rid,spec,f,project=a.project,policy=a.policy,
+    argv,line,hpath=codex_plan(a.root,a.to_session,rid,spec,f,project=a.project,policy=a.policy,source=a.source,
                                title=f.get('title') or re.split(r'[。:：(（]',ev.get('summary') or '')[0].strip() or None)
     print('→ 受け手を Codex アプリに出る形で起こす (thread を作って起動文を予約し、 アプリに開かせる = アプリが走らせる。'
           f' model {f.get("model") or "既定"} / effort {f.get("effort") or "既定"} / cwd {f["cwd"]} / 機械 {f["host"]} を固定):\n  {line}')
@@ -1229,7 +1248,7 @@ def cmd_launch(a):
         raise ValueError('この依頼は headless の codex exec を選んでいる (理由 = '+f.get('headless-reason','')+') = 依頼元の shell が起こす')
     a.policy=req['source_policy']; a.project=req['project']['key']
     spec=next(iter(req.get('references') or []),None)
-    argv,line,_=codex_plan(a.root,asg['session_id'],a.request,spec,f,project=a.project,policy=a.policy,
+    argv,line,_=codex_plan(a.root,asg['session_id'],a.request,spec,f,project=a.project,policy=a.policy,source=getattr(a,'source',None),
                            title=f.get('title') or re.split(r'[。:：(（]',req.get('summary') or '')[0].strip() or None)
     print('→ 起こす: '+line)
     run_codex_launch(a,a.request,argv,dict(os.environ))
@@ -1271,7 +1290,7 @@ def launch_claude_role(a, req, events):
     poster=(req.get('actor') or {}).get('session_id') or '?'
     if surface=='desktop':
         args,spath=desktop_plan(a.root,role,a.request,spec,a.expect_model,a.session,title=a.title,project=project,
-                                summary=req.get('summary'),detach=a.detach,policy=policy,effort=a.effort,reason=a.reason,worktree=a.worktree)
+                                summary=req.get('summary'),detach=a.detach,policy=policy,effort=a.effort,reason=a.reason,worktree=a.worktree,source=getattr(a,'source',None))
         args['background']=(f'Board request {a.request} for role {role}, posted by {poster} and opened here by session'
                             f' {(a.session or "")[:8]}. The request and its spec are the task; report through the board (claim,'
                             ' a note at each milestone, submit). The poster reviews the submission on the board.')
@@ -1283,7 +1302,7 @@ def launch_claude_role(a, req, events):
               +('。 合ったら detach_session (--detach の指定)' if a.detach else STAY_NESTED))
         return
     argv,env,line,hpath=launch_plan(a.root,role,a.request,spec,a.expect_model,a.session,project=project,policy=policy,
-                                    effort=a.effort,reason=a.reason,worktree=a.worktree)
+                                    effort=a.effort,reason=a.reason,worktree=a.worktree,source=getattr(a,'source',None))
     print(f'→ 既にある依頼 {a.request} の worker を起こす 1 行 (掲示板には何も書いていない):\n  {line}')
     if a.launch: print('→ 起動した: '+launch(argv,env,cwd=bc.workspace(a.root)).replace('\n','\n  '))
 

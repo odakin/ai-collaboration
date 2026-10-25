@@ -1339,6 +1339,29 @@ class LaunchCommand(unittest.TestCase):
             self.assertIn('asks the owner about closing', text)
             self.assertIn('automatically retry on another model', text)
 
+    def test_handoff_restricted_policy(self):
+        # A restricted post refuses --summary, --session-name and --deliverable and needs --source, so the steps the
+        # worker gets must leave the first three out and name the source (measured: refused at claim, then at submit).
+        rid = '20990101T000000Z-claude-000001'
+        texts = [board.codex_handoff_text(Path('/fixture/board'), 'role-fixture-worker', rid, None,
+            {'model': 'fixture-model', 'effort': 'high'}, policy='encrypted-metadata-only', source=Path('/fixture/src'))]
+        for surface in ('desktop', 'background'):
+            texts.append(board.handoff_text(Path('/fixture/board'), 'role-fixture-worker', rid, None, 'fixture-model',
+                'high', surface=surface, policy='encrypted-metadata-only', source=Path('/fixture/src')))
+        for text in texts:
+            steps = text.split('\n2. ', 1)[1].split('\n', 2)[:2]
+            for flag in ('--summary', '--session-name', '--deliverable <path>'):
+                self.assertNotIn(flag + ' ', steps[0] + ' ')
+            self.assertNotIn('`--deliverable <path>`', steps[1])
+            self.assertIn('--source /fixture/src', steps[0]); self.assertIn('--source /fixture/src', steps[1])
+            self.assertIn('--policy encrypted-metadata-only', steps[0])
+        plain = board.handoff_text(Path('/fixture/board'), 'role-fixture-worker', rid, 'fixture/spec.md', 'fixture-model',
+            'high', policy='ordinary')
+        self.assertIn('--summary', plain); self.assertIn('`--deliverable <path>`', plain); self.assertNotIn('--source', plain)
+        unknown = board.handoff_text(Path('/fixture/board'), 'role-fixture-worker', rid, None, 'fixture-model', 'high',
+            policy='encrypted-metadata-only')
+        self.assertIn('--source <the source checkout the requester named>', unknown)
+
     def test_plan_and_launch(self):
         import os
         td=tempfile.TemporaryDirectory(); base=Path(td.name)
