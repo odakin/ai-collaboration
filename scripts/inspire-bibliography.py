@@ -52,6 +52,13 @@ API のこつ
 - `fields=` で絞ると 250 件 page でも軽い。 h 指数・総被引用は author page の
   表示値を API では直接取れないので、全 record を引いて自分で集計する。
 - 1 query = 1 arXiv id の照合は `q=arxiv:<id>`。 旧式 id (`gr-qc/9403058`) も可。
+- ⚠️ **`arxiv:<id>` は他の条件と AND で組めない** (2026-10 実測): `arxiv:1207.7214 and fulltext:"zzqqxx"`
+  (意味の無い語) でもその論文が 1 件返る (`t:` との AND でも同じ)。 `refersto:arxiv:<id>` も
+  `refersto:recid:<recid>` と件数が合わず (同じ論文で 25181 対 17762)、 論文自身が混じる。
+  複合の式では `eprint:<id>` / `recid:` / `doi:` と `refersto:recid:` を使う (どれも意味の無い語で 0 件)。
+  「この論文の全文にこの語があるか」 を陽性対照にするなら `eprint:<id> and fulltext:"<語>"` で、
+  先に意味の無い語で 0 件になるのを確かめる。 単独の `arxiv:<id>` (本 script の refs と citing の
+  id 解決) はこの罠を踏まない。
 - 著者の同定は BAI (`J.Doe.1` 形式) が最も確実。 姓名 query は同姓の別人を掴む。
 - 経歴 (研究員歴・海外滞在) は `authors.affiliations` を論文の年で並べると
   authors API の positions が空でも復元できる。
