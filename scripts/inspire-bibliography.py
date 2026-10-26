@@ -53,8 +53,9 @@ API のこつ
   表示値を API では直接取れないので、全 record を引いて自分で集計する。
 - 1 query = 1 arXiv id の照合は `q=arxiv:<id>`。 旧式 id (`gr-qc/9403058`) も可。
 - ⚠️ **`arxiv:<id>` は他の条件と AND で組めない** (2026-10 実測): `arxiv:1207.7214 and fulltext:"zzqqxx"`
-  (意味の無い語) でもその論文が 1 件返る (`t:` との AND でも同じ)。 `refersto:arxiv:<id>` も
-  `refersto:recid:<recid>` と件数が合わず (同じ論文で 25181 対 17762)、 論文自身が混じる。
+  (意味の無い語) でもその論文が 1 件返る (`t:` との AND でも同じ)。 `refersto:arxiv:<id>` は
+  被引用の条件として効かない: 新形式の id は 3 つとも同じ 25181 件、 旧形式 (`hep-th/…`) は
+  461350 件を返す (実測) = 論文の被引用 (`refersto:recid:<recid>`) と無関係の集合で、 0 件にもならない。
   複合の式では `eprint:<id>` / `recid:` / `doi:` と `refersto:recid:` を使う (どれも意味の無い語で 0 件)。
   「この論文の全文にこの語があるか」 を陽性対照にするなら `eprint:<id> and fulltext:"<語>"` で、
   先に意味の無い語で 0 件になるのを確かめる。 単独の `arxiv:<id>` (本 script の refs と citing の
