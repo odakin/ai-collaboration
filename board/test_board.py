@@ -1759,6 +1759,24 @@ class LaunchClaudeRole(EffortFlag):
         self.assertIn('掲示板には何も書いていない',out); self.assertNotIn('⚠️',out)
         self.assertEqual(self.events(),n)
 
+    def test_launch_reuses_this_machines_launch_record(self):
+        # The requester posted to a role on this machine (record: Fable, xhigh, a reason) and then opens the worker
+        # window with launch --surface desktop and no --expect-model / --effort: the record decides, not the requester's
+        # own model (measured: the window came out on the requester's Opus with the request asking for Fable).
+        b=self.post_args(); b[b.index('--expect-model')+1]='claude-fable-5-1'
+        out=self.cli('request',*b,'--thread','2026-01-01-lcr-r','--to','claude','--to-session','role-eproj-rr','--surface','background',
+                     '--no-launch','--effort','xhigh','--reason','新しい導出を worker が組む').stdout
+        rid=self.rid(out)
+        out=self.cli('launch','--root',str(self.root),'--agent','claude','--session','claude-win-9','--request',rid,'--surface','desktop').stdout
+        args=json.loads((board.outbox_dir(self.root)/(rid+'.start_session.json')).read_text())
+        self.assertEqual((args['model'],args['effort']),('claude-fable-5-1','xhigh'))
+        rec=board.launch_record(self.root,rid)
+        self.assertEqual((rec['model'],rec['effort'],rec['reason'],rec['surface']),('claude-fable-5-1','xhigh','新しい導出を worker が組む','desktop'))
+        self.assertNotIn('理由なしで',out)
+        out=self.cli('launch','--root',str(self.root),'--agent','claude','--session','claude-win-9','--request',rid,'--surface','desktop',
+                     '--expect-model','claude-opus-5-5').stdout   # an explicit flag still wins over the record
+        self.assertEqual(json.loads((board.outbox_dir(self.root)/(rid+'.start_session.json')).read_text())['model'],'claude-opus-5-5')
+
     def test_launch_desktop_keeps_the_worker_nested_unless_detach(self):
         rid=self.incoming('2026-01-01-lcr-n')
         base=('launch','--root',str(self.root),'--agent','claude','--session','claude-win-9','--request',rid,

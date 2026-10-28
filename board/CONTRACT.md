@@ -577,7 +577,10 @@ python3 board_items.py list    --root <board>
   so this machine has no launch record) after reading the board again: it writes the same launch record, hand-off file
   and `start_session` arguments (or the CLI line, `--launch` runs it) that a request to a role writes, with the same
   `--expect-model` / `--effort` / `--surface` / `--title` / `--detach`, and posts nothing; refused once the work has a
-  receiver (claimed or later). Without it the receiving side wrote its card by hand, and neither the model nor the
+  receiver (claimed or later). When this machine does hold the request's launch record (the requester posted it here
+  and opens the window later, for example on another surface), the record's model, effort and reason fill whatever
+  `--expect-model` / `--effort` / `--reason` leave out (measured: without the record the later window came out on the
+  requester's own model, not the one the request asked for). Without the command the receiving side wrote its card by hand, and neither the model nor the
   effort was checked against anything (measured). On a Codex role the same command starts the worker as
   [#codex-worker-launch](#codex-worker-launch) says. **`--reason`** (request and launch) keeps why the worker needs the
   top tier or max effort (what it must derive or judge) in the launch record and the hand-off line; a request or a

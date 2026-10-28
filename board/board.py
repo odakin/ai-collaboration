@@ -1333,9 +1333,16 @@ def launch_claude_role(a, req, events):
     co-author's AI, another machine or another session posted it, so this machine has no launch record) the way a
     request to a role does: the launch record, the hand-off file and the start_session arguments (or the CLI line),
     with nothing posted. Without it the receiving side wrote its card by hand, and neither its model nor its effort was
-    checked against anything (measured: a co-author's prose review went out as a top-tier, max-effort card). Model and
-    effort = --expect-model / --effort, else the owner's defaults, else this session's. Refused once the work has a
-    receiver (a second window for the same request), and below the board's effort floor (check_effort_floor)."""
+    checked against anything (measured: a co-author's prose review went out as a top-tier, max-effort card). Model,
+    effort and reason = --expect-model / --effort / --reason, else this machine's launch record of the request (the
+    requester posted it here and opens the window afterwards), else the owner's defaults, else this session's
+    (measured: without the record a window opened later came out on the requester's model, not the one the request
+    asked for). Refused once the work has a receiver (a second window for the same request), and below the board's
+    effort floor (check_effort_floor)."""
+    rec=launch_record(a.root,a.request) or {}
+    if not a.expect_model and rec.get('model'): a.expect_model=rec['model']
+    if not a.effort and rec.get('effort'): a.effort=rec['effort']
+    if not getattr(a,'reason',None) and rec.get('reason'): a.reason=rec['reason']
     same=[e for e in events if (e['project']['key'],e['thread_id'])==(req['project']['key'],req['thread_id'])]
     st=reduce_workflow(same,view.now_utc()).get('status')
     if st not in ('requested','stale'): raise ValueError(f'この依頼は {st} = 受け手はもう居る (か終わった)。 起こさない')
