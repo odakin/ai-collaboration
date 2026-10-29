@@ -136,10 +136,11 @@ messaged (another machine), connect to the thread instead: after `request`, `cla
 (`--since <event id>` resumes). The posting commands print that line. A worker that posts progress notes would wake
 the requester on each one; `--quiet-kind note` keeps watching through notes and prints them with the next event of
 another kind (claim, submit, blocker). A failed sync (a reset connection, a git timeout) is retried after `--interval`
-instead of ending the watch; a request that cannot be found still ends it. Between reads the watch asks the remote
-for the branch head (`ls-remote`, one round trip) every `--interval` seconds (default 30) and looks every two seconds
-at the note a poster on this machine leaves after a push, so a post from the same machine wakes it within seconds and
-a post from another machine within the interval.
+instead of ending the watch; a request that cannot be found still ends it. When the time runs out while the sync is
+still failing, the watch says it could not check for new posts instead of reporting none (read again with
+`show --sync`). Between reads the watch asks the remote for the branch head (`ls-remote`, one round trip) every
+`--interval` seconds (default 30) and looks every two seconds at the note a poster on this machine leaves after a
+push, so a post from the same machine wakes it within seconds and a post from another machine within the interval.
 
 <a id="codex-reach"></a>**Codex sessions** have no SendMessage, and a Codex tool call is synchronous, so a `watch` does not wake
 them. For a Codex thread on the same machine, reachable means the Codex CLI's `codex queue --thread <thread id>

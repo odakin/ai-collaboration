@@ -1689,7 +1689,10 @@ def main():
                 if not transient_sync_error(ex): raise
                 print('watch: 同期に失敗 ('+(str(ex).splitlines() or [type(ex).__name__])[0][:200]+')、 '
                       +str(int(a.interval))+' 秒後にやり直す',file=sys.stderr)
-                if time.time()+a.interval>deadline: print('watch: 新しい書き込みなし (時間切れ)'); sys.exit(3)
+                if time.time()+a.interval>deadline:
+                    # the last read failed: "no new posts" would be a claim the watch could not check
+                    print('watch: 時間切れ。 最後の同期に失敗したので、 新しい書き込みが無いとは確かめていない (読み直す = show --request '
+                          +a.request+' --sync)'); sys.exit(3)
                 time.sleep(a.interval); continue
             ids=[e['event_id'] for e in thread]
             if seen is None:

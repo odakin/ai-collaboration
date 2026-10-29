@@ -1327,6 +1327,15 @@ class FetchTransport(Transport):
         time.sleep(2); board.post(self.root,c)
         out,err=w.communicate(timeout=60)
         self.assertEqual(w.returncode,0,err); self.assertIn('claim',out); self.assertIn(c['event_id'][:10],out)
+    def test_watch_timeout_while_the_sync_fails_does_not_say_no_new_posts(self):
+        # Measured: the remote was unreachable for the whole watch, and the timeout said there were no new posts.
+        import sys, shutil
+        r,_,_=chain(); board.post(self.root,r); shutil.move(str(self.remote),str(self.base/'gone.git'))
+        p=subprocess.run([sys.executable,str(board.ENGINE/'board.py'),'watch','--root',str(self.root),'--agent','claude',
+                          '--session','claude-session-001','--request',r['event_id'],'--interval','1','--max-minutes','0.01'],
+                         capture_output=True,text=True,timeout=60)
+        self.assertEqual(p.returncode,3,p.stderr); self.assertIn('同期に失敗',p.stderr)
+        self.assertNotIn('新しい書き込みなし',p.stdout); self.assertIn('確かめていない',p.stdout); self.assertIn(r['event_id'],p.stdout)
 
 
 class LaunchCommand(unittest.TestCase):
