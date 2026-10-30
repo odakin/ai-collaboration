@@ -45,6 +45,7 @@ Each module's first docstring line is the description source of truth. Every scr
 | [`state_discrimination.py`](state_discrimination.py) | Binary discrimination certificates, qubit models and foil helpers (NumPy only). |
 | [`strip-tex-comments.py`](strip-tex-comments.py) | Strip LaTeX comments from a referee copy without changing the typeset output. |
 | [`svg-contour-extract.py`](svg-contour-extract.py) | Recover published contour / curve data from the vector paths of a paper figure (SVG from pdftocairo), self-calibrated (NumPy only). |
+| [`tex-equation-labels.py`](tex-equation-labels.py) | Map \label names to printed equation numbers from a plain LaTeX source, for citing equations of older papers that have no arXiv HTML. |
 | [`tex-letter-census.py`](tex-letter-census.py) | LaTeX の数式の中の 1 文字の記号 (指定した字) を文脈つきで列挙し (添字の中か外か、 \text の中の $…$ も拾い、 \text・\mathrm・\label などの引数と comment・verbatim は除く)、 添字の中の字を macro に替える案を出す・当てる (括弧の無い添字は {…} で包む): 記法の一括変更を 1 文字ずつ判定する入口。--selftest 内蔵、規律 = claude-config conventions/paper-audit.md#single-letter-macro-pass |
 | [`torsion_irreducible.py`](torsion_irreducible.py) | Torsion / contorsion irreducible decomposition (trace vector, totally antisymmetric part, mixed part) and the Einstein–Cartan + Holst quadratic forms in the contorsion, with the Immirzi elimination factors (NumPy); --selftest. |
 | [`unbounded_operator_domains.py`](unbounded_operator_domains.py) | Domain counterexamples and weighted half-line Green algebra; --selftest. |
