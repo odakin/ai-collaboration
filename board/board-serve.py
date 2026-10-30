@@ -6,7 +6,8 @@ Read-only, except one opt-in write: with --handoff-dir, a request whose next mov
 there or its lease expired, its submission waits for review, or its question waits for the reviewer) gets a button, and
 POST /handoff puts it into that queue as one file per request. The server starts
 nothing; whoever the owner wires to the queue (a coordinating session, a runner) opens the worker and moves the file to
-<dir>/done/. Without --handoff-dir there is no write endpoint at all (CONTRACT.md#viewer-handoff-queue)."""
+<dir>/done/. Without --handoff-dir there is no write endpoint at all (CONTRACT.md#viewer-handoff-queue).
+GET /due (read-only, always) lists the same requests as JSON, for a coordinating session that picks them up itself."""
 import argparse
 import hmac
 import importlib.util
@@ -97,11 +98,12 @@ def main():
         else:
             payload=html.payload_from(a.root,None)
         payload.update(root=shown_root,labels=labels)
-        waiting=handoff_waiting(payload) if qdir else {}
+        waiting=handoff_waiting(payload)
         if qdir: payload['handoff']={'token':token,'label':a.handoff_label,'note':a.handoff_note,'states':handoff_states(qdir)}
         return html.build(payload).encode(),{'head':payload.get('head'),'generated_at':payload.get('generated_at')},waiting
 
     cache={'body':None,'version':{},'waiting':{},'at':0.0,'refreshing':False,'error':None,'synced':False}
+    # 'waiting' is computed on every render (not only with --handoff-dir) so GET /due can list it
     lock=threading.Lock()
 
     def refresh():
@@ -149,11 +151,15 @@ def main():
             if self.headers.get('Host') not in {f'127.0.0.1:{a.port}',f'localhost:{a.port}'}:
                 self.send_error(403); return
             path,_,query=self.path.split('#')[0].partition('?')
-            if path not in {'/','/demo','/version'}:
+            if path not in {'/','/demo','/version','/due'}:
                 self.send_error(404); return
             try:
                 if path=='/demo':
                     p=html.demo_payload(); self.reply(200,html.build(p).encode(),'text/html; charset=utf-8'); return
+                if path=='/due':   # read-only: the requests whose next move is on a role id, for a coordinating session to pick up itself
+                    kick()
+                    with lock: v=dict(cache['version'],synced=cache['synced'],due=list(cache['waiting'].values()))
+                    self.answer(200,**v); return
                 if path=='/version':
                     kick(force=query=='refresh=1')
                     with lock:

@@ -652,7 +652,9 @@ assignee, reviewer and the time); the server starts nothing and posts nothing. W
 `<dir>/done/`; for an hour after that the page shows it as taken and refuses a second hand-off, so one click cannot
 open two workers. Measured: in the Claude desktop app, a turn that a background task's notification started cannot
 start a session itself (a `start_session` with `user_asked` is refused there), so a consumer woken that way offers the
-owner a card for the worker; a review or an answer it can post itself. The write is accepted only from a page this server rendered: Host and Origin must be the
+owner a card for the worker; a review or an answer it can post itself. `GET /due` (read-only, with or without
+`--handoff-dir`) lists the same requests as JSON, so a coordinating session can also pick them up by itself without a
+click. The write is accepted only from a page this server rendered: Host and Origin must be the
 server itself, the body must be JSON (no cross-site form can send it without a preflight, which the server never
 answers) and must carry the per-process token embedded in the page. Without `--handoff-dir` there is no write
 endpoint. A post wakes no session: delivery means pending work is visible on the
