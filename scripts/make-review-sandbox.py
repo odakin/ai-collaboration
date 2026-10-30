@@ -168,11 +168,23 @@ def collect(root: Path, slug: str, into: Path, include_literature: bool = False)
                 continue
             shutil.copy2(p, dest); copied.append(dest)
     skipped: list[Path] = []
+    kept: list[Path] = []
+
+    def keep_existing(src: str, dst: str) -> str:  # the same rule as the top files, below a directory too
+        if Path(dst).exists() and Path(dst).read_bytes() != Path(src).read_bytes():
+            kept.append(Path(dst))
+            return dst
+        return shutil.copy2(src, dst)
+
     for sub in ("notes", "checks", "scratch"):  # scratch too: a worker's scripts are never discarded (hoist station)
         d = sb / sub
         if d.is_dir() and any(d.iterdir()):
             ignore = None if include_literature or sub != "scratch" else _literature_ignore(skipped)
-            shutil.copytree(d, into / sub, dirs_exist_ok=True, ignore=ignore); copied.append(into / sub)
+            shutil.copytree(d, into / sub, dirs_exist_ok=True, ignore=ignore, copy_function=keep_existing)
+            copied.append(into / sub)
+    if kept:
+        print(f"  ↷ kept {len(kept)} existing file(s) that differ from the sandbox copy, e.g. {kept[0]}"
+              " (delete one first if you really want the sandbox version)")
     if skipped:
         print(f"  ↷ not copied: {len(skipped)} literature file(s) in scratch/ (PDF / e-print / saved pages / what is named"
               f" after them; the originals stay in {sb / 'scratch'}). --include-literature copies them."
@@ -232,6 +244,11 @@ def selftest() -> int:
         (Path(td) / "dest" / "REVIEW-RESULTS.md").write_text("annotated\n", encoding="utf-8")
         collect(root, "t1", Path(td) / "dest")
         assert (Path(td) / "dest" / "REVIEW-RESULTS.md").read_text(encoding="utf-8") == "annotated\n"  # second collect must not clobber
+        (Path(td) / "dest" / "notes" / "stage1-blind.md").write_text("annotated\n", encoding="utf-8")
+        (sb / "notes" / "later.md").write_text("later\n", encoding="utf-8")
+        collect(root, "t1", Path(td) / "dest")
+        assert (Path(td) / "dest" / "notes" / "stage1-blind.md").read_text(encoding="utf-8") == "annotated\n"  # nor below a directory
+        assert (Path(td) / "dest" / "notes" / "later.md").exists()  # a file that is new in the sandbox still arrives
         # downloaded literature (PDF / e-print / same-stem text extract) stays in the sandbox unless asked for
         for name in ("cited_2401.00001.pdf", "cited_2401.00001.txt", "cited_src.tar.gz", "numbers.txt"):
             (sb / "scratch" / name).write_text("x\n", encoding="utf-8")
