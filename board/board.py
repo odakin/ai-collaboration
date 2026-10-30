@@ -1463,6 +1463,13 @@ def cmd_init(a, ap):
         print('→ the directory is not in a Git repository yet: create or clone the repository whose members are this board\'s readers')
 
 
+def request_matches(key, state, ref):
+    """show / watch の --request: 依頼の event id か thread の名前 (一覧が出す `<project>/<thread id>`、 一意なら `<thread id>` だけ)。
+    一覧や通知で見るのは thread の名前で、 event id だけで引くと、 読むたびに events/ の file を手で読む code を書くことになった (実測)。"""
+    w=state.get('workflow') or {}
+    return bool(w.get('request_id')) and (w['request_id']==ref or ref in ('/'.join(key), key[1]))
+
+
 def inbox_show(a, root, *, board_name=None, collect=None):
     """inbox / show for one board. `collect` (a list) gathers rows across boards instead of printing."""
     with snapshot(root) if a.sync else contextlib.nullcontext(root) as root:
@@ -1476,8 +1483,7 @@ def inbox_show(a, root, *, board_name=None, collect=None):
             print(f'ℹ️ history {p.name}: {why}', file=sys.stderr if a.json else sys.stdout)
         tag=(lambda row: dict(row,board=board_name)) if board_name else (lambda row: row)
         if a.command == 'show':
-            found=[(pk,tid,t) for (pk,tid),t in all_threads.items()
-                   if (t.get('workflow') or {}).get('request_id') == a.request]
+            found=[(pk,tid,t) for (pk,tid),t in all_threads.items() if request_matches((pk,tid),t,a.request)]
             if collect is not None:
                 if len(found)==1: collect.append(tag(view.workflow_row(*found[0],reader=me)))
                 return
@@ -1679,8 +1685,7 @@ def main():
                 with snapshot(a.root,fresh=True) as root:
                     events=read(root)
                     if key is None:
-                        found=[k for k,t in view.derive(events,view.now_utc()).items()
-                               if (t.get('workflow') or {}).get('request_id')==a.request]
+                        found=[k for k,t in view.derive(events,view.now_utc()).items() if request_matches(k,t,a.request)]
                         if len(found)!=1: raise ValueError('request not found or ambiguous: '+a.request)
                         key=found[0]
                         if repo is not None: last_remote,last_note=repo.remote_sha(),repo.notified(); next_remote=time.time()+a.interval

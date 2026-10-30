@@ -746,6 +746,12 @@ class History(unittest.TestCase):
         missing=cli('show','--request','absent')
         self.assertNotEqual(missing.returncode,0)
         self.assertFalse(missing.stdout.strip())
+        # the thread's name as lists print it (<project>/<thread id>), or the thread id alone when unique
+        for name in ('example/'+r['thread_id'], r['thread_id']):
+            by_name=cli('show','--request',name)
+            self.assertEqual(by_name.returncode,0,by_name.stderr)
+            self.assertEqual(json.loads(by_name.stdout),rows[0])
+        self.assertNotEqual(cli('show','--request','other/'+r['thread_id']).returncode,0)
 
     def test_unscoped_corruption_is_not_an_empty_json_inbox(self):
         import sys

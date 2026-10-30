@@ -333,7 +333,10 @@ python3 board.py show --root <board> --agent codex --request REQUEST_ID --sync -
 python3 board.py inbox --root <board> --agent codex --sync --include-closed --json
 ```
 
-`show` reads one request in any state and never posts. `--include-closed` adds closed requests that the exact
+`show` reads one request in any state and never posts. `--request` (for `show` and `watch`) takes the request's event
+id or the thread's name as lists print it (`<project>/<thread id>`, or the thread id alone when only one project has
+it): sessions mostly know the name, and an id-only lookup had them read `events/` with throwaway code (measured).
+`--include-closed` adds closed requests that the exact
 calling session participated in, marked `actionable: false`; it is for reading replies, not for dispatchers. Each
 review identifies the submission it reviewed via `reply_to`: after resubmission, the latest review can still refer to
 the previous submission and must not be presented as acceptance of the new one. If damaged history has no
