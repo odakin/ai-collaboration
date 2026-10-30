@@ -42,6 +42,7 @@ Pin the version (`v<N>`) and write the sha256 of the PDF and the HTML here; the 
 
 ### C (the requester's questions — no hypotheses, the worker decides)
 - C-01 …
+- **Ask first about the class the downstream use needs**: word the main question for the class (of states, partitions, models, …) the result will actually be used on, and mark the most general or pathological class as an explicit sub-question. A question worded "for any …" reads as the main goal, so the worker's effort and the efficacy count go to the general case instead of the class the requester needs.
 - **Carried over from earlier campaigns**: the 👁 items in the repo root `carryover.yaml` go into group C (second eye = independent derivation by another pass, or a machine anchor). When one closes, the receiver writes `second_eye: "done <date> <where>"` in the original ledger.
 
 ## Output format
