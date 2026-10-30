@@ -148,6 +148,10 @@ select{font:inherit;color:inherit}
 kbd{font:11px/1 var(--mono);border:1px solid var(--line-2);border-bottom-width:2px;border-radius:4px;padding:2px 5px;color:var(--text-2);background:var(--panel)}
 svg{width:16px;height:16px;flex:none}
 .mono{font-family:var(--mono);font-size:.9em}
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.lnk{font-size:12.5px;color:var(--accent-ink);font-weight:500;border-radius:4px}
+.lnk:hover{text-decoration:underline}
+mark{background:color-mix(in srgb,var(--orange) 30%,transparent);color:inherit;border-radius:3px;padding:0 1px}
 .muted{color:var(--muted)}
 .bad{color:var(--red-ink);font-weight:600}
 
@@ -199,6 +203,11 @@ svg{width:16px;height:16px;flex:none}
 .chip:hover{border-color:var(--line-2);color:var(--text-2)}
 .chip[aria-pressed="true"]{border-color:color-mix(in srgb,var(--accent) 45%,transparent);background:var(--sel);color:var(--text)}
 .chip .av{width:14px;height:14px;font-size:0}
+.chip .cn{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.newline{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;font-size:12.5px;color:var(--text-2)}
+.newline:empty{display:none}
+.nl{display:inline-flex;align-items:center;gap:6px;font-weight:600}
+.nd{width:7px;height:7px;border-radius:50%;background:var(--accent);display:inline-block;flex:none}
 .fsel{width:100%;height:34px;padding:0 8px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
 .reset{font-size:12.5px;color:var(--accent-ink);align-self:flex-start}
 .reset:hover{text-decoration:underline}
@@ -214,11 +223,19 @@ svg{width:16px;height:16px;flex:none}
 .note li+li{margin-top:4px}
 
 .list{flex:1;overflow:auto;padding:0 8px 16px;overscroll-behavior:contain;border-top:1px solid var(--line)}
-.gh{position:sticky;top:0;z-index:1;margin:0;padding:12px 10px 6px;display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:var(--text-2);background:var(--side)}
+.gh{position:sticky;top:0;z-index:1;margin:0;padding:10px 10px 6px;display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:var(--text-2);background:var(--side)}
+.gbtn{display:inline-flex;align-items:center;gap:8px;padding:3px 6px;margin:-3px -6px;border-radius:6px;font-weight:700;flex:none}
+.gbtn:hover{background:var(--hover);color:var(--text)}
+.chev{width:6px;height:6px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:translateY(-2px) rotate(45deg);transition:transform .15s;opacity:.55}
+.gbtn[aria-expanded="false"] .chev{transform:rotate(-45deg)}
+.bucket{padding:10px 10px 2px;font-size:11px;font-weight:600;color:var(--muted)}
 .gh .gc{font-weight:500;color:var(--muted);font-variant-numeric:tabular-nums}
 .gh .gi{margin-left:auto;font-weight:400;font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--c,var(--gray));flex:none}
-.row{position:relative;width:100%;display:grid;grid-template-columns:8px minmax(0,1fr) auto;gap:10px;align-items:start;padding:9px 10px;border-radius:9px}
+.row{position:relative;width:100%;display:grid;grid-template-columns:8px minmax(0,1fr) auto;gap:10px;align-items:start;padding:9px 10px;border-radius:9px;content-visibility:auto;contain-intrinsic-size:auto 60px}
+.rmain{min-width:0}
+.row.new .rt{font-weight:700}
+.rs{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:3px;font-size:12px;line-height:1.55;color:var(--text-2);overflow-wrap:anywhere}
 .row .dot{margin-top:7px}
 .row:hover{background:var(--hover)}
 .row[aria-current="true"]{background:var(--sel)}
@@ -227,14 +244,21 @@ svg{width:16px;height:16px;flex:none}
 .rm{display:flex;gap:5px;margin-top:3px;font-size:12px;color:var(--muted);white-space:nowrap;min-width:0}
 .rm span{overflow:hidden;text-overflow:ellipsis}
 .rm .proj{flex:none;max-width:45%}
-.ra{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;padding-top:2px}
-.grp-done .rt{font-weight:400;color:var(--text-2)}
+.ra{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;padding-top:2px}
+.ra.stale{color:var(--orange-ink);font-weight:600}
 .lempty{padding:40px 16px;text-align:center;color:var(--muted);font-size:13px}
 .sfoot{padding:10px 16px 12px;border-top:1px solid var(--line);font-size:11.5px;line-height:1.7;color:var(--muted);display:flex;flex-direction:column}
-.sfoot .keys{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:2px}
+.sfoot .keys{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;margin-top:2px}
+.sfoot .lnk{font-size:11.5px}
 
 /* ---- 詳細 */
-.detail{min-width:0;overflow:auto;background:var(--panel);outline:0}
+.detail{min-width:0;overflow:auto;background:var(--panel);outline:0;scroll-padding-top:56px}
+.dbar-wrap{position:sticky;top:0;z-index:5;height:0}
+.dbar{position:absolute;left:0;right:0;top:0;background:color-mix(in srgb,var(--panel) 86%,transparent);-webkit-backdrop-filter:saturate(1.4) blur(12px);backdrop-filter:saturate(1.4) blur(12px);border-bottom:1px solid var(--line);transform:translateY(-100%);opacity:0;pointer-events:none;transition:transform .18s,opacity .18s}
+.dbar.on{transform:none;opacity:1;pointer-events:auto}
+.dbar-in{max-width:860px;margin:0 auto;padding:8px 32px 8px 40px;display:flex;align-items:center;gap:10px}
+.dbar-t{flex:1;min-width:0;font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dbar .back{display:none}
 .dwrap{max-width:860px;margin:0 auto;padding:30px 40px 96px}
 .back{display:none}
 .crumb{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:12.5px;color:var(--muted);min-width:0}
@@ -260,10 +284,10 @@ svg{width:16px;height:16px;flex:none}
 .node{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:700;border:2px solid var(--line-2);color:var(--muted);background:var(--panel)}
 .done .node{background:var(--accent);border-color:var(--accent);color:#fff}
 .done .node svg{width:14px;height:14px;stroke-width:3}
-.cur .node{border-color:var(--accent);color:var(--accent-ink);box-shadow:0 0 0 4px var(--ring)}
+.cur .node{border-color:var(--c,var(--accent));color:var(--ci,var(--accent-ink));box-shadow:0 0 0 4px color-mix(in srgb,var(--c,var(--accent)) 22%,transparent)}
 .done .sl{color:var(--text-2)}
 .cur .sl{color:var(--text);font-weight:700}
-.steps .sub{font-size:11.5px;font-weight:600;color:var(--accent-ink)}
+.steps .sub{font-size:11.5px;font-weight:600;color:var(--ci,var(--accent-ink))}
 
 .turn{margin:14px 18px 4px;padding:14px 16px;border-radius:12px;background:var(--sunken)}
 .turn.fin{background:color-mix(in srgb,var(--green) 10%,transparent)}
@@ -285,7 +309,7 @@ svg{width:16px;height:16px;flex:none}
 button.who{border-radius:6px;padding:2px 6px 2px 2px;margin:-2px -6px -2px -2px}
 button.who:hover{background:var(--hover)}
 .av{width:20px;height:20px;border-radius:50%;flex:none;display:inline-grid;place-items:center;font-size:10.5px;font-weight:700;color:#fff;background:var(--human)}
-.av.claude{background:var(--claude)} .av.codex{background:var(--codex)}
+.av.claude{background:var(--claude)} .av.codex{background:var(--codex)} .av.role{background:var(--purple);font-size:10px}
 .who .ag{font-weight:600;white-space:nowrap}
 .who .sn{color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .rl{flex:none;white-space:nowrap;font-size:10.5px;font-weight:600;color:var(--purple-ink);border:1px solid color-mix(in srgb,var(--purple) 40%,transparent);border-radius:4px;padding:0 4px}
@@ -313,7 +337,15 @@ button.who:hover{background:var(--hover)}
 .feed-h{margin:0 0 16px;font-size:15px;font-weight:700;display:flex;align-items:baseline;gap:10px}
 .feed-h small{font-size:12px;font-weight:400;color:var(--muted)}
 .feed{list-style:none;margin:0;padding:0}
-.item{position:relative;display:grid;grid-template-columns:28px minmax(0,1fr);gap:12px;padding-bottom:26px}
+.feed .sep{display:flex;align-items:center;gap:10px;margin:2px 0 16px;font-size:12px;font-weight:600;color:var(--muted)}
+.feed .sep::after{content:"";flex:1;height:1px;background:var(--line)}
+.feed .newdiv{color:var(--accent-ink)}
+.feed .newdiv::after{background:color-mix(in srgb,var(--accent) 45%,transparent)}
+.feed .gap{margin:-8px 0 22px 40px}
+.gapbtn{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 14px;border:1px dashed var(--line-2);border-radius:999px;font-size:12.5px;color:var(--text-2)}
+.gapbtn:hover{border-style:solid;color:var(--text);background:var(--hover)}
+.feed-h .lnk{margin-left:auto;font-weight:500}
+.item{position:relative;display:grid;grid-template-columns:28px minmax(0,1fr);gap:12px;padding-bottom:26px;content-visibility:auto;contain-intrinsic-size:auto 140px}
 .item::before{content:"";position:absolute;left:13px;top:34px;bottom:6px;width:2px;border-radius:1px;background:var(--line)}
 .item:last-child{padding-bottom:0}
 .item:last-child::before{display:none}
@@ -350,6 +382,15 @@ button.who:hover{background:var(--hover)}
 .empty h2{margin:0 0 8px;font-size:18px;color:var(--text)}
 .empty p{margin:0;line-height:1.8}
 
+dialog{max-width:420px;width:calc(100% - 32px);border:1px solid var(--line);border-radius:14px;padding:20px 22px;background:var(--panel);color:var(--text);box-shadow:0 20px 48px -12px rgba(0,0,0,.35)}
+dialog::backdrop{background:rgba(0,0,0,.35)}
+dialog h2{margin:0 0 12px;font-size:16px}
+.keymap{display:grid;grid-template-columns:auto 1fr;gap:8px 16px;margin:0;font-size:13.5px;align-items:center}
+.keymap dt{white-space:nowrap}
+.keymap dd{margin:0;color:var(--text-2)}
+.dclose{margin-top:16px;display:flex;justify-content:flex-end}
+.dclose button{height:32px;padding:0 16px;border-radius:8px;background:var(--sunken);font-weight:600}
+.dclose button:hover{background:var(--line)}
 .toast{position:fixed;left:50%;bottom:24px;z-index:20;transform:translate(-50%,12px);opacity:0;pointer-events:none;padding:8px 16px;border-radius:999px;background:var(--text);color:var(--panel);font-size:13px;font-weight:500;transition:opacity .18s,transform .18s}
 .toast.show{opacity:1;transform:translate(-50%,0)}
 
@@ -360,6 +401,8 @@ button.who:hover{background:var(--hover)}
   body[data-view="list"] .detail{display:none}
   body[data-view="detail"] .side{display:none}
   .dwrap{padding:10px 16px 72px}
+  .dbar-in{padding:6px 12px}
+  .dbar .back{display:inline-grid;place-items:center;width:32px;height:32px;margin:0;padding:0}
   .back{display:inline-flex;align-items:center;gap:2px;height:34px;padding:0 10px 0 4px;margin:0 0 6px -6px;border-radius:8px;color:var(--accent-ink);font-size:14px;font-weight:600}
   .back:hover{background:var(--hover)}
   .dt{font-size:19px}
@@ -389,6 +432,7 @@ button.who:hover{background:var(--hover)}
     <div class="tools">
       <label class="search"><span id="search-ic"></span><input id="q" type="search" placeholder="案件・要約・セッションを検索" autocomplete="off" aria-label="案件を検索"><kbd>/</kbd></label>
       <div class="scope" id="scope" role="tablist" aria-label="表示範囲"></div>
+      <div class="newline" id="newline" role="status"></div>
       <details class="filters" id="filters"><summary>絞り込み<span id="fcount"></span></summary><div class="fbody" id="fbody"></div></details>
     </div>
     <nav class="list" id="list" aria-label="案件"></nav>
@@ -397,6 +441,15 @@ button.who:hover{background:var(--hover)}
   <main class="detail" id="detail" tabindex="-1" aria-label="案件の詳細"></main>
 </div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
+<dialog id="help" aria-labelledby="help-t"><h2 id="help-t">キーボード操作</h2><dl class="keymap">
+  <dt><kbd>j</kbd> <kbd>k</kbd></dt><dd>次・前の案件</dd>
+  <dt><kbd>n</kbd></dt><dd>次の新着の案件</dd>
+  <dt><kbd>/</kbd></dt><dd>検索（空白で区切ると全部を含むものだけ）</dd>
+  <dt><kbd>Enter</kbd></dt><dd>検索中: いちばん上の結果を開く</dd>
+  <dt><kbd>Esc</kbd></dt><dd>検索語を消す・検索を抜ける・一覧へ戻る（狭い画面）</dd>
+  <dt><kbd>t</kbd></dt><dd>テーマ（システム / ライト / ダーク）</dd>
+  <dt><kbd>?</kbd></dt><dd>この一覧</dd>
+</dl><form method="dialog" class="dclose"><button>閉じる</button></form></dialog>
 
 <script id="data" type="application/json">__PAYLOAD__</script>
 <script>
@@ -405,6 +458,7 @@ button.who:hover{background:var(--hover)}
 const DATA = JSON.parse(document.getElementById('data').textContent);
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const DAY = 86400000;
 
 // ---- 語彙 (状態の判定は JSON 側で確定済み。 ここは表示だけ)
 const AG = Object.assign({claude:'Claude', codex:'Codex', human:'人', other:'他'}, DATA.labels || {});
@@ -412,17 +466,21 @@ const KIND = {request:'依頼', claim:'着手', submit:'提出', accept:'確認�
   blocker:'相談', update:'更新', note:'状況メモ', finding:'発見', done:'完了', abandoned:'取り下げ'};
 const KIND_G = {request:'todo', claim:'doing', submit:'review', accept:'done', revise:'attention', blocker:'attention', finding:'todo',
   done:'done', abandoned:'legacy', release:'legacy', handover:'legacy', update:'legacy', note:'legacy'};
+// 従来形式の記録がこの日数動かなければ一覧で畳む。 依頼 (v2) なら「放置」 の印を付ける (掲示板の放置と同じ線)
+const QUIET_DAYS = 14;
 const GROUPS = [
   {k:'attention', label:'要対応', hint:'相談・担当期限切れ・記録の不整合'},
   {k:'review', label:'確認待ち', hint:'提出済み。確認する相手の番'},
   {k:'todo', label:'引受待ち', hint:'担当の着手待ち'},
   {k:'doing', label:'作業中', hint:'担当が作業中・修正中'},
   {k:'legacy', label:'進行中の記録', hint:'提出・確認に分かれていない従来形式'},
+  {k:'quiet', label:'しばらく動きのない記録', hint:`従来形式で ${QUIET_DAYS} 日以上動きなし`},
   {k:'done', label:'完了', hint:'確認済み・取り下げ・完了'},
 ];
 const GORDER = Object.fromEntries(GROUPS.map((g, i) => [g.k, i]));
 const STEPS = ['依頼', '引受', '提出', '確認'];
 const STEP_AT = {requested:1, stale:1, working:2, revision:2, blocked:2, submitted:3, accepted:4};
+const FEED_TAIL = 6;   // 長い経過は最初 (= 依頼) と最後のこの件数だけ出し、 途中は畳む
 const IC = {
   search:'<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
   reload:'<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>',
@@ -430,15 +488,21 @@ const IC = {
   light:'<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/>',
   dark:'<path d="M20.5 13.2A8.5 8.5 0 1 1 10.8 3.5a6.6 6.6 0 0 0 9.7 9.7z"/>',
   back:'<path d="m15 18-6-6 6-6"/>',
+  up:'<path d="m6 15 6-6 6 6"/>',
   copy:'<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>',
   check:'<path d="m5 12.5 4.5 4.5L19 7.5"/>',
 };
 const svg = k => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[k]}</svg>`;
+const store = {
+  get(k, d){ try { const v = JSON.parse(localStorage.getItem(k) || 'null'); return v ?? d; } catch (_) { return d; } },
+  set(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} },
+};
 
 // ---- threads と、 セッション ID → 名前 (= 投稿時の --session-name) の対応
 const threads = DATA.threads.map(t => ({...t, key: t.project + '/' + t.thread_id}));
 const byKey = Object.fromEntries(threads.map(t => [t.key, t]));
 const allProjects = [...new Set(threads.map(t => t.project))].sort();
+const PCOUNT = threads.reduce((m, t) => (m[t.project] = (m[t.project] || 0) + 1, m), {});
 const GENERIC = new Set(['', 'workflow', 'restricted-task']);
 // one address = (agent, native id), or a role id alone whichever vendor acts under it (CONTRACT.md#role-any-agent)
 const isRole = sid => /^(role|resident)-/.test(sid || '');
@@ -450,21 +514,24 @@ for (const t of threads) for (const e of t.events) {
   if (!p || (e.created_at || '') >= p.at) NAMES.set(k, {name: a.task, at: e.created_at || ''});
 }
 const shortId = sid => !sid ? '' : /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(sid) ? sid.slice(0, 8) : sid.length > 28 ? sid.slice(0, 27) + '…' : sid;
-function who(a){
+const roleShort = sid => { const s = String(sid).replace(/^role-/, '');
+  const p = allProjects.filter(x => s.startsWith(x + '-')).sort((a, b) => b.length - a.length)[0];
+  return p ? s.slice(p.length + 1) : s; };
+// actor = 実際に投稿した記録の主 (vendor が分かる)。 宛先 (担当・確認する相手・番) の役割は Claude でも Codex でも開ける (CONTRACT.md#role-any-agent)
+function who(a, actor = false){
   if (!a) return null;
   const role = isRole(a.session_id), n = NAMES.get(sessionKey(a))?.name || '';
-  // a role id names whichever session opens under it, Claude or Codex (CONTRACT.md#role-any-agent)
-  return {agent: role ? 'other' : a.agent, ag: role ? 'Claude / Codex' : AG[a.agent] || a.agent, name: role ? a.session_id : (n || shortId(a.session_id)), id: a.session_id || '', role};
+  if (role) return {agent: actor ? a.agent : 'role', ag: actor ? AG[a.agent] || a.agent : '', name: roleShort(a.session_id), id: a.session_id || '', role};
+  return {agent: a.agent, ag: AG[a.agent] || a.agent, name: n || shortId(a.session_id), id: a.session_id || '', role};
 }
-const whoText = a => { const w = who(a); return w ? w.ag + (w.name ? ' · ' + w.name : '') : '—'; };
-const avatar = agent => `<span class="av ${esc(agent)}" aria-hidden="true">${esc((AG[agent] || agent || '?')[0])}</span>`;
-function whoHtml(a, copy = true){
-  const w = who(a); if (!w) return '<span class="muted">—</span>';
-  const inner = `${avatar(w.agent)}<span class="ag">${esc(w.ag)}</span>${w.name ? `<span class="sn">${esc(w.name)}</span>` : ''}${w.role ? '<span class="rl">役割</span>' : ''}`;
-  return copy && w.id ? `<button type="button" class="who" data-copy="${esc(w.id)}" title="セッション ID ${esc(w.id)}（クリックでコピー）">${inner}</button>` : `<span class="who">${inner}</span>`;
+const whoText = a => { const w = who(a); return w ? [w.ag, w.name].filter(Boolean).join(' · ') : '—'; };
+const avatar = agent => `<span class="av ${esc(agent)}" aria-hidden="true">${agent === 'role' ? '役' : esc((AG[agent] || agent || '?')[0])}</span>`;
+const whoTitle = w => w.role ? `役割 ${w.id}（Claude でも Codex でも、この名前で開いた session が受け持つ）` : `セッション ID ${w.id}`;
+function whoHtml(a, copy = true, actor = false){
+  const w = who(a, actor); if (!w) return '<span class="muted">—</span>';
+  const inner = `${avatar(w.agent)}${w.ag ? `<span class="ag">${esc(w.ag)}</span>` : ''}${w.name ? `<span class="${w.ag ? 'sn' : 'ag'}">${esc(w.name)}</span>` : ''}${w.role ? '<span class="rl">役割</span>' : ''}`;
+  return copy && w.id ? `<button type="button" class="who" data-copy="${esc(w.id)}" title="${esc(whoTitle(w))}（クリックでコピー）">${inner}</button>` : `<span class="who" title="${esc(whoTitle(w))}">${inner}</span>`;
 }
-const addresses = new Map();
-threads.forEach(t => { const w = t.workflow; if (w) for (const a of [w.assignee, w.requester, w.reviewer]) if (a) addresses.set(sessionKey(a), a); });
 
 // ---- 時刻
 const rel = iso => { if (!iso) return ''; const d = (Date.now() - Date.parse(iso)) / 1000;
@@ -472,10 +539,19 @@ const rel = iso => { if (!iso) return ''; const d = (Date.now() - Date.parse(iso
   if (d < 86400) return Math.floor(d / 3600) + '時間前'; if (d < 86400 * 14) return Math.floor(d / 86400) + '日前';
   return new Date(iso).toLocaleDateString('ja-JP', {month: 'numeric', day: 'numeric'}); };
 const abs = iso => iso ? new Date(iso).toLocaleString('ja-JP', {month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit'}) : '';
-const when = iso => { const d = (Date.now() - Date.parse(iso)) / 1000; return d >= 0 && d < 86400 ? `${abs(iso)} · ${rel(iso)}` : abs(iso); };
+const hm = iso => new Date(iso).toLocaleTimeString('ja-JP', {hour: '2-digit', minute: '2-digit'});
+const dayKey = iso => { const d = new Date(iso); return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`; };
+const dayLabel = iso => { const d = new Date(iso);
+  return d.toLocaleDateString('ja-JP', {year: d.getFullYear() === new Date().getFullYear() ? undefined : 'numeric', month: 'long', day: 'numeric', weekday: 'short'}); };
 const remain = iso => { const s = (Date.parse(iso) - Date.now()) / 1000; if (s <= 0) return '期限切れ';
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60); return h ? `残り ${h}時間${m}分` : `残り ${m}分`; };
 const leasePct = e => { const a = Date.parse(e.created_at), b = Date.parse(e.lease_until); return Math.max(0, Math.min(1, (b - Date.now()) / (b - a))); };
+const idleDays = t => t.last_at ? Math.floor((Date.now() - Date.parse(t.last_at)) / DAY) : 0;
+function bucketOf(iso){
+  const at = d => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const diff = Math.round((at(new Date()) - at(new Date(iso))) / DAY);
+  return diff <= 0 ? '今日' : diff === 1 ? '昨日' : diff < 7 ? 'この 1 週間' : diff < 31 ? 'この 1 か月' : 'それより前';
+}
 
 // ---- 表題: 依頼文や要約の最初の一文 (全文は経過に残る)
 // 文の終わり (。 / . ) は短くても区切る。 括弧・コロン等は 16 字未満なら区切らない (= 「Fable session (…」 を切らない)
@@ -505,8 +581,9 @@ function groupOf(t){
   if (t.closed) return 'done';
   if (t.open_blockers.length || t.stale_claims.length) return 'attention';
   if (t.active_claims.length) return 'doing';
-  return 'legacy';
+  return idleDays(t) >= QUIET_DAYS ? 'quiet' : 'legacy';
 }
+const idle = t => !t.closed && !!t.workflow && idleDays(t) >= QUIET_DAYS;   // 依頼が動かないまま = 放置
 function statusLabel(t){
   if (t.workflow) return t.workflow.label;
   if (t.closed) return KIND[t.last_kind] || '完了';
@@ -522,26 +599,60 @@ function turnText(t){
   return last ? `${KIND[last.kind] || last.kind} · ${AG[last.actor.agent] || last.actor.agent}` : '';
 }
 const participants = t => [...new Set(t.events.map(e => e.actor.agent))];
+for (const t of threads) {   // 検索の索引と表題は 1 回だけ作る (記録が数千件あっても打鍵ごとに組み直さない)
+  t._title = titleOf(t);
+  t._hay = [t.project, t.thread_id, t._title, t.workflow?.title, ...t.events.flatMap(e => [e.summary, e.details, e.actor.task, e.actor.session_id,
+    ...(e.touches || []), ...(e.references || []), ...(e.deliverables || [])])].join('\n').toLowerCase();
+}
 
-// ---- 絞り込み
-const state = {q: '', scope: 'open', agents: new Set(['claude', 'codex', 'human', 'other']), projects: new Set(allProjects),
-  inbox: 'all', sel: null, view: 'list'};
+// ---- 新着: この端末で前に開いた時点より後に動いた案件 (端末ごとの便宜なので localStorage、 初回はいまを基準にする)
+const SEEN_KEY = 'board-seen:' + (DATA.head === 'demo' ? 'demo' : (DATA.root || 'board'));
+let seen = store.get(SEEN_KEY, null);
+if (!seen || !seen.base) { seen = {base: DATA.generated_at || new Date().toISOString(), keys: {}}; store.set(SEEN_KEY, seen); }
+const lastSeen = t => seen.keys[t.key] || seen.base;
+const isNew = t => (t.last_at || '') > lastSeen(t);
+function markSeen(t){ if (t && isNew(t)) { seen.keys[t.key] = t.last_at; store.set(SEEN_KEY, seen); } }
+function markAllSeen(){ seen = {base: DATA.generated_at || new Date().toISOString(), keys: {}}; store.set(SEEN_KEY, seen); }
+
+// ---- 絞り込みと畳み
+const state = {q: '', terms: [], scope: 'open', agents: new Set(['claude', 'codex', 'human', 'other']), projects: new Set(allProjects),
+  inbox: 'all', onlyNew: false, sel: null, view: 'list', expanded: new Set(), prevSeen: null};
+const FOLD_KEY = 'board-fold';
+const foldPref = store.get(FOLD_KEY, {}) || {};
+// 動きのない記録は既定で畳む。 「すべて」 では完了も畳む。 検索中・新着だけ・「完了」 だけの表示では畳まない (結果を隠さない)
+const folded = k => state.terms.length || state.onlyNew || state.scope === 'closed' ? false : k in foldPref ? !!foldPref[k] : (k === 'quiet' || (k === 'done' && state.scope === 'all'));
 const presentAgents = ['claude', 'codex', 'human', 'other'].filter(a => threads.some(t => participants(t).includes(a)));
-function passes(t, {scope = true} = {}){
+function passes(t, {scope = true, onlyNew = true} = {}){
   if (scope && state.scope === 'open' && t.closed) return false;
   if (scope && state.scope === 'closed' && !t.closed) return false;
+  if (onlyNew && state.onlyNew && !isNew(t) && t.key !== state.sel) return false;
   if (state.inbox !== 'all' && t.workflow?.status !== 'invalid' && sessionKey(t.workflow?.waiting_on) !== state.inbox) return false;
   if (!state.projects.has(t.project)) return false;
   if (t.events.length && !participants(t).some(a => state.agents.has(a))) return false;
-  if (state.q) {
-    const q = state.q.toLowerCase();
-    const hay = [t.project, t.thread_id, titleOf(t), t.workflow?.title, ...t.events.flatMap(e => [e.summary, e.details, e.actor.task, e.actor.session_id, ...(e.touches || [])])].join(' ').toLowerCase();
-    if (!hay.includes(q)) return false;
-  }
+  if (state.terms.length && !state.terms.every(x => t._hay.includes(x))) return false;
   return true;
 }
 const visible = () => threads.filter(t => passes(t)).sort((a, b) => (GORDER[groupOf(a)] - GORDER[groupOf(b)]) || (b.last_at || '').localeCompare(a.last_at || ''));
+const navList = () => visible().filter(t => !folded(groupOf(t)));
 const activeFilters = () => (presentAgents.some(a => !state.agents.has(a)) ? 1 : 0) + (state.projects.size < allProjects.length ? 1 : 0) + (state.inbox !== 'all' ? 1 : 0);
+
+// ---- 検索語の強調と、 表題に無い語が当たった箇所の抜き出し
+const reEsc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function hl(text){
+  text = String(text ?? '');
+  if (!state.terms.length) return esc(text);
+  const re = new RegExp('(' + state.terms.map(reEsc).join('|') + ')', 'gi');
+  return text.split(re).map((part, i) => i % 2 ? `<mark>${esc(part)}</mark>` : esc(part)).join('');
+}
+function snippet(t){
+  const tl = t._title.toLowerCase(), miss = state.terms.find(x => !tl.includes(x));
+  if (!miss) return '';
+  for (let i = t.events.length - 1; i >= 0; i--) {
+    const s = String(t.events[i].summary || '').replace(/\s+/g, ' '), j = s.toLowerCase().indexOf(miss);
+    if (j >= 0) { const a = Math.max(0, j - 24); return (a ? '…' : '') + s.slice(a, j + 64) + (j + 64 < s.length ? '…' : ''); }
+  }
+  return '';
+}
 
 // ---- 左: 見出し・注意・道具・一覧
 function renderBrand(){
@@ -563,39 +674,63 @@ function renderTools(){
   const n = {open: base.filter(t => !t.closed).length, closed: base.filter(t => t.closed).length, all: base.length};
   $('#scope').innerHTML = [['open', '進行中'], ['closed', '完了'], ['all', 'すべて']].map(([k, l]) =>
     `<button type="button" role="tab" data-scope="${k}" aria-selected="${state.scope === k}">${l}<span class="n">${n[k]}</span></button>`).join('');
+  const newN = threads.filter(t => isNew(t) && passes(t, {onlyNew: false})).length;   // いまの表示範囲と絞り込みの中で数える
+  $('#newline').innerHTML = newN || state.onlyNew
+    ? `<span class="nl">${newN ? '<span class="nd" aria-hidden="true"></span>' : ''}新着 ${newN} 件</span><button type="button" class="lnk" data-onlynew aria-pressed="${state.onlyNew}">${state.onlyNew ? 'すべて表示' : '新着だけ表示'}</button>${newN ? '<button type="button" class="lnk" data-allseen>すべて既読にする</button>' : ''}` : '';
   const f = activeFilters();
   $('#fcount').innerHTML = f ? `<span class="fcount">${f}</span>` : '';
+  // 「誰の番か」 は、 いま番が回っている相手だけ (= 進行中の依頼の waiting_on)。 過去に一度出た宛先は並べない
+  const owed = new Map();
+  for (const t of threads) { const a = !t.closed && t.workflow?.waiting_on; if (a) { const k = sessionKey(a); owed.set(k, {a, n: (owed.get(k)?.n || 0) + 1}); } }
+  const opts = [...owed].sort((x, y) => y[1].n - x[1].n || whoText(x[1].a).localeCompare(whoText(y[1].a)));
+  if (state.inbox !== 'all' && !owed.has(state.inbox)) opts.push([state.inbox, {a: null, n: 0}]);
   $('#fbody').innerHTML = `
     <div><div class="fl">投稿者</div><div class="chips">${presentAgents.map(a => `<button class="chip" type="button" data-agent="${a}" aria-pressed="${state.agents.has(a)}">${avatar(a)}${esc(AG[a])}</button>`).join('')}</div></div>
-    <div><div class="fl"><span>プロジェクト</span><small>⌥ クリックでそれだけ表示</small></div><div class="chips">${allProjects.map(p => `<button class="chip" type="button" data-project="${esc(p)}" aria-pressed="${state.projects.has(p)}">${esc(projLabel(p))}</button>`).join('')}</div></div>
-    <div><label class="fl" for="session-filter">誰の番か</label><select class="fsel" id="session-filter">${[['all', 'すべてのセッション'], ...[...addresses].map(([k, a]) => [k, whoText(a)])].map(([k, l]) => `<option value="${esc(k)}" ${state.inbox === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
+    <div><div class="fl"><span>プロジェクト</span><small>⌥ クリックでそれだけ表示</small></div><div class="chips">${[...allProjects].sort((a, b) => PCOUNT[b] - PCOUNT[a] || a.localeCompare(b)).map(p => `<button class="chip" type="button" data-project="${esc(p)}" aria-pressed="${state.projects.has(p)}">${esc(projLabel(p))}<span class="cn">${PCOUNT[p]}</span></button>`).join('')}</div></div>
+    <div><label class="fl" for="session-filter"><span>誰の番か</span><small>いま番が回っている相手</small></label><select class="fsel" id="session-filter"><option value="all">すべて</option>${opts.map(([k, o]) => `<option value="${esc(k)}" ${state.inbox === k ? 'selected' : ''}>${esc(o.a ? whoText(o.a) : k)}（${o.n}）</option>`).join('')}</select></div>
     ${f ? '<button type="button" class="reset" data-reset>絞り込みを解除</button>' : ''}`;
 }
 function row(t){
-  const g = groupOf(t), turn = turnText(t);
-  return `<button type="button" class="row" data-go="${esc(t.key)}" aria-current="${state.sel === t.key}" title="${esc(t.thread_id)}">
+  const g = groupOf(t), turn = turnText(t), nw = isNew(t), sn = state.terms.length ? snippet(t) : '';
+  const d = idleDays(t), st = idle(t);
+  return `<button type="button" class="row${nw ? ' new' : ''}" data-go="${esc(t.key)}" aria-current="${state.sel === t.key}" title="${esc(t.thread_id)}">
     <span class="dot g-${g}" aria-hidden="true"></span>
-    <span><span class="rt">${esc(titleOf(t))}</span><span class="rm"><span class="proj">${esc(projLabel(t.project))}</span>${turn ? `<span aria-hidden="true">·</span><span>${esc(turn)}</span>` : ''}</span></span>
-    <time class="ra" datetime="${esc(t.last_at)}" title="${esc(abs(t.last_at))}">${esc(rel(t.last_at))}</time></button>`;
+    <span class="rmain"><span class="rt">${hl(t._title)}</span>${sn ? `<span class="rs">${hl(sn)}</span>` : ''}<span class="rm"><span class="proj">${esc(projLabel(t.project))}</span>${turn ? `<span aria-hidden="true">·</span><span>${esc(turn)}</span>` : ''}</span></span>
+    <span class="ra${st ? ' stale' : ''}">${nw ? '<span class="nd" aria-hidden="true"></span><span class="vh">新着</span>' : ''}<time datetime="${esc(t.last_at)}" title="${esc(abs(t.last_at))}${st ? `・最後の動きから ${d} 日` : ''}">${esc(st ? `放置 ${d}日` : rel(t.last_at))}</time></span></button>`;
 }
 function renderList(){
   const vis = visible();
-  if (!vis.length) { $('#list').innerHTML = `<p class="lempty">${state.q || activeFilters() ? '条件に合う案件はありません。' : state.scope === 'open' ? '進行中の案件はありません。' : '案件はありません。'}</p>`; return; }
-  $('#list').innerHTML = GROUPS.map(g => { const items = vis.filter(t => groupOf(t) === g.k); if (!items.length) return '';
-    return `<section class="grp-${g.k}" aria-label="${esc(g.label)}"><h2 class="gh g-${g.k}"><span class="dot" aria-hidden="true"></span>${esc(g.label)}<span class="gc">${items.length}</span><span class="gi">${esc(g.hint)}</span></h2>${items.map(row).join('')}</section>`; }).join('');
+  if (!vis.length) { $('#list').innerHTML = `<p class="lempty">${state.q || activeFilters() || state.onlyNew ? '条件に合う案件はありません。' : state.scope === 'open' ? '進行中の案件はありません。' : '案件はありません。'}</p>`; return; }
+  $('#list').innerHTML = GROUPS.map(g => {
+    const items = vis.filter(t => groupOf(t) === g.k); if (!items.length) return '';
+    const f = folded(g.k); let body = '', last = '';
+    if (!f) body = items.map(t => { let pre = '';   // 多い区分は時期の見出しで区切る (今日 / 昨日 / この 1 週間 …)
+      if (items.length > 12) { const b = bucketOf(t.last_at); if (b !== last) { pre = `<div class="bucket">${b}</div>`; last = b; } }
+      return pre + row(t); }).join('');
+    return `<section class="grp" aria-label="${esc(g.label)}"><h2 class="gh g-${g.k}"><button type="button" class="gbtn" data-fold="${g.k}" aria-expanded="${!f}"><span class="chev" aria-hidden="true"></span><span class="dot" aria-hidden="true"></span>${esc(g.label)}<span class="gc">${items.length}</span></button><span class="gi">${esc(g.hint)}</span></h2>${body}</section>`;
+  }).join('');
 }
 function renderFoot(){
   const total = threads.reduce((n, t) => n + t.events.length, 0), live = /^https?:$/.test(location.protocol);
   $('#sfoot').innerHTML = `<span>${threads.length} 案件 · ${total} 記録 · HEAD <span class="mono">${esc(DATA.head || '—')}</span> · ${esc(DATA.root || '')}</span>
     <span>${DATA.head === 'demo' ? '架空の見本です。' : live ? '再読み込みで最新の記録を取り込みます。' : '静的な書き出しです。最新にするには再生成してください。'}</span>
-    <span class="keys"><span><kbd>j</kbd> <kbd>k</kbd> 移動</span><span><kbd>/</kbd> 検索</span><span><kbd>t</kbd> テーマ</span></span>`;
+    <span class="keys"><span><kbd>j</kbd> <kbd>k</kbd> 移動</span><span><kbd>n</kbd> 次の新着</span><span><kbd>/</kbd> 検索</span><button type="button" class="lnk" data-help><kbd>?</kbd> 操作の一覧</button></span>`;
 }
 
 // ---- 右: 詳細
-const pathItem = (p, kind) => `<li><button type="button" class="path" data-copy="${esc(p)}" title="クリックでパスをコピー">${kind ? `<span class="pk">${esc(kind)}</span>` : ''}<span class="pv">${esc(tilde(p))}</span>${svg('copy')}</button></li>`;
+const pathItem = (p, kind) => `<li><button type="button" class="path" data-copy="${esc(p)}" title="クリックでパスをコピー">${kind ? `<span class="pk">${esc(kind)}</span>` : ''}<span class="pv">${hl(tilde(p))}</span>${svg('copy')}</button></li>`;
+function badges(t){
+  const sl = statusLabel(t), d = idleDays(t);
+  return [`<span class="badge g-${groupOf(t)}">${esc(sl)}</span>`,
+    idle(t) ? `<span class="badge g-review" title="最後の動きから ${d} 日">放置 ${d}日</span>` : '',
+    t.open_blockers.length && sl !== '障害あり' ? `<span class="badge g-attention">障害 ${t.open_blockers.length}</span>` : '',
+    t.stale_claims.length && sl !== '担当期限切れ' ? `<span class="badge g-review">担当期限切れ ${t.stale_claims.length}</span>` : '',
+    t.unpromoted.length ? `<span class="badge g-todo">未反映の発見 ${t.unpromoted.length}</span>` : '',
+    t.project === 'restricted' ? '<span class="badge plain">🔒 メタデータのみ</span>' : ''].join('');
+}
 function workflowCard(t){
   const w = t.workflow, cur = STEP_AT[w.status];
-  const steps = cur === undefined ? '' : `<ol class="steps" aria-label="進み具合">${STEPS.map((s, i) => { const st = i < cur ? 'done' : i === cur ? 'cur' : 'todo';
+  const steps = cur === undefined ? '' : `<ol class="steps g-${groupOf(t)}" aria-label="進み具合">${STEPS.map((s, i) => { const st = i < cur ? 'done' : i === cur ? 'cur' : 'todo';
     return `<li class="${st}"${st === 'cur' ? ' aria-current="step"' : ''}><span class="node">${st === 'done' ? svg('check') : i + 1}</span><span class="sl">${s}</span>${st === 'cur' ? `<span class="sub">${esc(w.label)}</span>` : ''}</li>`; }).join('')}</ol>`;
   const turn = w.status === 'invalid'
     ? `<div class="turn bad"><div class="turn-h">記録に矛盾があり、状態を確定できません</div><p>下の経過と各記録の詳細を確認してください。</p></div>`
@@ -607,7 +742,7 @@ function workflowCard(t){
   const deliv = w.deliverables.length ? `<ul class="paths">${w.deliverables.map(p => pathItem(p)).join('')}</ul>` : '<p class="muted">まだ提出されていないか、場所を非公開にした案件です。</p>';
   return `<section class="card" aria-label="依頼の状態">${steps}${turn}
     <dl class="props"><dt>依頼元</dt><dd>${whoHtml(w.requester)}</dd><dt>担当</dt><dd>${whoHtml(w.assignee)}</dd><dt>確認する相手</dt><dd>${whoHtml(w.reviewer)}</dd>${leaseRow}</dl>
-    <div class="sect"><h4>完了条件</h4><p>${esc(w.acceptance)}</p></div>
+    <div class="sect"><h4>完了条件</h4><p>${hl(w.acceptance)}</p></div>
     <div class="sect"><h4>成果物</h4>${deliv}</div>
     ${w.errors.length ? `<div class="sect"><div class="note err">記録に矛盾があります。確認してください。${esc(w.errors.join('; '))}</div></div>` : ''}
   </section>`;
@@ -617,51 +752,78 @@ function exchange(t){
   const items = [['question', '直近の質問'], ['answer', 'その回答'], ['submission', '直近の提出'], ['review', '直近の確認・差し戻し']].filter(([k]) => w[k]).map(([k, label]) => {
     const e = w[k], refs = [...(e.references || []), ...(e.deliverables || [])];
     const older = k === 'review' && w.submission && e.reply_to && e.reply_to !== w.submission.event_id;
-    return `<li><div class="hx-h"><span class="hx-l">${label}</span>${whoHtml(e.actor, false)}<span>${esc(rel(e.created_at))}</span><button type="button" class="jump" data-jump="${esc(e.event_id)}">経過で見る ↓</button></div>
-      <p>${esc(e.summary)}</p>${older ? '<div class="note warn">この確認・差し戻しは、最新の提出より前の提出に対するものです。</div>' : ''}${refs.length ? `<ul class="paths">${refs.map(p => pathItem(p)).join('')}</ul>` : ''}</li>`;
+    return `<li><div class="hx-h"><span class="hx-l">${label}</span>${whoHtml(e.actor, false, true)}<span>${esc(rel(e.created_at))}</span><button type="button" class="jump" data-jump="${esc(e.event_id)}">経過で見る ↓</button></div>
+      <p>${hl(e.summary)}</p>${older ? '<div class="note warn">この確認・差し戻しは、最新の提出より前の提出に対するものです。</div>' : ''}${refs.length ? `<ul class="paths">${refs.map(p => pathItem(p)).join('')}</ul>` : ''}</li>`;
   }).join('');
   return items ? `<section class="card"><div class="card-h">直近のやりとり</div><ul class="hx">${items}</ul></section>` : '';
 }
-function feed(t){
-  const items = t.events.map(e => {
-    const dead = !e._live, unc = !e._committed, w = who(e.actor), c = e._commit;
-    const label = e.kind === 'blocker' && !t.workflow ? '障害' : (KIND[e.kind] || e.kind);
-    const refs = [...(e.deliverables || []).map(p => pathItem(p, '成果物')), ...(e.references || []).map(p => pathItem(p, '参照')),
-      ...(e.touches || []).map(p => pathItem(p, '対象')), ...(e.promoted_to || []).map(p => pathItem(p, '反映先'))].join('');
-    const lease = e.kind === 'claim' && e.lease_until && !dead && !t.closed ? (() => { const p = leasePct(e), alive = p > 0;
-      return `<div class="lease"><div class="lease-l"><span>担当期限 ${esc(abs(e.lease_until))}</span><span>${esc(remain(e.lease_until))}</span></div><div class="bar ${!alive ? 'out' : p < .2 ? 'low' : ''}"><i style="width:${(alive ? p * 100 : 100).toFixed(1)}%"></i></div></div>`; })() : '';
-    return `<li class="item${dead ? ' dead' : ''}" id="ev-${esc(e.event_id)}">${avatar(e.actor.agent)}<div class="ibody">
-      <div class="ih"><span class="ag">${esc(w?.ag || '')}</span>${w?.name ? `<button type="button" class="sn" data-copy="${esc(w.id)}" title="セッション ID ${esc(w.id)}（クリックでコピー）">${esc(w.name)}</button>` : ''}<span class="kind g-${KIND_G[e.kind] || 'legacy'}">${esc(label)}</span>${dead ? '<span class="flag">取り消し済み</span>' : ''}${unc ? '<span class="flag">未コミット</span>' : ''}<time datetime="${esc(e.created_at)}" title="${esc(e.created_at)}">${esc(when(e.created_at))}</time></div>
-      <p class="isum">${esc(e.summary)}</p>
-      ${e._role_notice ? `<p class="rn">${esc(e._role_notice)}</p>` : ''}
-      ${e.details ? `<details class="more"><summary>詳細を読む</summary><p>${esc(e.details)}</p></details>` : ''}
-      ${refs ? `<ul class="paths">${refs}</ul>` : ''}${lease}
-      ${(e.supersedes || []).length ? `<p class="sup">取り消した記録: ${e.supersedes.map(id => `<button type="button" class="jump" data-jump="${esc(id)}">${esc(id)}</button>`).join(' ')}</p>` : ''}
-      <details class="rec"><summary>記録の詳細</summary><dl><dt>ID</dt><dd class="mono">${esc(e.event_id)}</dd>${e.reply_to ? `<dt>返信先</dt><dd class="mono">${esc(e.reply_to)}</dd>` : ''}${c ? `<dt>commit</dt><dd class="mono">${esc(c.sha)} · ${esc(c.author)} · ${esc(abs(c.date))}</dd>` : ''}${e.actor.instance ? `<dt>実行環境</dt><dd class="mono">${esc(e.actor.instance)}</dd>` : ''}<dt>ファイル</dt><dd class="mono">${esc(e._path)}</dd></dl></details>
-    </div></li>`; }).join('');
-  return `<section class="feedsec" aria-label="経過"><h3 class="feed-h">経過<small>${t.events.length} 件 · 古い順</small></h3><ol class="feed">${items}</ol></section>`;
+function feedItem(t, e){
+  const dead = !e._live, unc = !e._committed, w = who(e.actor, true), c = e._commit;
+  const label = e.kind === 'blocker' && !t.workflow ? '障害' : (KIND[e.kind] || e.kind);
+  const refs = [...(e.deliverables || []).map(p => pathItem(p, '成果物')), ...(e.references || []).map(p => pathItem(p, '参照')),
+    ...(e.touches || []).map(p => pathItem(p, '対象')), ...(e.promoted_to || []).map(p => pathItem(p, '反映先'))].join('');
+  const lease = e.kind === 'claim' && e.lease_until && !dead && !t.closed ? (() => { const p = leasePct(e), alive = p > 0;
+    return `<div class="lease"><div class="lease-l"><span>担当期限 ${esc(abs(e.lease_until))}</span><span>${esc(remain(e.lease_until))}</span></div><div class="bar ${!alive ? 'out' : p < .2 ? 'low' : ''}"><i style="width:${(alive ? p * 100 : 100).toFixed(1)}%"></i></div></div>`; })() : '';
+  const age = (Date.now() - Date.parse(e.created_at)) / 1000;
+  return `<li class="item${dead ? ' dead' : ''}" id="ev-${esc(e.event_id)}">${avatar(e.actor.agent)}<div class="ibody">
+    <div class="ih"><span class="ag">${esc(w?.ag || '')}</span>${w?.name ? `<button type="button" class="sn" data-copy="${esc(w.id)}" title="${esc(whoTitle(w))}（クリックでコピー）">${esc(w.name)}</button>` : ''}${w?.role ? '<span class="rl">役割</span>' : ''}<span class="kind g-${KIND_G[e.kind] || 'legacy'}">${esc(label)}</span>${dead ? '<span class="flag">取り消し済み</span>' : ''}${unc ? '<span class="flag">未コミット</span>' : ''}<time datetime="${esc(e.created_at)}" title="${esc(abs(e.created_at))}">${esc(hm(e.created_at))}${age >= 0 && age < 86400 ? ` · ${esc(rel(e.created_at))}` : ''}</time></div>
+    <p class="isum">${hl(e.summary)}</p>
+    ${e._role_notice ? `<p class="rn">${esc(e._role_notice)}</p>` : ''}
+    ${e.details ? `<details class="more"${state.terms.length && state.terms.some(x => String(e.details).toLowerCase().includes(x)) ? ' open' : ''}><summary>詳細を読む</summary><p>${hl(e.details)}</p></details>` : ''}
+    ${refs ? `<ul class="paths">${refs}</ul>` : ''}${lease}
+    ${(e.supersedes || []).length ? `<p class="sup">取り消した記録: ${e.supersedes.map(id => `<button type="button" class="jump" data-jump="${esc(id)}">${esc(id)}</button>`).join(' ')}</p>` : ''}
+    <details class="rec"><summary>記録の詳細</summary><dl><dt>ID</dt><dd class="mono">${esc(e.event_id)}</dd>${e.reply_to ? `<dt>返信先</dt><dd class="mono">${esc(e.reply_to)}</dd>` : ''}${c ? `<dt>commit</dt><dd class="mono">${esc(c.sha)} · ${esc(c.author)} · ${esc(abs(c.date))}</dd>` : ''}${e.actor.instance ? `<dt>実行環境</dt><dd class="mono">${esc(e.actor.instance)}</dd>` : ''}<dt>ファイル</dt><dd class="mono">${esc(e._path)}</dd></dl></details>
+  </div></li>`;
 }
+function feed(t){
+  // 長い経過は 最初 (= 依頼) + 最後の数件 だけ出す。 前に開いた後の新着は畳まない。 検索中は全部出す
+  const ev = t.events, n = ev.length, prev = state.prevSeen;
+  const firstNew = prev ? ev.findIndex(e => (e.created_at || '') > prev) : -1;
+  let start = 0;
+  if (!state.expanded.has(t.key) && !state.terms.length && n > FEED_TAIL + 4) {
+    start = n - FEED_TAIL; if (firstNew >= 1) start = Math.min(start, firstNew);
+    if (start - 1 < 4) start = 0;
+  }
+  const out = []; let lastDay = '';
+  ev.forEach((e, i) => {
+    if (start && i > 0 && i < start) {
+      if (i === 1) out.push(`<li class="gap"><button type="button" class="gapbtn" data-expand="${esc(t.key)}">途中の ${start - 1} 件を表示</button></li>`);
+      return;
+    }
+    if (i === firstNew) out.push('<li class="sep newdiv" role="separator"><span>ここから新着</span></li>');
+    const dk = dayKey(e.created_at);
+    if (dk !== lastDay) { out.push(`<li class="sep" role="separator"><span>${esc(dayLabel(e.created_at))}</span></li>`); lastDay = dk; }
+    out.push(feedItem(t, e));
+  });
+  return `<section class="feedsec" aria-label="経過"><h3 class="feed-h">経過<small>${n} 件 · 古い順</small>${start ? `<button type="button" class="lnk" data-expand="${esc(t.key)}">すべて表示</button>` : ''}</h3><ol class="feed">${out.join('')}</ol></section>`;
+}
+let headObserver = null;
 function renderDetail(){
   const box = $('#detail'), t = byKey[state.sel];
+  headObserver?.disconnect();
   if (!threads.length) { box.innerHTML = `<div class="dwrap"><div class="empty">${(DATA.invalid || []).length
     ? '<h2>記録を確認できません</h2><p>左上の注意を確認してください。未処理の依頼がないという意味ではありません。</p>'
     : '<h2>まだ依頼がありません</h2><p>依頼元と担当のセッション、完了条件を指定して依頼を作ると、ここで提出と受領確認まで追えます。</p>'}</div></div>`; return; }
   if (!t) { box.innerHTML = '<div class="dwrap"><div class="empty"><h2>案件を選んでください</h2><p>左の一覧から選びます。<kbd>j</kbd> <kbd>k</kbd> でも移動できます。</p></div></div>'; return; }
   const repo = t.events.find(e => e.project?.repo)?.project.repo, dead = t.events.filter(e => !e._live).length;
-  const sl = statusLabel(t);
-  const badges = [`<span class="badge g-${groupOf(t)}">${esc(sl)}</span>`,
-    t.open_blockers.length && sl !== '障害あり' ? `<span class="badge g-attention">障害 ${t.open_blockers.length}</span>` : '',
-    t.stale_claims.length && sl !== '担当期限切れ' ? `<span class="badge g-review">担当期限切れ ${t.stale_claims.length}</span>` : '',
-    t.unpromoted.length ? `<span class="badge g-todo">未反映の発見 ${t.unpromoted.length}</span>` : '',
-    t.project === 'restricted' ? '<span class="badge plain">🔒 メタデータのみ</span>' : ''].join('');
-  box.innerHTML = `<div class="dwrap"><header>
+  // 経過を下へ読み進めても、 何の案件の何の状態かを上の細い帯に残す
+  box.innerHTML = `<div class="dbar-wrap"><div class="dbar" id="dbar"><div class="dbar-in">
+      <button type="button" class="back" data-back aria-label="一覧へ戻る">${svg('back')}</button>
+      <span class="badge g-${groupOf(t)}">${esc(statusLabel(t))}</span><span class="dbar-t">${esc(t._title)}</span>
+      <button type="button" class="ib" data-top title="先頭へ" aria-label="先頭へ">${svg('up')}</button></div></div></div>
+    <div class="dwrap"><header class="dhead">
       <button type="button" class="back" data-back>${svg('back')}一覧</button>
       <div class="crumb"><span>${esc(projLabel(t.project))}</span>${repo ? `<span class="sep">/</span><span>${esc(repo)}</span>` : ''}<span class="sep">/</span><span class="mono">${esc(t.thread_id)}</span></div>
-      <h2 class="dt">${esc(titleOf(t))}</h2>
-      <div class="badges">${badges}<span class="metaline">${t.events.length} 件の記録${dead ? `（取り消し済み ${dead}）` : ''} · 最終更新 ${esc(rel(t.last_at))}</span></div>
+      <h2 class="dt">${hl(t._title)}</h2>
+      <div class="badges">${badges(t)}<span class="metaline">${t.events.length} 件の記録${dead ? `（取り消し済み ${dead}）` : ''} · 最終更新 ${esc(rel(t.last_at))}</span></div>
     </header>
-    ${t.workflow ? workflowCard(t) + exchange(t) : '<div class="note plain" style="margin-top:20px">従来形式の作業記録です。提出と確認を分ける新しい依頼は、別のスレッドで始めます。</div>'}
+    ${t.workflow ? workflowCard(t) + exchange(t) : `<div class="note plain" style="margin-top:20px">従来形式の作業記録です。提出と確認を分ける新しい依頼は、別のスレッドで始めます。</div>`}
     ${feed(t)}</div>`;
+  const head = box.querySelector('.dhead'), bar = $('#dbar');
+  if (head && bar && 'IntersectionObserver' in window) {
+    headObserver = new IntersectionObserver(([en]) => bar.classList.toggle('on', !en.isIntersecting && box.scrollTop > 0), {root: box, threshold: 0});
+    headObserver.observe(head);
+  }
 }
 
 // ---- 操作
@@ -670,13 +832,18 @@ const smooth = () => matchMedia('(prefers-reduced-motion: reduce)').matches ? 'a
 const keyFromHash = () => { try { const k = decodeURIComponent(location.hash.slice(1)); return byKey[k] ? k : null; } catch (_) { return null; } };
 let pushed = false;
 function applyView(){ document.body.dataset.view = state.view; }
+function open(key){   // 詳細を描いてから既読にする (= 「ここから新着」 の線は前に開いた時点で引く)
+  const t = byKey[key]; state.sel = key;
+  state.prevSeen = t && isNew(t) ? lastSeen(t) : null;
+  renderDetail(); markSeen(t); renderTools(); renderList();
+}
 function select(key){
-  state.sel = key;
+  if (!byKey[key]) return;
   const url = '#' + encodeURIComponent(key);
   if (narrow() && state.view !== 'detail') { history.pushState({detail: true}, '', url); pushed = true; }
   else history.replaceState(history.state, '', url);
-  state.view = 'detail';
-  renderList(); renderDetail(); applyView();
+  state.view = 'detail'; applyView();
+  open(key);
   $('#detail').scrollTop = 0;
   document.querySelector('.row[aria-current="true"]')?.scrollIntoView({block: 'nearest'});
 }
@@ -686,15 +853,24 @@ function back(){
   state.view = 'list'; applyView();
 }
 window.addEventListener('popstate', () => { const k = keyFromHash(); pushed = false;
-  if (k) { state.sel = k; state.view = 'detail'; } else state.view = 'list';
-  renderList(); renderDetail(); applyView(); });
+  if (k) { state.view = 'detail'; applyView(); open(k); } else { state.view = 'list'; applyView(); renderList(); } });
 function move(d){
-  const vis = visible(); if (!vis.length) return;
+  const vis = navList(); if (!vis.length) return;
   const i = vis.findIndex(t => t.key === state.sel);
   select(vis[i < 0 ? 0 : Math.max(0, Math.min(vis.length - 1, i + d))].key);
 }
+function nextNew(){
+  const vis = visible().filter(isNew);
+  if (!vis.length) { toast('新着はありません'); return; }
+  const all = visible(), i = all.findIndex(t => t.key === state.sel);
+  const t = all.slice(i + 1).find(isNew) || vis[0];
+  if (folded(groupOf(t))) { foldPref[groupOf(t)] = false; store.set(FOLD_KEY, foldPref); }
+  select(t.key);
+}
 function jump(id){
-  const el = document.getElementById('ev-' + id);
+  let el = document.getElementById('ev-' + id);
+  const t = byKey[state.sel];
+  if (!el && t && t.events.some(e => e.event_id === id) && !state.expanded.has(t.key)) { state.expanded.add(t.key); renderDetail(); el = document.getElementById('ev-' + id); }
   if (!el) { toast('この記録は表示されていません'); return; }
   el.scrollIntoView({block: 'center', behavior: smooth()});
   el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
@@ -706,11 +882,22 @@ async function copy(text){
   const ta = document.createElement('textarea'); ta.value = text; ta.style.cssText = 'position:fixed;opacity:0'; document.body.append(ta); ta.select();
   const ok = document.execCommand('copy'); ta.remove(); toast(ok ? 'コピーしました' : 'コピーできませんでした');
 }
+function setQuery(v){
+  state.q = v.trim(); state.terms = state.q.toLowerCase().split(/\s+/).filter(Boolean);
+  renderTools(); renderList();
+  if (state.sel) { const box = $('#detail'), y = box.scrollTop; renderDetail(); box.scrollTop = y; }
+}
 document.addEventListener('click', e => {
   const cp = e.target.closest('[data-copy]'); if (cp) { copy(cp.dataset.copy); return; }
   const go = e.target.closest('[data-go]'); if (go) { select(go.dataset.go); return; }
   const jp = e.target.closest('[data-jump]'); if (jp) { jump(jp.dataset.jump); return; }
+  const fd = e.target.closest('[data-fold]'); if (fd) { const k = fd.dataset.fold; foldPref[k] = !folded(k); store.set(FOLD_KEY, foldPref); renderList(); return; }
+  const ex = e.target.closest('[data-expand]'); if (ex) { state.expanded.add(ex.dataset.expand); const box = $('#detail'), y = box.scrollTop; renderDetail(); box.scrollTop = y; return; }
   if (e.target.closest('[data-back]')) { back(); return; }
+  if (e.target.closest('[data-top]')) { $('#detail').scrollTo({top: 0, behavior: smooth()}); return; }
+  if (e.target.closest('[data-help]')) { $('#help').showModal(); return; }
+  if (e.target.closest('[data-onlynew]')) { state.onlyNew = !state.onlyNew; renderTools(); renderList(); return; }
+  if (e.target.closest('[data-allseen]')) { markAllSeen(); state.onlyNew = false; renderTools(); renderList(); toast('すべて既読にしました'); return; }
   const sc = e.target.closest('[data-scope]'); if (sc) { state.scope = sc.dataset.scope; renderTools(); renderList(); return; }
   const ag = e.target.closest('[data-agent]'); if (ag) { const a = ag.dataset.agent; state.agents.has(a) ? state.agents.delete(a) : state.agents.add(a); renderTools(); renderList(); return; }
   const pj = e.target.closest('[data-project]'); if (pj) { const p = pj.dataset.project;
@@ -719,28 +906,32 @@ document.addEventListener('click', e => {
   if (e.target.closest('[data-reset]')) { state.agents = new Set(['claude', 'codex', 'human', 'other']); state.projects = new Set(allProjects); state.inbox = 'all'; renderTools(); renderList(); }
 });
 document.addEventListener('change', e => { if (e.target.id === 'session-filter') { state.inbox = e.target.value; renderTools(); renderList(); } });
-$('#q').addEventListener('input', e => { state.q = e.target.value.trim(); renderTools(); renderList(); });
+let qTimer;
+$('#q').addEventListener('input', e => { clearTimeout(qTimer); const v = e.target.value; qTimer = setTimeout(() => setQuery(v), 120); });
 document.addEventListener('keydown', e => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if ($('#help').open) return;
   if (e.target.matches?.('input,textarea,select')) {
-    if (e.key === 'Escape') e.target.blur();
-    if (e.key === 'Enter' && e.target.id === 'q') { const v = visible(); if (v.length) select(v[0].key); }
+    if (e.key === 'Escape') { if (e.target.id === 'q' && e.target.value) { e.target.value = ''; clearTimeout(qTimer); setQuery(''); } else e.target.blur(); }
+    if (e.key === 'Enter' && e.target.id === 'q') { clearTimeout(qTimer); setQuery(e.target.value); const v = navList(); if (v.length) select(v[0].key); }
     return;
   }
   if (e.key === '/') { e.preventDefault(); if (narrow() && state.view === 'detail') back(); $('#q').focus(); return; }
+  if (e.key === '?') { $('#help').showModal(); return; }
   if (e.key === 't') { cycleTheme(); return; }
+  if (e.key === 'n') { nextNew(); return; }
   if (e.key === 'Escape' && narrow() && state.view === 'detail') { back(); return; }
   if (e.key === 'j' || e.key === 'k') move(e.key === 'j' ? 1 : -1);
 });
 
 // ---- テーマ (システム / ライト / ダーク) と再読み込み
 const THEMES = ['system', 'light', 'dark'], TLABEL = {system: 'システムに合わせる', light: 'ライト', dark: 'ダーク'};
-let theme = 'system'; try { theme = localStorage.getItem('board-theme') || 'system'; } catch (_) {}
-if (!THEMES.includes(theme)) theme = 'system';
+let theme = store.get('board-theme', 'system');
+if (!THEMES.includes(theme)) { try { theme = localStorage.getItem('board-theme') || 'system'; } catch (_) {} if (!THEMES.includes(theme)) theme = 'system'; }
 function applyTheme(){
   const r = document.documentElement; if (theme === 'system') r.removeAttribute('data-theme'); else r.setAttribute('data-theme', theme);
   const b = $('#theme'); b.innerHTML = svg(theme); b.title = `テーマ: ${TLABEL[theme]}（t で切り替え）`; b.setAttribute('aria-label', b.title);
-  try { localStorage.setItem('board-theme', theme); } catch (_) {}
+  store.set('board-theme', theme);
 }
 function cycleTheme(){ theme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length]; applyTheme(); }
 $('#theme').addEventListener('click', cycleTheme);
@@ -752,9 +943,11 @@ $('#search-ic').outerHTML = svg('search');
 
 // ---- 起動
 const initial = keyFromHash();
-state.sel = initial || visible()[0]?.key || null;
 state.view = initial ? 'detail' : 'list';
-applyTheme(); renderBrand(); renderAlerts(); renderTools(); renderList(); renderDetail(); renderFoot(); applyView();
+applyTheme(); renderBrand(); renderAlerts(); renderFoot(); applyView();
+const first = initial || navList()[0]?.key || null;
+if (first && (initial || !narrow())) open(first);
+else { state.sel = first; renderTools(); renderList(); renderDetail(); }
 document.querySelector('.row[aria-current="true"]')?.scrollIntoView({block: 'nearest'});
 setInterval(() => { renderBrand(); renderList(); }, 60000);
 })();
