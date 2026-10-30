@@ -91,7 +91,10 @@ touch.
 Post when another session could act differently because of it. New delegation uses the
 [v2 workflow](#request-and-receipt-workflow-v2): request, claim, material finding/blocker/update, then submit and
 reviewer receipt. Self-initiated peer status and existing v1 threads use the legacy claim/finding/blocker/update and
-done/abandoned path. Never use legacy `done` to close a v2 request.
+done/abandoned path. Never use legacy `done` to close a v2 request. `board.py` has no `done` / `abandoned` subcommand:
+write the event with `board-view.py --root <board> --template done --project <key> --thread <id> --task '…' --summary '…'
+--write`, then commit and push that event file in the board repo. A v1 thread counts as closed only while its last live
+event is `done` or `abandoned`, so an `update` posted after the `done` reopens it (measured).
 
 When posting work for a receiver with a small effective context window, minimise its read set and require step-wise
 durable commits (layer-1 `claude-config/conventions/output-cap-death-loop.md#context-compaction-loss`). A
