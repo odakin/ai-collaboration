@@ -19,9 +19,13 @@ Usage
           into DEST_DIR, never the other way.  Prints the contamination-grep reminder.  Pass the same --root as create.
           When DEST_DIR is inside a git work tree, it warns about collected files the repository ignores (a LaTeX `*.out`
           rule drops checker outputs and `git add <dir>` skips them silently; add them with `git add -f`).
-          The literature the reviewer downloaded into scratch/ (PDF, e-print archives, and the text extracted from them =
-          a file with the same name stem) is not copied: it is someone else's copyrighted work and DEST_DIR is often a
-          repository or a synced folder shared with collaborators (measured).  The originals stay in the sandbox; --include-literature copies them anyway.
+          The literature the reviewer downloaded into scratch/ (PDF, e-print archives, saved web pages, and what is named
+          after them: the text extract with the same stem, the unpacked e-print directory, page images / OCR / other
+          versions named <stem>-… / <stem>_… / <stem>v…) is not copied: it is someone else's copyrighted work and
+          DEST_DIR is often a repository or a synced folder shared with collaborators (measured).  Derived files under
+          names the reviewer chose (a page-image folder named after an author, a renamed source folder) are not
+          recognized: look through DEST_DIR/scratch before committing.  The originals stay in the sandbox;
+          --include-literature copies them anyway.
   make-review-sandbox.py --selftest
 
 Before --include, clean the review markup: review-markup-clean.py (colour / Q&A).  create strips the
@@ -110,15 +114,37 @@ def create(root: Path, slug: str, spec: Path, includes: list[Path], keep_comment
 
 
 LITERATURE_SUFFIXES = (".pdf", ".tar.gz", ".tgz", ".tar", ".djvu", ".epub")
+# saved web pages (abstract pages, journal landing pages, API answers) are third-party text too
+PAGE_SUFFIXES = (".html", ".htm", ".xml")
+# what a reviewer derives from a downloaded file and names after it (text, page images, versions, source parts);
+# a script named after a paper (`<id>_check.py`) is the reviewer's own and is kept
+DERIVED_SUFFIXES = (".txt", ".png", ".jpg", ".jpeg", ".ppm", ".html", ".htm", ".xml", ".tex", ".bbl", ".ps", ".eps")
 
 
 def _literature_ignore(skipped: list[Path]):
-    """copytree ignore: downloaded literature + text extracted from it (same stem), recorded in `skipped`."""
+    """copytree ignore: downloaded literature and what was derived from it, recorded in `skipped`.
+
+    Skipped: the downloads (LITERATURE_SUFFIXES), saved web pages (PAGE_SUFFIXES), a file with the stem of a
+    download (its text extract), a directory with the name of a downloaded archive (the unpacked e-print source =
+    third-party TeX), and a derived file named <stem><-_.v...> after a download (page images, OCR, other versions).
+    Measured: the earlier rule kept unpacked `<id>-src/` directories, `<id>-abs.html` pages and page images with
+    their OCR, so third-party sources reached the destination repository."""
     def ignore(dirpath, names):
-        bases = {n[: -len(suf)] for n in names for suf in LITERATURE_SUFFIXES if n.lower().endswith(suf)}
-        out = {n for n in names
-               if any(n.lower().endswith(suf) for suf in LITERATURE_SUFFIXES) or Path(n).stem in bases}
-        out = {n for n in out if not (Path(dirpath) / n).is_dir()}
+        bases = {n[: -len(suf)] for n in names for suf in LITERATURE_SUFFIXES + PAGE_SUFFIXES
+                 if n.lower().endswith(suf)}
+
+        def derived(n: str) -> bool:
+            return any(n.startswith(b) and len(n) > len(b) and n[len(b)] in "-_.v" for b in bases if b)
+
+        out = set()
+        for n in names:
+            low, is_dir = n.lower(), (Path(dirpath) / n).is_dir()
+            if is_dir:
+                if n in bases or Path(n).stem in bases or derived(n):
+                    out.add(n)
+            elif (any(low.endswith(suf) for suf in LITERATURE_SUFFIXES + PAGE_SUFFIXES) or Path(n).stem in bases
+                  or (derived(n) and low.endswith(DERIVED_SUFFIXES))):
+                out.add(n)
         skipped.extend(Path(dirpath) / n for n in sorted(out))
         return out
     return ignore
@@ -148,8 +174,9 @@ def collect(root: Path, slug: str, into: Path, include_literature: bool = False)
             ignore = None if include_literature or sub != "scratch" else _literature_ignore(skipped)
             shutil.copytree(d, into / sub, dirs_exist_ok=True, ignore=ignore); copied.append(into / sub)
     if skipped:
-        print(f"  ↷ not copied: {len(skipped)} literature file(s) in scratch/ (PDF / e-print / their text extracts;"
-              f" the originals stay in {sb / 'scratch'}). --include-literature copies them")
+        print(f"  ↷ not copied: {len(skipped)} literature file(s) in scratch/ (PDF / e-print / saved pages / what is named"
+              f" after them; the originals stay in {sb / 'scratch'}). --include-literature copies them."
+              f" Derived files under names the reviewer chose are not recognized: look through {into / 'scratch'} before committing")
     ignored = git_ignored(into, copied)
     if ignored:
         names = ", ".join(sorted({p.suffix or p.name for p in ignored}))
@@ -213,6 +240,18 @@ def selftest() -> int:
             collect(root, "t1", Path(td) / "dest-lit")
         got_lit = sorted(q.name for q in (Path(td) / "dest-lit" / "scratch").iterdir())
         assert got_lit == ["numbers.txt", "try.py"], got_lit
+        # unpacked e-print source, saved abstract page, page images / OCR and other versions are third-party too;
+        # a script named after the paper is the reviewer's own
+        (sb / "scratch" / "2401.00002-src.tgz").write_text("x\n", encoding="utf-8")
+        (sb / "scratch" / "2401.00002-src").mkdir()
+        (sb / "scratch" / "2401.00002-src" / "main.tex").write_text("x\n", encoding="utf-8")
+        for name in ("2401.00002.pdf", "2401.00002-abs.html", "2401.00002_p-01.png", "2401.00002_p-01.txt",
+                     "2401.00002v1.txt", "2401.00002_check.py", "journal_landing.html"):
+            (sb / "scratch" / name).write_text("x\n", encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()):
+            collect(root, "t1", Path(td) / "dest-lit2")
+        got_lit2 = sorted(q.name for q in (Path(td) / "dest-lit2" / "scratch").iterdir())
+        assert got_lit2 == ["2401.00002_check.py", "numbers.txt", "try.py"], got_lit2
         with contextlib.redirect_stdout(io.StringIO()):
             collect(root, "t1", Path(td) / "dest-all", include_literature=True)
         assert (Path(td) / "dest-all" / "scratch" / "cited_2401.00001.txt").exists()

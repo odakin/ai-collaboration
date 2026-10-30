@@ -18,7 +18,9 @@ requester should not read its messages while it runs.  Two things were being don
 
 The transcript is found from the sandbox path: <config dir>/projects/<sandbox path with non-alphanumerics -> "-">/*.jsonl,
 over $CLAUDE_CONFIG_DIR, ~/.claude and every ~/.claude-* (or --config-dir).  Several transcripts in that directory are
-several launches (attempts); each is reported.
+several launches (attempts); each is reported.  The transcripts of the subagents a launch started
+(<session id>/subagents/*.jsonl) belong to that launch: status adds their tool counts, and receipt takes their network
+use into the seal order and the web list and their text into the contamination counts.
 
 Usage
   inspect-review-sandbox.py status  SANDBOX_DIR [--config-dir DIR ...]
@@ -72,6 +74,16 @@ def find_transcripts(sandbox: Path, config_dirs: list[Path]) -> list[Path]:
             if d.is_dir():
                 found.extend(d.glob("*.jsonl"))
     return sorted(set(found), key=lambda p: p.stat().st_mtime)
+
+
+def subagent_transcripts(main: Path) -> list[Path]:
+    """Transcripts of the subagents (Agent tool) that a launch started: <session id>/subagents/*.jsonl next to it.
+
+    A reviewer may delegate parts of the spec to subagents; their tool calls, downloads and contamination hits are
+    recorded only there (measured: the downloads of a run were all in subagent transcripts, and the main one alone
+    read as "no network use")."""
+    d = main.with_suffix("") / "subagents"
+    return sorted(d.glob("*.jsonl"), key=lambda p: p.stat().st_mtime) if d.is_dir() else []
 
 
 def writes_seal(tool: str, inp: dict, seal_name: str) -> bool:
@@ -181,6 +193,15 @@ def cmd_status(sandbox: Path, config_dirs: list[Path], seal_name: str) -> int:
                   "or split the spec, relaunch (output-cap-death-loop.md).")
         elif info["thinking_only_cap"] == 1:
             print("  note: one response hit the output limit with thinking only; check again after the next response.")
+        subs = subagent_transcripts(t)
+        if subs:
+            tools, denied = collections.Counter(), 0
+            for s in subs:
+                si = parse(s, seal_name)
+                tools.update(si["tools"])
+                denied += si["denied"]
+            print(f"  subagents: {len(subs)} transcripts, tool calls: "
+                  + (", ".join(f"{k} {v}" for k, v in sorted(tools.items())) or "none") + f"; permission denials: {denied}")
     return 0
 
 
@@ -218,23 +239,30 @@ def cmd_receipt(sandbox: Path, results: Path, config_dirs: list[Path], seal: str
         print(f"seal: {seal} or {sealed} not found under {results} (single-stage run?)")
     transcripts = find_transcripts(sandbox, config_dirs)
     seal_name = Path(seal).stem
+    all_transcripts = []
     for i, t in enumerate(transcripts, 1):
         info = parse(t, seal_name)
-        first_net = min((n[0] for n in info["net"] if n[0]), default=None)
-        if info["seal_ts"] and first_net:
-            ok = info["seal_ts"] <= first_net
-            print(f"transcript {i}/{len(transcripts)}: seal written {info['seal_ts']}, first network use {first_net} -> "
+        subs = subagent_transcripts(t)
+        all_transcripts += [t] + subs
+        parts = [info] + [parse(s, seal_name) for s in subs]
+        nets = sorted((n for p in parts for n in p["net"]), key=lambda n: n[0] or "")
+        seal_ts = min((p["seal_ts"] for p in parts if p["seal_ts"]), default=None)
+        first_net = min((n[0] for n in nets if n[0]), default=None)
+        label = f"transcript {i}/{len(transcripts)}" + (f" (+ {len(subs)} subagent transcripts)" if subs else "")
+        if seal_ts and first_net:
+            ok = seal_ts <= first_net
+            print(f"{label}: seal written {seal_ts}, first network use {first_net} -> "
                   f"{'seal precedes the literature' if ok else 'NETWORK USE BEFORE THE SEAL'}")
             status = status if ok else 1
-        elif info["seal_ts"]:
-            print(f"transcript {i}/{len(transcripts)}: seal written {info['seal_ts']}, no network use")
+        elif seal_ts:
+            print(f"{label}: seal written {seal_ts}, no network use")
         elif first_net:
-            print(f"transcript {i}/{len(transcripts)}: no seal command found, first network use {first_net}")
+            print(f"{label}: no seal command found, first network use {first_net}")
         else:
-            print(f"transcript {i}/{len(transcripts)}: no seal command and no network use")
-        for ts, kind, value in info["net"]:
+            print(f"{label}: no seal command and no network use")
+        for ts, kind, value in nets:
             print(f"  {kind:8s} {ts}  {value}")
-        print(f"  permission denials: {info['denied']}; tool calls: {sum(info['tools'].values())}")
+        print(f"  permission denials: {sum(p['denied'] for p in parts)}; tool calls: {sum(sum(p['tools'].values()) for p in parts)}")
     if terms:
         result_text = []
         for name in RESULT_NAMES:
@@ -246,7 +274,7 @@ def cmd_receipt(sandbox: Path, results: Path, config_dirs: list[Path], seal: str
                 except OSError:
                     pass
         joined = "\n".join(result_text)
-        transcript_text = "\n".join(t.read_text(encoding="utf-8", errors="replace") for t in transcripts)
+        transcript_text = "\n".join(t.read_text(encoding="utf-8", errors="replace") for t in all_transcripts)
         print("contamination terms (case-insensitive): term -> result files / transcript")
         for term in terms:
             r, tr = count_term(term, joined), count_term(term, transcript_text)
@@ -315,6 +343,22 @@ def selftest() -> int:
                + assistant("T02", [{"type": "tool_use", "name": "Write", "input": {"file_path": "notes/stage1-seal.txt", "content": digest}}]))
         (proj / "a.jsonl").write_text(bad)
         assert cmd_receipt(sandbox, sandbox, [cfg], "notes/stage1-seal.txt", "notes/stage1-blind.md", []) == 1
+        # a subagent of the launch: its network use enters the seal order, its text the contamination counts
+        (proj / "a.jsonl").write_text(good)
+        sub = proj / "a" / "subagents"
+        sub.mkdir(parents=True)
+        (sub / "agent-x.jsonl").write_text(assistant("T03", [{"type": "tool_use", "name": "WebFetch", "input": {"url": "https://example.org/early"}}])
+                                           + assistant("T05", [{"type": "text", "text": "subagent saw HiddenWord"}]))
+        assert subagent_transcripts(proj / "a.jsonl") == [sub / "agent-x.jsonl"]
+        assert cmd_receipt(sandbox, sandbox, [cfg], "notes/stage1-seal.txt", "notes/stage1-blind.md", []) == 1
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            cmd_receipt(sandbox, sandbox, [cfg], "notes/stage1-seal.txt", "notes/stage1-blind.md", ["HiddenWord"])
+            cmd_status(sandbox, [cfg], "stage1-seal")
+        out = buf.getvalue()
+        assert "'HiddenWord': 0 / 1" in out and "(+ 1 subagent transcripts)" in out and "subagents: 1 transcripts" in out, out
+        (sub / "agent-x.jsonl").unlink()
+        sub.rmdir(); sub.parent.rmdir()
         # a modified sealed note is flagged
         (proj / "a.jsonl").write_text(good)
         (sandbox / "notes" / "stage1-blind.md").write_text("edited after the seal\n")
