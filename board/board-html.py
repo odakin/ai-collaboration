@@ -226,6 +226,7 @@ mark{background:color-mix(in srgb,var(--orange) 30%,transparent);color:inherit;b
 .hbtn[disabled]{opacity:.55;cursor:default;filter:none}
 .hand-st{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--green-ink)}
 .hand-st svg{width:14px;height:14px;stroke-width:2.5}
+.hand-why{font-size:12.5px;color:var(--muted)}
 .rm .hs{flex:none;color:var(--green-ink);font-weight:600}
 .note ul{margin:6px 0 2px;padding-left:18px}
 .note li+li{margin-top:4px}
@@ -519,7 +520,8 @@ function pickedBy(t){
   evs.forEach((e, i) => { if (PICKUP_RESET.has(e.kind) || (e.kind === 'update' && e.reply_to)) last = i; });
   return evs.slice(last + 1).find(e => e.kind === 'note' && (e.summary || '').startsWith(PICKUP) && Date.now() - Date.parse(e.created_at) < PICKUP_HOLD_MS) || null;
 }
-const handable = w => !!(HAND && w && w.request_id && ['requested', 'stale', 'submitted', 'blocked'].includes(w.status) && /^role-/.test(w.waiting_on?.session_id || ''));
+const stranded = w => !!(HAND?.stranded || []).includes(w?.request_id);   // 宛先の session が終わった依頼 (board-serve が判定)
+const handable = w => !!(HAND && w && w.request_id && ['requested', 'stale', 'submitted', 'blocked'].includes(w.status) && (/^role-/.test(w.waiting_on?.session_id || '') || stranded(w)));
 
 // ---- threads と、 セッション ID → 名前 (= 投稿時の --session-name) の対応
 const threads = DATA.threads.map(t => ({...t, key: t.project + '/' + t.thread_id}));
@@ -759,7 +761,7 @@ function handHtml(t){
   const st = handStates.get(w.request_id);
   if (st === 'queued') return `<div class="hand"><span class="hand-st">${svg('check')}渡しました — 受け取り待ち</span></div>`;
   if (st === 'started') return `<div class="hand"><span class="hand-st">${svg('check')}受け取りました — 対応中</span></div>`;
-  return `<div class="hand"><button type="button" class="hbtn" data-handoff="${esc(w.request_id)}">${esc(HAND.label)}</button></div>`;
+  return `<div class="hand"><button type="button" class="hbtn" data-handoff="${esc(w.request_id)}">${esc(HAND.label)}</button>${stranded(w) ? '<span class="hand-why">宛先の session は終了しています</span>' : ''}</div>`;
 }
 async function handoff(btn){
   const rid = btn.dataset.handoff; btn.disabled = true;

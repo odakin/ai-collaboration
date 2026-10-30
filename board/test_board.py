@@ -427,6 +427,33 @@ class Pickup(unittest.TestCase):
         self.assertIsNone(board.pickup_problem([r,self.note(1,'a')],self.note(2,'a')))     # the same session again
         self.assertIn('引き受け済み',board.pickup_problem([r,self.note(1,'a')],self.note(2,'b')))
 
+class SessionState(unittest.TestCase):
+    def test_states(self):
+        import os, time
+        if not (board.ENGINE.parent.parent/'claude-config'/'scripts'/'lib'/'session_model.py').is_file():
+            self.skipTest('layer-1 session_model.py not installed')
+        td=tempfile.TemporaryDirectory(); root=Path(td.name)
+        (root/'sessions').mkdir(); (root/'projects'/'-w-p').mkdir(parents=True)
+        live='0123abcd-0000-4000-8000-000000000001'; old='4567cdef-0000-4000-8000-000000000002'; fresh='89abef01-0000-4000-8000-000000000003'
+        (root/'sessions'/'1.json').write_text(json.dumps({'pid':os.getpid(),'sessionId':live,'cwd':'/w/p'}))
+        for sid in (live,old,fresh): (root/'projects'/'-w-p'/f'{sid}.jsonl').write_text('{}\n')
+        os.utime(root/'projects'/'-w-p'/f'{old}.jsonl',(time.time()-7200,time.time()-7200))
+        saved={k:os.environ.get(k) for k in ('CLAUDE_SESSIONS_DIR','CLAUDE_PROJECTS_DIR')}
+        os.environ['CLAUDE_SESSIONS_DIR']=str(root/'sessions'); os.environ['CLAUDE_PROJECTS_DIR']=str(root/'projects')
+        try:
+            self.assertEqual(board.session_state('claude',live),'live')
+            self.assertEqual(board.session_state('claude',old),'ended')
+            self.assertEqual(board.session_state('claude',old[:8]),'ended')                     # an 8-character address
+            self.assertEqual(board.session_state('claude',fresh),'unknown')                     # just quiet: an app restart is not an end
+            self.assertEqual(board.session_state('claude','ffffffff-0000-4000-8000-000000000009'),'unknown')   # no transcript here = another machine's
+            self.assertEqual(board.session_state('claude','role-p-x'),'unknown')
+            self.assertEqual(board.session_state('codex',old),'unknown')
+        finally:
+            for k,v in saved.items():
+                if v is None: os.environ.pop(k,None)
+                else: os.environ[k]=v
+            td.cleanup()
+
 class Note(unittest.TestCase):
     def test_note_is_inert_in_request_thread(self):
         r,c,sub=chain(); n=event('note',5,agent='codex')

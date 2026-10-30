@@ -675,7 +675,11 @@ open two workers. Measured: in the Claude desktop app, a turn that a background 
 start a session itself (a `start_session` with `user_asked` is refused there), so a consumer woken that way offers the
 owner a card for the worker; a review or an answer it can post itself. `GET /due` (read-only, with or without
 `--handoff-dir`) lists the same requests as JSON, so a coordinating session can also pick them up by itself without a
-click. The write is accepted only from a page this server rendered: Host and Origin must be the
+click. Both also cover a request whose next move is on a native Claude session that has ended (`stranded: true`):
+this machine holds its transcript, it is not in the live registry, and the transcript has been quiet for 30 minutes.
+A session looks absent from every machine but its own, so a session with no transcript here is left to its own
+machine, and restricted threads are left out. Such a request needs a `handover` to a role before anyone can work on
+it (the designated reviewer, or a `human` handover on the owner's instruction, as above). The write is accepted only from a page this server rendered: Host and Origin must be the
 server itself, the body must be JSON (no cross-site form can send it without a preflight, which the server never
 answers) and must carry the per-process token embedded in the page. Without `--handoff-dir` there is no write
 endpoint. A post wakes no session: delivery means pending work is visible on the

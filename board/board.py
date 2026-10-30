@@ -3,6 +3,7 @@
 from __future__ import annotations
 import argparse
 import contextlib
+import glob
 import hashlib
 import importlib.util
 import json
@@ -46,6 +47,7 @@ PICKUP='引き受けた:'                                      # the note `picku
 PICKUP_HOLD_H=2                                           # a pickup holds until the request's next transition or this many hours
 PICKUP_STATES=('requested','stale','submitted','blocked') # the next move is waiting for someone: a pickup says who takes it
 PICKUP_RESET={'request','claim','submit','accept','revise','release','blocker','handover','abandoned'}   # kinds that move the request on
+SESSION_ENDED_QUIET_S=1800                                # a session counts as ended only after this long without a transcript write
 
 
 def run(root, *args, check=True):
@@ -518,6 +520,23 @@ def native_session(agent, session, events):
     names=[(e.get('actor') or {}).get('task') or '' for e in events
            if (e.get('actor') or {}).get('agent')==agent and (e.get('actor') or {}).get('session_id')==session]
     return next((n[:8] for n in reversed(names) if re.match(r'[0-9a-f]{8}(?![0-9a-z])',n)),None)
+
+
+def session_state(agent, session, quiet_s=SESSION_ENDED_QUIET_S):
+    """Whether the native Claude session at `session` has ended, as far as this machine can tell: 'live' (it is in the
+    live registry), 'ended' (this machine holds its transcript, it is not live, and the transcript has been quiet for
+    `quiet_s`: an app restart is not an end) or 'unknown' (a role, another vendor, or no transcript here = probably
+    another machine's session, whose conductor decides; a session looks absent from every machine but its own).
+    Never raises; 'unknown' without the companion tool."""
+    if agent!='claude' or not session or is_role(session) or len(session)<8: return 'unknown'
+    try:
+        sm=_session_model()
+        if sm.live_address(session): return 'live'
+        hits=[f for root in sm.projects_dirs() for f in glob.glob(os.path.join(glob.escape(root),'*',glob.escape(session)+'*.jsonl'))]
+        if hits and time.time()-max(os.path.getmtime(f) for f in hits)>=quiet_s: return 'ended'
+    except Exception:
+        pass
+    return 'unknown'
 
 
 def live_address(agent, session, events):
