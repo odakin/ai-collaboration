@@ -220,6 +220,13 @@ mark{background:color-mix(in srgb,var(--orange) 30%,transparent);color:inherit;b
 .note.plain{background:var(--sunken);border-color:transparent;color:var(--text-2)}
 .note>summary{cursor:pointer;font-weight:600}
 .note.fresh{display:flex;align-items:center;justify-content:space-between;gap:12px;font-weight:600}
+.hand{margin-top:12px;display:flex;align-items:center;gap:10px}
+.hbtn{display:inline-flex;align-items:center;height:34px;padding:0 16px;border-radius:9px;background:var(--accent);color:#fff;font-size:13.5px;font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.hbtn:hover{filter:brightness(1.08)}
+.hbtn[disabled]{opacity:.55;cursor:default;filter:none}
+.hand-st{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--green-ink)}
+.hand-st svg{width:14px;height:14px;stroke-width:2.5}
+.rm .hs{flex:none;color:var(--green-ink);font-weight:600}
 .note ul{margin:6px 0 2px;padding-left:18px}
 .note li+li{margin-top:4px}
 
@@ -500,6 +507,11 @@ const store = {
   set(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} },
 };
 
+// ---- 引き受けを頼む (board-serve --handoff-dir のときだけ): 受け手を待つ依頼を、 押して受付の待ち行列に渡す
+const HAND = DATA.handoff || null;
+const handStates = new Map(Object.entries(HAND?.states || {}));   // request id → queued (渡した) | started (受付が worker を起こした)
+const handable = w => !!(HAND && w && w.request_id && ['requested', 'stale'].includes(w.status) && /^role-/.test(w.assignee?.session_id || ''));
+
 // ---- threads と、 セッション ID → 名前 (= 投稿時の --session-name) の対応
 const threads = DATA.threads.map(t => ({...t, key: t.project + '/' + t.thread_id}));
 const byKey = Object.fromEntries(threads.map(t => [t.key, t]));
@@ -694,10 +706,11 @@ function renderTools(){
 }
 function row(t){
   const g = groupOf(t), turn = turnText(t), nw = isNew(t), sn = state.terms.length ? snippet(t) : '';
+  const hs = HAND && t.workflow?.request_id ? handStates.get(t.workflow.request_id) : null;
   const d = idleDays(t), st = idle(t);
   return `<button type="button" class="row${nw ? ' new' : ''}" data-go="${esc(t.key)}" aria-current="${state.sel === t.key}" title="${esc(t.thread_id)}">
     <span class="dot g-${g}" aria-hidden="true"></span>
-    <span class="rmain"><span class="rt">${hl(t._title)}</span>${sn ? `<span class="rs">${hl(sn)}</span>` : ''}<span class="rm"><span class="proj">${esc(projLabel(t.project))}</span>${turn ? `<span aria-hidden="true">·</span><span>${esc(turn)}</span>` : ''}</span></span>
+    <span class="rmain"><span class="rt">${hl(t._title)}</span>${sn ? `<span class="rs">${hl(sn)}</span>` : ''}<span class="rm"><span class="proj">${esc(projLabel(t.project))}</span>${turn ? `<span aria-hidden="true">·</span><span>${esc(turn)}</span>` : ''}${hs ? `<span aria-hidden="true">·</span><span class="hs">${hs === 'queued' ? '渡し済み' : '起動済み'}</span>` : ''}</span></span>
     <span class="ra${st ? ' stale' : ''}">${nw ? '<span class="nd" aria-hidden="true"></span><span class="vh">新着</span>' : ''}<time datetime="${esc(t.last_at)}" title="${esc(abs(t.last_at))}${st ? `・最後の動きから ${d} 日` : ''}">${esc(st ? `放置 ${d}日` : rel(t.last_at))}</time></span></button>`;
 }
 function renderList(){
@@ -730,6 +743,26 @@ function badges(t){
     t.unpromoted.length ? `<span class="badge g-todo">未反映の発見 ${t.unpromoted.length}</span>` : '',
     t.project === 'restricted' ? '<span class="badge plain">🔒 メタデータのみ</span>' : ''].join('');
 }
+function handHtml(w){
+  if (!handable(w)) return '';
+  const st = handStates.get(w.request_id);
+  if (st === 'queued') return `<div class="hand"><span class="hand-st">${svg('check')}渡しました — 受け取り待ち</span></div>`;
+  if (st === 'started') return `<div class="hand"><span class="hand-st">${svg('check')}worker を起こしました — 着手待ち</span></div>`;
+  return `<div class="hand"><button type="button" class="hbtn" data-handoff="${esc(w.request_id)}">${esc(HAND.label)}</button></div>`;
+}
+async function handoff(btn){
+  const rid = btn.dataset.handoff; btn.disabled = true;
+  let r = null, j = {};
+  try {
+    r = await fetch('/handoff', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({token: HAND.token, request_id: rid})});
+    j = await r.json().catch(() => ({}));
+  } catch (_) {}
+  if (!r) { toast('サーバーに届きませんでした'); btn.disabled = false; return; }
+  if (!r.ok || !j.ok) { toast(j.why || `渡せませんでした (${r.status})`); btn.disabled = false; return; }
+  handStates.set(rid, j.already || 'queued');
+  toast(j.already ? 'もう渡してあります' : (j.note || HAND.note));
+  const box = $('#detail'), y = box.scrollTop; renderDetail(); box.scrollTop = y; renderList();
+}
 function workflowCard(t){
   const w = t.workflow, cur = STEP_AT[w.status];
   const steps = cur === undefined ? '' : `<ol class="steps g-${groupOf(t)}" aria-label="進み具合">${STEPS.map((s, i) => { const st = i < cur ? 'done' : i === cur ? 'cur' : 'todo';
@@ -737,7 +770,7 @@ function workflowCard(t){
   const turn = w.status === 'invalid'
     ? `<div class="turn bad"><div class="turn-h">記録に矛盾があり、状態を確定できません</div><p>下の経過と各記録の詳細を確認してください。</p></div>`
     : w.waiting_on
-    ? `<div class="turn"><div class="turn-h"><span>次に動く人</span>${whoHtml(w.waiting_on)}</div>${w.next_action ? `<p>${esc(w.next_action)}</p>` : ''}</div>`
+    ? `<div class="turn"><div class="turn-h"><span>次に動く人</span>${whoHtml(w.waiting_on)}</div>${w.next_action ? `<p>${esc(w.next_action)}</p>` : ''}${handHtml(w)}</div>`
     : `<div class="turn fin"><div class="turn-h">${esc(w.label)}</div><p>${esc(w.next_action || 'この依頼は終了しました。')}</p></div>`;
   const leaseRow = w.lease_until && ['working', 'revision', 'blocked', 'stale'].includes(w.status)
     ? `<dt>担当期限</dt><dd>${esc(abs(w.lease_until))} まで · <span class="${w.claim_expired ? 'bad' : 'muted'}">${w.claim_expired ? '期限切れ' : esc(remain(w.lease_until))}</span></dd>` : '';
@@ -890,6 +923,7 @@ function setQuery(v){
   if (state.sel) { const box = $('#detail'), y = box.scrollTop; renderDetail(); box.scrollTop = y; }
 }
 document.addEventListener('click', e => {
+  const hb = e.target.closest('[data-handoff]'); if (hb) { if (!hb.disabled) handoff(hb); return; }
   const cp = e.target.closest('[data-copy]'); if (cp) { copy(cp.dataset.copy); return; }
   const go = e.target.closest('[data-go]'); if (go) { select(go.dataset.go); return; }
   const jp = e.target.closest('[data-jump]'); if (jp) { jump(jp.dataset.jump); return; }
@@ -950,6 +984,13 @@ if (/^https?:$/.test(location.protocol) && DATA.head !== 'demo') {
     let v = null;
     try { const r = await fetch('/version' + (force ? '?refresh=1' : ''), {cache: 'no-store'}); if (r.ok) v = await r.json(); } catch (_) {}
     if (!v) { dead = true; if (wantReload) location.reload(); return; }   // /version の無い古いサーバー = 従来どおり読み直しだけ
+    if (HAND && v.handoffs) {
+      const h = JSON.stringify(Object.entries(v.handoffs).sort());
+      if (h !== JSON.stringify([...handStates].sort())) {
+        handStates.clear(); Object.entries(v.handoffs).forEach(([k, x]) => handStates.set(k, x));
+        renderList(); if (state.sel) { const box = $('#detail'), y = box.scrollTop; renderDetail(); box.scrollTop = y; }
+      }
+    }
     if (v.head && v.head !== DATA.head) {
       if (!touched || wantReload) { location.reload(); return; }
       showFresh(); spin(false);

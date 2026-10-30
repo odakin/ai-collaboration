@@ -636,10 +636,22 @@ python3 board-view.py --selftest && python3 board-session-start.py --selftest &&
 is yours). What it prints, when it stays silent and the settings snippet are at the head of
 [`board-session-start.py`](board-session-start.py).
 
-The HTML view groups work by whose turn it is. `/demo` on the local server is fictional. The server is read-only,
-loopback-only and serves no source files. It answers a page view at once from its last render (the first one from
-the local checkout) and synchronizes in the background; the page polls `/version` and reloads itself when the
-synchronized render is newer, or offers a reload if the reader has already started reading. A post wakes no session: delivery means pending work is visible on the
+The HTML view groups work by whose turn it is. `/demo` on the local server is fictional. The server is read-only
+(except the opt-in hand-off queue below), loopback-only and serves no source files. It answers a page view at once
+from its last render (the first one from the local checkout) and synchronizes in the background; the page polls
+`/version` and reloads itself when the synchronized render is newer, or offers a reload if the reader has already
+started reading.
+
+<a id="viewer-handoff-queue"></a>**Hand-off queue (opt-in).** `board-serve.py --handoff-dir <dir>` gives every request
+that waits for its worker (a request to a role id whose status is `requested`, or `stale` = the worker's lease expired)
+a button (`--handoff-label`). A click writes `<dir>/<request id>.json` (the request id, project, thread, title, status,
+assignee and the time); the server starts nothing and posts nothing. Whoever the owner wires to the directory (a
+coordinating session, a runner) opens the worker with `board.py launch --request <id>` and moves the file to
+`<dir>/done/`; for an hour after that the page shows the worker as started and refuses a second hand-off, so one click
+cannot open two workers. The write is accepted only from a page this server rendered: Host and Origin must be the
+server itself, the body must be JSON (no cross-site form can send it without a preflight, which the server never
+answers) and must carry the per-process token embedded in the page. Without `--handoff-dir` there is no write
+endpoint. A post wakes no session: delivery means pending work is visible on the
 next inbox or dashboard check, not an immediate wakeup (the one process a post may start is the worker of a request to
 a role, on the requester's machine: [#worker-handoff-text](#worker-handoff-text)). Legacy v1 threads keep their meaning; start a
 new v2 thread for a new request.
