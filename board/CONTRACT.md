@@ -191,10 +191,12 @@ on one machine started a worker its owner meant to start from the other). **Head
 `CODEX_EXEC_REASON` and never starts it; layer-1 `claude-config/hooks/codex-headless-launch-check.sh` stops a headless
 `codex exec` that starts a board worker or a sealed-review judge without a reason. A sealed blind-review judge is not a
 board worker: the worker that holds the request starts it with `codex-app-launch.py start --sealed`
-([`cold-eyes-isolation.md#sealed-sandbox`](../conventions/cold-eyes-isolation.md#sealed-sandbox) step 5), which keeps
-the daemon as the writer, so the judge keeps the environment its launch checked and the network it was given; the app
-shows no progress while it runs (`codex resume <thread id>` attaches a terminal view to the daemon), and the app can
-open and continue it some 40–60 seconds after its turn ends (measured).
+([`cold-eyes-isolation.md#sealed-sandbox`](../conventions/cold-eyes-isolation.md#sealed-sandbox) step 5). The app runs it
+too, so its progress shows there; the launcher checks the instruction files first and refuses `--network` (an app turn
+falls back to the app's network default), so literature goes into the sandbox before the launch. The daemon as the
+writer (`--writer daemon`) shows no progress in the app and takes `--daemon-reason`; without a reason the launcher does
+not start it. `codex resume <thread id>` attaches a terminal view to a daemon run, and the app can open and continue it
+some 40–60 seconds after its turn ends (measured).
 
 Operating facts (measured):
 
