@@ -33,6 +33,9 @@ records the result in the AUTO block, so the receiver never hand-rolls the loop 
 Unknown nonzero exits are failures, not evidence of rejection. A standard marker must
 start a line, have exit 0, and not coexist with FOIL-BROKEN. --run returns nonzero on
 any failed/unknown result (even with --write); an empty inventory is not a coverage check.
+Without --run, the run row of the existing AUTO block is carried over and relabelled as
+the previous run (this invocation did not execute anything), with a note on stderr, so a
+stats-only refresh at receipt no longer drops the last run silently.
 
 State machine (derived, never recorded — conventions/verification-cycle-ops.md):
   spec      spec.md only, no ledger items           → worker not started
@@ -261,6 +264,10 @@ def run_failed(r: dict) -> bool:
     return any(v != "PASS" for _, v in r["checks"]) or any(v != "teeth" for _, v, _ in r["foils"])
 
 
+RUN_ROW = "| **実走 (--run)** |"
+PREV_RUN_ROW = "| **前回の実走 (--run; 今回は再実行していない)** |"
+
+
 def render_run(r: dict) -> str:
     if not r["checks"] and not r["foils"]:
         return ""
@@ -268,8 +275,22 @@ def render_run(r: dict) -> str:
     f_teeth = sum(1 for _, v, _ in r["foils"] if v == "teeth")
     convs = sorted({c for _, _, c in r["foils"]})
     bad = [f"{n}:{v}" for n, v in r["checks"] if v != "PASS"] + [f"{n}:{v}" for n, v, _ in r["foils"] if v != "teeth"]
-    return (f"| **実走 (--run)** | checks {c_pass}/{len(r['checks'])} PASS, foils {f_teeth}/{len(r['foils'])} teeth "
+    return (f"{RUN_ROW} checks {c_pass}/{len(r['checks'])} PASS, foils {f_teeth}/{len(r['foils'])} teeth "
             f"(contract: {', '.join(convs) or '—'})" + (f" ⚠️ {'; '.join(bad)}" if bad else "") + " |")
+
+
+def previous_run_row(camp: Path) -> str | None:
+    """The run row of the existing AUTO block, relabelled as the previous run (None if absent)."""
+    res = camp / "results.md"
+    text = res.read_text(encoding="utf-8") if res.exists() else ""
+    for begin in (AUTO_BEGIN, LEGACY_BEGIN):
+        if begin in text and AUTO_END in text.split(begin, 1)[1]:
+            for line in text.split(begin, 1)[1].split(AUTO_END, 1)[0].splitlines():
+                if line.startswith(PREV_RUN_ROW):
+                    return line
+                if line.startswith(RUN_ROW):
+                    return PREV_RUN_ROW + line[len(RUN_ROW):]
+    return None
 
 
 def render(s: dict) -> str:
@@ -292,6 +313,8 @@ def render(s: dict) -> str:
         row = render_run(s['run'])
         if row:
             lines.append(row)
+    elif s.get('previous_run_row'):
+        lines.append(s['previous_run_row'])
     lines.append(AUTO_END)
     return "\n".join(lines)
 
@@ -551,6 +574,16 @@ def selftest() -> int:
                 path.unlink()
         cli = subprocess.run([sys.executable, __file__, str(camp), "--run"], capture_output=True, text=True)
         assert cli.returncode == 0, cli.stderr
+        # A stats-only --write keeps the last run row, marked as not re-run, and stays byte-stable.
+        cli = subprocess.run([sys.executable, __file__, str(camp), "--run", "--write"], capture_output=True, text=True)
+        assert cli.returncode == 0 and RUN_ROW in (camp / "results.md").read_text(encoding="utf-8"), cli.stderr
+        cli = subprocess.run([sys.executable, __file__, str(camp), "--write"], capture_output=True, text=True)
+        once = (camp / "results.md").read_text(encoding="utf-8")
+        assert cli.returncode == 0 and "not re-run" in cli.stderr, cli.stderr
+        assert PREV_RUN_ROW in once and RUN_ROW not in once and "checks 1/1 PASS, foils 2/2 teeth" in once, once
+        subprocess.run([sys.executable, __file__, str(camp), "--write"], capture_output=True, text=True)
+        assert (camp / "results.md").read_text(encoding="utf-8") == once
+        assert PREV_RUN_ROW not in render(stats(camp, camp)) and RUN_ROW not in render(stats(camp, camp))  # foil: without the carry the row is gone
     with tempfile.TemporaryDirectory() as td:
         root = Path(td); (root / "campaigns" / "retros").mkdir(parents=True)
         def mk(name, ledger=None, results=None):
@@ -583,7 +616,7 @@ def selftest() -> int:
         assert "I-2" in joined and "見直し期日" in joined and "I-3" in joined and "時計なし" in joined and "I-1" not in joined, joined
         assert "a-spec" not in joined  # no git history in tempdir → no age → silent
         txt = render_index(ix); assert "| `c-done` | **done** |" in txt and "I-2" in txt
-    print("selftest OK (21 checks)")
+    print("selftest OK (22 checks)")
     return 0
 
 
@@ -627,6 +660,11 @@ def main(argv: list[str]) -> int:
             print(f"  check {n}: {v}")
         for n, v, c in st["run"]["foils"]:
             print(f"  foil  {n}: {v} [{c}]")
+    else:
+        prev = previous_run_row(camp)
+        if prev:
+            st["previous_run_row"] = prev
+            print("note: no --run; the previous run row is kept and marked as not re-run (add --run to refresh it)", file=sys.stderr)
     block = render(st)
     print(block)
     if write:
