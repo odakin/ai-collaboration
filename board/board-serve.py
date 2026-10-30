@@ -20,7 +20,8 @@ html=importlib.util.module_from_spec(spec); spec.loader.exec_module(html)
 
 # A page view starts a background synchronization at most this often; /version?refresh=1 (the page's reload button)
 # starts one at once. Measured: the synchronized render (fetch + derive) took 3-10 s per page view when it ran in the
-# request, the local one about 1.5 s; the cached page is served in milliseconds.
+# request, the local one about 1.5 s warm and 8 s cold (the first one after the process starts, so it is done at start);
+# the cached page is served in milliseconds.
 MIN_REFRESH_S=15
 CSP="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
 
@@ -62,6 +63,19 @@ def main():
             cache['refreshing']=True
         threading.Thread(target=refresh,daemon=True).start()
 
+    warmed=threading.Event()
+
+    def warm():   # 起動したら最初の描画 (手元の checkout) と同期を先に済ませる = 起動後の最初の頁も待たせない
+        try:
+            body,ver=render(False)
+            with lock:
+                if cache['body'] is None: cache.update(body=body,version=ver,at=0.0)
+        except (ValueError,OSError,subprocess.SubprocessError):
+            pass
+        finally:
+            warmed.set()
+        kick(force=True)
+
     class Handler(BaseHTTPRequestHandler):
         def reply(self,status,body,ctype):
             self.send_response(status)
@@ -86,8 +100,9 @@ def main():
                     with lock:
                         v=dict(cache['version'],refreshing=cache['refreshing'],synced=cache['synced'],error=cache['error'])
                     self.reply(200,json.dumps(v).encode(),'application/json'); return
+                warmed.wait(30)
                 with lock: body=cache['body']
-                if body is None:   # the first view after start: the local checkout now, the synchronized one behind it
+                if body is None:   # the warm-up failed: the local checkout now, the synchronized one behind it
                     body,ver=render(False)
                     with lock:
                         if cache['body'] is None: cache.update(body=body,version=ver,at=0.0)
@@ -99,6 +114,7 @@ def main():
         def log_message(self,*args): pass
     server=HTTPServer(('127.0.0.1',a.port),Handler)
     print(f'Board: http://127.0.0.1:{a.port}/  Demo: /demo',flush=True)
+    threading.Thread(target=warm,daemon=True).start()
     try: server.serve_forever()
     except KeyboardInterrupt: pass
     finally: server.server_close()
