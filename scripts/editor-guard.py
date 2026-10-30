@@ -27,6 +27,8 @@ Usage:
      その帰属つきで commit するか、あとの差分を分けて carrier する (道具は自動で分けない)。
   4. (1 が exit 3 のとき) `editor-guard.py carrier paper.tex -m "Author's hand edits (...)" --push`
      → 読んだ差分と同じなら commit。読んだ後にさらに編集が着地していれば exit 4 で止まるので、1 からやり直す。
+  5. commit の前にもう一度書くときは `editor-guard.py verify paper.tex && <書き込み> && editor-guard.py mark paper.tex`
+     (check は自分の未 commit の変更でも exit 3 で止まる。mark の後に誰も保存していないことは verify が見る)。
 
 破られ方 (2026-09-13 実測、3 回):
   - `git status --short <file> && 編集 && commit` は変更があっても exit 0 なので止まらず、著者の編集が自分の
