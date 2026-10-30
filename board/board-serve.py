@@ -45,14 +45,14 @@ CSP="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; 
 def handoff_waiting(payload):
     """Requests the viewer may hand off: an open workflow request whose next move is on a role id (Claude or Codex) =
     its worker is not there yet (requested) or its lease expired (stale), its submission waits for review (submitted), or
-    its question waits for the reviewer (blocked). A request someone is working on, or whose next move is on a native
-    session, is not handed off. Keyed by request id."""
+    its question waits for the reviewer (blocked). A request someone is working on or has picked up (CONTRACT.md#pickup),
+    or whose next move is on a native session, is not handed off. Keyed by request id."""
     out={}
     for t in payload.get('threads') or []:
         w=t.get('workflow') or {}
         nxt=w.get('waiting_on') or {}
         if (not t.get('closed') and w.get('status') in HANDOFF_STATES and w.get('request_id')
-                and str(nxt.get('session_id','')).startswith('role-')):
+                and str(nxt.get('session_id','')).startswith('role-') and not board.live_pickup(t.get('events') or [],w['request_id'])):
             out[w['request_id']]={'request_id':w['request_id'],'project':t.get('project'),'thread_id':t.get('thread_id'),
                                   'title':(w.get('title') or '')[:300],'status':w.get('status'),'waiting_on':nxt,
                                   'assignee':w.get('assignee'),'reviewer':w.get('reviewer')}

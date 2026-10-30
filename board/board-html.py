@@ -511,6 +511,14 @@ const store = {
 // 押して受付の待ち行列に渡す
 const HAND = DATA.handoff || null;
 const handStates = new Map(Object.entries(HAND?.states || {}));   // request id → queued (渡した) | started (受付が worker を起こした)
+// 引き受けの印 (board.py pickup = 依頼が動くか 2 時間で切れる。 判定は board.py の live_pickup と同じ)
+const PICKUP = '引き受けた:', PICKUP_HOLD_MS = 2 * 3600e3, PICKUP_RESET = new Set(['request', 'claim', 'submit', 'accept', 'revise', 'release', 'blocker', 'handover', 'abandoned']);
+function pickedBy(t){
+  const rid = t.workflow?.request_id; if (!rid || t.closed) return null;
+  const evs = t.events.filter(e => e.request_id === rid); let last = -1;
+  evs.forEach((e, i) => { if (PICKUP_RESET.has(e.kind) || (e.kind === 'update' && e.reply_to)) last = i; });
+  return evs.slice(last + 1).find(e => e.kind === 'note' && (e.summary || '').startsWith(PICKUP) && Date.now() - Date.parse(e.created_at) < PICKUP_HOLD_MS) || null;
+}
 const handable = w => !!(HAND && w && w.request_id && ['requested', 'stale', 'submitted', 'blocked'].includes(w.status) && /^role-/.test(w.waiting_on?.session_id || ''));
 
 // ---- threads と、 セッション ID → 名前 (= 投稿時の --session-name) の対応
@@ -707,11 +715,11 @@ function renderTools(){
 }
 function row(t){
   const g = groupOf(t), turn = turnText(t), nw = isNew(t), sn = state.terms.length ? snippet(t) : '';
-  const hs = HAND && t.workflow?.request_id ? handStates.get(t.workflow.request_id) : null;
+  const hs = pickedBy(t) ? 'picked' : HAND && t.workflow?.request_id ? handStates.get(t.workflow.request_id) : null;
   const d = idleDays(t), st = idle(t);
   return `<button type="button" class="row${nw ? ' new' : ''}" data-go="${esc(t.key)}" aria-current="${state.sel === t.key}" title="${esc(t.thread_id)}">
     <span class="dot g-${g}" aria-hidden="true"></span>
-    <span class="rmain"><span class="rt">${hl(t._title)}</span>${sn ? `<span class="rs">${hl(sn)}</span>` : ''}<span class="rm"><span class="proj">${esc(projLabel(t.project))}</span>${turn ? `<span aria-hidden="true">·</span><span>${esc(turn)}</span>` : ''}${hs ? `<span aria-hidden="true">·</span><span class="hs">${hs === 'queued' ? '渡し済み' : '対応中'}</span>` : ''}</span></span>
+    <span class="rmain"><span class="rt">${hl(t._title)}</span>${sn ? `<span class="rs">${hl(sn)}</span>` : ''}<span class="rm"><span class="proj">${esc(projLabel(t.project))}</span>${turn ? `<span aria-hidden="true">·</span><span>${esc(turn)}</span>` : ''}${hs ? `<span aria-hidden="true">·</span><span class="hs">${hs === 'queued' ? '渡し済み' : hs === 'picked' ? '引き受け済み' : '対応中'}</span>` : ''}</span></span>
     <span class="ra${st ? ' stale' : ''}">${nw ? '<span class="nd" aria-hidden="true"></span><span class="vh">新着</span>' : ''}<time datetime="${esc(t.last_at)}" title="${esc(abs(t.last_at))}${st ? `・最後の動きから ${d} 日` : ''}">${esc(st ? `放置 ${d}日` : rel(t.last_at))}</time></span></button>`;
 }
 function renderList(){
@@ -744,7 +752,9 @@ function badges(t){
     t.unpromoted.length ? `<span class="badge g-todo">未反映の発見 ${t.unpromoted.length}</span>` : '',
     t.project === 'restricted' ? '<span class="badge plain">🔒 メタデータのみ</span>' : ''].join('');
 }
-function handHtml(w){
+function handHtml(t){
+  const w = t.workflow, pk = pickedBy(t);
+  if (pk) return `<div class="hand"><span class="hand-st">${svg('check')}引き受け済み — ${esc(whoText(pk.actor))}</span></div>`;
   if (!handable(w)) return '';
   const st = handStates.get(w.request_id);
   if (st === 'queued') return `<div class="hand"><span class="hand-st">${svg('check')}渡しました — 受け取り待ち</span></div>`;
@@ -771,7 +781,7 @@ function workflowCard(t){
   const turn = w.status === 'invalid'
     ? `<div class="turn bad"><div class="turn-h">記録に矛盾があり、状態を確定できません</div><p>下の経過と各記録の詳細を確認してください。</p></div>`
     : w.waiting_on
-    ? `<div class="turn"><div class="turn-h"><span>次に動く人</span>${whoHtml(w.waiting_on)}</div>${w.next_action ? `<p>${esc(w.next_action)}</p>` : ''}${handHtml(w)}</div>`
+    ? `<div class="turn"><div class="turn-h"><span>次に動く人</span>${whoHtml(w.waiting_on)}</div>${w.next_action ? `<p>${esc(w.next_action)}</p>` : ''}${handHtml(t)}</div>`
     : `<div class="turn fin"><div class="turn-h">${esc(w.label)}</div><p>${esc(w.next_action || 'この依頼は終了しました。')}</p></div>`;
   const leaseRow = w.lease_until && ['working', 'revision', 'blocked', 'stale'].includes(w.status)
     ? `<dt>担当期限</dt><dd>${esc(abs(w.lease_until))} まで · <span class="${w.claim_expired ? 'bad' : 'muted'}">${w.claim_expired ? '期限切れ' : esc(remain(w.lease_until))}</span></dd>` : '';

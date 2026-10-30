@@ -42,6 +42,10 @@ CODEX_LAUNCHER_ENV='AGENT_BOARD_CODEX_LAUNCHER'          # request to a Codex ro
 CODEX_MODEL_ENV='AGENT_BOARD_CODEX_MODEL'                # request to a Codex role: the model when --expect-model is not given (else Codex's own config.toml)
 CODEX_EFFORT_ENV='AGENT_BOARD_CODEX_EFFORT'              # request to a Codex role: the effort when --effort is not given (else Codex's own config.toml)
 CODEX_LAUNCHED='起動した: Codex thread'                   # the note a Codex launch posts on its request; a second launch reads it and stops
+PICKUP='引き受けた:'                                      # the note `pickup` posts on a request before the work on it starts (CONTRACT.md#pickup)
+PICKUP_HOLD_H=2                                           # a pickup holds until the request's next transition or this many hours
+PICKUP_STATES=('requested','stale','submitted','blocked') # the next move is waiting for someone: a pickup says who takes it
+PICKUP_RESET={'request','claim','submit','accept','revise','release','blocker','handover','abandoned'}   # kinds that move the request on
 
 
 def run(root, *args, check=True):
@@ -363,6 +367,35 @@ def post(root, event, *, before_push=None, landed=None):
     return _post_fetch(root,event,rel,before_push=before_push,landed=landed)
 
 
+class PickupTaken(ValueError):
+    """A pickup refused because another session holds the request or the request has moved on (`pickup` exits 2)."""
+
+
+def live_pickup(events, request_id, now=None):
+    """The pickup note that holds `request_id` now, or None: the first one after the request's last transition (the
+    thread's events are in commit order, so every machine reads the same first one), younger than PICKUP_HOLD_H."""
+    now=now or view.now_utc()
+    evs=[e for e in events if e.get('request_id')==request_id]
+    last=-1
+    for i,e in enumerate(evs):
+        if e.get('kind') in PICKUP_RESET or (e.get('kind')=='update' and e.get('reply_to')): last=i
+    for e in evs[last+1:]:
+        if e.get('kind')=='note' and (e.get('summary') or '').startswith(PICKUP):
+            if (now-view.parse_ts(e['created_at'])).total_seconds()<PICKUP_HOLD_H*3600: return e
+    return None
+
+
+def pickup_problem(same, event, now=None):
+    """Why the pickup note `event` may not go on top of `same` (the thread as just read), or None."""
+    now=now or view.now_utc()
+    st=reduce_workflow(same,now).get('status')
+    if st not in PICKUP_STATES: return f'引き受けられない: この依頼は {st} (もう誰かが動いているか、 終わった)'
+    held=live_pickup(same,event.get('request_id'),now)
+    if held and not same_session(held['actor'],event['actor']):
+        return f"引き受け済み: {_who(held['actor'])} が {held['created_at']} に引き受けた ({PICKUP_HOLD_H} 時間か、 依頼が動くまで)"
+    return None
+
+
 def _validate_post(dest, event, cfg):
     """The transition check both transports run against the board as just read; returns (events, same-thread events,
     existing identical event or None)."""
@@ -378,6 +411,11 @@ def _validate_post(dest, event, cfg):
         if {k:v for k,v in existing.items() if not k.startswith('_')} != event:
             raise ValueError('event_id already exists with different content')
         return events,same,existing
+    if event['kind']=='note' and (event.get('summary') or '').startswith(PICKUP):
+        # Here, not in the reducer: this runs again on every attempt after a rejected push, so of two sessions that pick
+        # up at once the later push is refused; history is never reinterpreted.
+        why=pickup_problem(same,event)
+        if why: raise PickupTaken(why)
     if event['kind']=='submit':
         current=reduce_workflow(same,view.now_utc())
         if current['claim'] is None or view.parse_ts(current['claim']['lease_until']) <= view.now_utc():
@@ -1265,7 +1303,7 @@ def run_codex_launch(a, request_id, argv, env):
     return out
 
 
-def post_request_note(a, request_id, summary):
+def post_request_note(a, request_id, summary, label='起動の記録'):
     import copy
     if a.policy=='encrypted-metadata-only':
         print('  (不透明な thread なので起動の記録は掲示板に載せない = 他の機械からは起動済みが見えない)'); return
@@ -1277,7 +1315,23 @@ def post_request_note(a, request_id, summary):
     same=[e for e in events if e['project']['key']==ev['project']['key'] and e['thread_id']==ev['thread_id']]
     probs=errors(ev,json.loads(SCHEMA_PATH.read_text()))+[x for x in reduce_workflow(same+[ev],view.now_utc())['errors'] if x.startswith(ev['event_id']+':')]
     if probs: raise ValueError('; '.join(probs))
-    print('posted '+post(a.root,ev)+' (起動の記録)')
+    print('posted '+post(a.root,ev)+f' ({label})')
+
+
+def cmd_pickup(a):
+    """`pickup --request <id>`: reserve a request for this session before working on it (opening its worker, reviewing
+    it, answering its question). Of two sessions or two machines that pick up at once exactly one posts; the other gets
+    exit 2 and leaves the request alone (CONTRACT.md#pickup)."""
+    if not a.request: raise ValueError('pickup needs --request <request id>')
+    with snapshot(a.root,fresh=True) as dest: events=read(dest)
+    req=next((e for e in events if e['event_id']==a.request and e['kind']=='request'),None)
+    if req is None: raise ValueError('request not found: '+a.request)
+    if req['source_policy']!='ordinary':
+        raise ValueError('不透明な thread には引き受けの印を載せない (掲示板に任意の文を書けない = source 側の窓口で分担する)')
+    a.policy=req['source_policy']; a.project=req['project']['key']
+    try: post_request_note(a,a.request,f"{PICKUP} {(a.summary or '').strip() or '受け持つ'}",label='引き受けの印')
+    except PickupTaken as ex:
+        print(ex); raise SystemExit(2)
 
 
 def cmd_launch(a):
@@ -1523,7 +1577,7 @@ def inbox_show(a, root, *, board_name=None, collect=None):
 
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('command',choices=sorted(KINDS|{'inbox','show','retry','sessions','watch','touch','untouch','touching','boards','init','launch'}))
+    ap.add_argument('command',choices=sorted(KINDS|{'inbox','show','retry','sessions','watch','touch','untouch','touching','boards','init','launch','pickup'}))
     ap.add_argument('--root',type=Path,help='the board directory (holds board.json and events/)')
     ap.add_argument('--board',help='a board in the workspace by name (`boards` lists them)')
     ap.add_argument('--all-boards',action='store_true',help='inbox / show: every unlocked board in the workspace')
@@ -1632,6 +1686,8 @@ def main():
     ws=touch_base(a.root)
     if a.command=='launch':
         cmd_launch(a); return
+    if a.command=='pickup':
+        cmd_pickup(a); return
     if a.command == 'touching':
         # Read-only. With --path the verdict covers the whole board (a file is one file whichever thread declared it);
         # --project / --thread narrow only the listing. Exit 2 = an earlier session holds a path, 3 = --wait timed out.

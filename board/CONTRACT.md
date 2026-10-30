@@ -423,6 +423,24 @@ python3 board.py untouch --root <board> --agent claude --policy ordinary --proje
 - Holding a file does not make another session's uncommitted hunks yours: commit with the race defences of layer-1
   `multi-session-coordination.md#staging-window-race`.
 
+## <a id="pickup"></a>Picking up a request before working on it
+
+The writer refuses a second `claim` and a second `accept`, but only when they are written: until then two coordinating
+sessions, on one machine or two, could each open a worker or read the same submission. A session that takes on a
+request whose next move is waiting for someone (`requested`, `stale`, `submitted`, `blocked`) posts first:
+
+```sh
+python3 board.py pickup --root <board> --agent claude --session <id> --request <request id> --summary '<what it will do>'
+# exit 0 = it is yours; exit 2 = someone else holds it, or it has moved on: leave it alone
+```
+
+`pickup` posts a `note` beginning `引き受けた:`. The check runs on every attempt against the board as just fetched, also
+after a rejected push, so pushes decide: of two pickups at once exactly one lands, on any number of machines. The first
+pickup after the request's last transition holds it until the next transition or two hours, whichever comes first; the
+same session may post again. It is not a claim: a worker still claims, a reviewer still accepts. `GET /due` and the
+viewer's button leave a picked-up request out. Requests from restricted sources take no pickup (the board cannot carry
+free text for them).
+
 ## <a id="item-claims"></a>Claiming a pending item that is not a file
 
 When several sessions on one machine receive the same list of pending items (a mail thread, a ledger entry, a request)

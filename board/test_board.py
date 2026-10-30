@@ -405,6 +405,28 @@ class Workflow(unittest.TestCase):
         self.assertFalse(t['example','2026-09-06-example']['closed'])
         self.assertEqual(t['example','2026-09-06-other']['workflow']['status'],'requested')
 
+class Pickup(unittest.TestCase):
+    def note(self, seq, session, when=None):
+        e=event('note',seq,agent='claude'); e['actor']['session_id']=session; e['summary']=f'{board.PICKUP} 受け持つ'
+        if when: e['created_at']=board.view.iso_z(when)
+        return e
+    def test_first_after_the_last_transition_holds(self):
+        r,c,sub=chain(); rid=r['request_id']
+        a=self.note(3,'a'); b=self.note(4,'b')
+        self.assertIsNone(board.live_pickup([r,c,sub],rid))
+        self.assertEqual(board.live_pickup([r,c,sub,a,b],rid)['actor']['session_id'],'a')
+        self.assertIsNone(board.live_pickup([r,c,a,sub],rid))   # the submission moved it on
+    def test_expires(self):
+        r,c,sub=chain(); old=self.note(3,'a',NOW-dt.timedelta(hours=board.PICKUP_HOLD_H,minutes=1))
+        self.assertIsNone(board.live_pickup([r,c,sub,old],r['request_id']))
+        self.assertIsNone(board.pickup_problem([r,c,sub,old],self.note(4,'b')))
+    def test_problem(self):
+        r,c,sub=chain()
+        self.assertIn('引き受けられない',board.pickup_problem([r,c],self.note(2,'b')))   # a worker is on it
+        self.assertIsNone(board.pickup_problem([r],self.note(1,'a')))
+        self.assertIsNone(board.pickup_problem([r,self.note(1,'a')],self.note(2,'a')))     # the same session again
+        self.assertIn('引き受け済み',board.pickup_problem([r,self.note(1,'a')],self.note(2,'b')))
+
 class Note(unittest.TestCase):
     def test_note_is_inert_in_request_thread(self):
         r,c,sub=chain(); n=event('note',5,agent='codex')
@@ -808,6 +830,27 @@ class Transport(unittest.TestCase):
             board.post(self.root,c,before_push=race)
         with board.snapshot(self.root) as snap:
             self.assertEqual(len(board.read(snap)),2)
+    def _pickup_note(self, session, seq):
+        e=event('note',seq,agent='claude'); e['actor']['session_id']=session
+        e['summary']=f'{board.PICKUP} 検収する'
+        return e
+    def test_concurrent_pickup_one_lands(self):
+        # two coordinating sessions (two machines) pick up the same submitted request at once: the push decides
+        r,c,sub=chain()
+        for e in (r,c,sub): board.post(self.root,e)
+        first=self._pickup_note('claude-mini',3); second=self._pickup_note('claude-m5',4)
+        def race(attempt):
+            if attempt==0: board.post(self.root,first)
+        with self.assertRaisesRegex(board.PickupTaken,'引き受け済み'):
+            board.post(self.root,second,before_push=race)
+        with board.snapshot(self.root,fresh=True) as snap:
+            es=board.read(snap); self.assertEqual(len(es),4)
+            self.assertEqual(board.live_pickup(es,r['request_id'])['actor']['session_id'],'claude-mini')
+        # the same session may post again; another may not, until the request moves on
+        board.post(self.root,self._pickup_note('claude-mini',5))
+        with self.assertRaises(board.PickupTaken): board.post(self.root,self._pickup_note('claude-m5',6))
+        acc=event('accept',7,reply=sub); board.post(self.root,acc)
+        with self.assertRaisesRegex(board.PickupTaken,'引き受けられない'): board.post(self.root,self._pickup_note('claude-m5',8))
     def test_cli_restricted_roundtrip_and_retry(self):
         import sys
         script=board.ENGINE/'board.py'
