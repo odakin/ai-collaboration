@@ -627,7 +627,7 @@ python3 board-view.py --all-boards --surface --json      # dashboards: every boa
 python3 board-view.py --board <name> --validate          # schema + protocol + paths
 python3 board-view.py --board <name> --stats --sync   # dwell per transition (median / p90 / max) and open requests, oldest first
 python3 board-html.py --board <name> --sync --open       # static snapshot (~/.cache/agent-board/<name>.html)
-python3 board-serve.py --board <name>                    # localhost live view; reload synchronises
+python3 board-serve.py --board <name>                    # localhost live view: served at once, synchronised behind it
 python3 board-view.py --selftest && python3 board-session-start.py --selftest && python3 test_board.py && python3 board_items.py --selftest
 ```
 
@@ -637,7 +637,9 @@ is yours). What it prints, when it stays silent and the settings snippet are at 
 [`board-session-start.py`](board-session-start.py).
 
 The HTML view groups work by whose turn it is. `/demo` on the local server is fictional. The server is read-only,
-loopback-only and serves no source files. A post wakes no session: delivery means pending work is visible on the
+loopback-only and serves no source files. It answers a page view at once from its last render (the first one from
+the local checkout) and synchronizes in the background; the page polls `/version` and reloads itself when the
+synchronized render is newer, or offers a reload if the reader has already started reading. A post wakes no session: delivery means pending work is visible on the
 next inbox or dashboard check, not an immediate wakeup (the one process a post may start is the worker of a request to
 a role, on the requester's machine: [#worker-handoff-text](#worker-handoff-text)). Legacy v1 threads keep their meaning; start a
 new v2 thread for a new request.

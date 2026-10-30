@@ -219,6 +219,7 @@ mark{background:color-mix(in srgb,var(--orange) 30%,transparent);color:inherit;b
 .note.info{background:var(--info-bg);border-color:var(--info-line);color:var(--info-ink)}
 .note.plain{background:var(--sunken);border-color:transparent;color:var(--text-2)}
 .note>summary{cursor:pointer;font-weight:600}
+.note.fresh{display:flex;align-items:center;justify-content:space-between;gap:12px;font-weight:600}
 .note ul{margin:6px 0 2px;padding-left:18px}
 .note li+li{margin-top:4px}
 
@@ -428,6 +429,7 @@ dialog h2{margin:0 0 12px;font-size:16px}
         <button class="ib" id="theme" type="button"></button>
       </div>
     </header>
+    <div class="notes" id="fresh" role="status"></div>
     <div class="notes" id="alerts" role="status"></div>
     <div class="tools">
       <label class="search"><span id="search-ic"></span><input id="q" type="search" placeholder="案件・要約・セッションを検索" autocomplete="off" aria-label="案件を検索"><kbd>/</kbd></label>
@@ -935,9 +937,32 @@ function applyTheme(){
 }
 function cycleTheme(){ theme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length]; applyTheme(); }
 $('#theme').addEventListener('click', cycleTheme);
+// ---- 生きている表示 (board-serve): 頁は手元の記録か前回の描画ですぐ出し、 裏で同期した版が出来たら差し替える。
+// まだ何も触っていなければ自動で読み直す。 読んでいる最中 (押した・打った・回した) なら上に「表示を更新」 を出すだけ
 if (/^https?:$/.test(location.protocol) && DATA.head !== 'demo') {
-  const rb = $('#reload'); rb.hidden = false; rb.innerHTML = svg('reload'); rb.title = '最新の記録を読み込む'; rb.setAttribute('aria-label', rb.title);
-  rb.addEventListener('click', () => { rb.classList.add('spin'); location.reload(); });
+  const rb = $('#reload'); rb.hidden = false; rb.innerHTML = svg('reload'); rb.title = '最新の記録を取り込む'; rb.setAttribute('aria-label', rb.title);
+  let touched = false, wantReload = false, timer = 0, dead = false;
+  ['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach(ev => addEventListener(ev, e => { if (!e.target.closest?.('#reload')) touched = true; }, {passive: true}));
+  const spin = on => rb.classList.toggle('spin', on);
+  const showFresh = () => { $('#fresh').innerHTML = '<div class="note info fresh"><span>新しい記録があります</span><button type="button" class="lnk" data-refresh>表示を更新</button></div>'; };
+  const later = ms => { clearTimeout(timer); timer = setTimeout(tick, ms); };
+  async function tick(force){
+    let v = null;
+    try { const r = await fetch('/version' + (force ? '?refresh=1' : ''), {cache: 'no-store'}); if (r.ok) v = await r.json(); } catch (_) {}
+    if (!v) { dead = true; if (wantReload) location.reload(); return; }   // /version の無い古いサーバー = 従来どおり読み直しだけ
+    if (v.head && v.head !== DATA.head) {
+      if (!touched || wantReload) { location.reload(); return; }
+      showFresh(); spin(false);
+    } else if (v.generated_at && v.generated_at > (DATA.generated_at || '')) {
+      DATA.generated_at = v.generated_at; renderBrand();   // 中身は同じ = 「更新 HH:MM」 だけ進める
+    }
+    if (wantReload && !v.refreshing) { wantReload = false; spin(false); toast(v.error ? '同期できませんでした (手元の記録を表示中)' : '最新です'); }
+    later(v.refreshing || wantReload ? 1500 : document.hidden ? 120000 : 60000);
+  }
+  rb.addEventListener('click', () => { if (dead) { spin(true); location.reload(); return; } wantReload = true; spin(true); tick(true); });
+  document.addEventListener('click', e => { if (e.target.closest('[data-refresh]')) location.reload(); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && !dead) later(500); });
+  later(1200);
 }
 $('#search-ic').outerHTML = svg('search');
 
