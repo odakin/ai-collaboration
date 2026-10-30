@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
-"""Extract numbered rows and complete equation groups from arXiv HTML without MathML duplication; --selftest.
+"""Extract numbered rows and complete equation groups from arXiv HTML without MathML duplication, warn on numbering gaps and duplicate rows; --selftest.
 
 The output is a transcription inventory, not a mathematical verification.
 MathML alttext is preferred to rendered child nodes. Untagged preceding rows
 are retained through equation_group, which may be shared by several numbers.
 Uses only the Python standard library; does not download or execute HTML.
+
+Collapse warnings (stderr, the output is still written): a subequation group
+can come out as one entry, or one term can land in two rows. The script warns
+when a numbering series skips (2.1 -> 2.3, 5a -> 5c, or a series not starting
+at 1), when a number appears twice, and when two numbers carry the same row
+text. Labels it cannot parse (roman numerals, starred tags) are not checked.
 """
 from __future__ import annotations
 
@@ -14,6 +20,7 @@ from hashlib import sha256
 from html.parser import HTMLParser
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -88,6 +95,42 @@ def extract(html):
     return entries
 
 
+NUMBER=re.compile(r'^\(?\s*((?:[A-Z]+\.?)?(?:\d+\.)*)(\d+)([a-z]?)\s*\)?$')
+
+
+def collapse_warnings(entries):
+    """Numbering gaps, repeated numbers and repeated row text, in document order."""
+    warnings=[];seen={};rows={};last={};letters={}
+    for entry in entries:
+        label=entry['number'].strip()
+        if label in seen:
+            warnings.append(f'number {label} appears twice (entries {seen[label]} and {entry["id"]})')
+        seen.setdefault(label,entry['id'])
+        row=entry['numbered_row'];cut=row.rfind(label)
+        row=(row[:cut]+row[cut+len(label):] if cut>=0 and label else row).strip()
+        if row and row in rows and rows[row]!=label:
+            warnings.append(f'{rows[row]} and {label} have the same row text (a term may be duplicated)')
+        rows.setdefault(row,label)
+        match=NUMBER.match(label)
+        if not match:
+            continue
+        prefix,value,letter=match.group(1) or '',int(match.group(2)),match.group(3)
+        key=(prefix,value)
+        if key not in letters:
+            previous=last.get(prefix,0)
+            if value!=previous+1 and value>previous:
+                warnings.append(f'numbering skips from {prefix}{previous} to {label}' if previous
+                                else f'series {prefix or "(top level)"} starts at {label}, not 1')
+            last[prefix]=max(previous,value)
+            letters[key]=''
+        if letter:
+            expected=chr(ord(letters[key])+1) if letters[key] else 'a'
+            if letter!=expected and letter>letters[key]:
+                warnings.append(f'subequation letters skip from {prefix}{value}{letters[key] or "(none)"} to {label}')
+            letters[key]=max(letters[key],letter)
+    return warnings
+
+
 def selftest():
     fixture='''<table id="group" class="ltx_equationgroup">
     <tbody><tr><td><math alttext="f(x)="><mi>DO_NOT_DUPLICATE</mi></math></td></tr></tbody>
@@ -105,6 +148,20 @@ def selftest():
     assert extract('<p>no numbered equations</p>')==[]
     # Last-row-only extraction loses a required part of the fixture.
     assert result[0]['numbered_row']!=result[0]['equation_group']
+    # Collapse warnings: roman labels are skipped; a clean series stays silent.
+    assert collapse_warnings(result)==[]
+    def rows(*pairs):
+        return [dict(id=f'e{i}',number=n,numbered_row=f'{body} {n}',equation_group='') for i,(n,body) in enumerate(pairs)]
+    clean=rows(('(1)','a'),('(2a)','b'),('(2b)','c'),('(3)','d'),('(A1)','e'),('(A2)','f'),('(2.1)','g'),('(2.2)','h'))
+    assert collapse_warnings(clean)==[],collapse_warnings(clean)
+    broken=rows(('(1)','a'),('(3)','b'),('(4a)','c'),('(4c)','d'),('(5)','c'),('(5)','x'),('(2.2)','y'))
+    found=collapse_warnings(broken)
+    assert any('skips from 1 to (3)' in w for w in found),found
+    assert any('letters skip from 4a to (4c)' in w for w in found),found
+    assert any('(4a) and (5) have the same row text' in w for w in found),found
+    assert any('(5) appears twice' in w for w in found),found
+    assert any('series 2. starts at (2.2)' in w for w in found),found
+    assert len(found)==5,found
     with tempfile.TemporaryDirectory() as temp:
         source=Path(temp)/'input.html';output=Path(temp)/'output.json'
         source.write_text(fixture,encoding='utf-8');output.write_text('sentinel')
@@ -113,7 +170,12 @@ def selftest():
             assert process.returncode!=0 and output.read_text()=='sentinel'
         process=subprocess.run([sys.executable,__file__,str(source),'--output',str(source)],capture_output=True,text=True)
         assert process.returncode!=0 and source.read_text()==fixture
-    print('PASS: equation groups, alttext, labels, row-loss foil and fail-before-write guards')
+        gapped=fixture.replace('(II)','(4)').replace('(I)','(2)')
+        source.write_text(gapped,encoding='utf-8')
+        process=subprocess.run([sys.executable,__file__,str(source),'--output',str(output)],capture_output=True,text=True)
+        assert process.returncode==0 and 'WARNING' in process.stderr and 'skips from 2 to (4)' in process.stderr,process.stderr
+        assert len(json.loads(output.read_text()))==2
+    print('PASS: equation groups, alttext, labels, row-loss foil, collapse warnings and fail-before-write guards')
 
 
 def main():
@@ -137,7 +199,10 @@ def main():
     if args.expect_count is not None and len(result)!=args.expect_count:
         raise SystemExit(f'expected {args.expect_count} equations, found {len(result)}; output not written')
     args.output.write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
-    print(f'wrote {len(result)} equation records')
+    warnings=collapse_warnings(result)
+    for warning in warnings:
+        print(f'WARNING: {warning}',file=sys.stderr)
+    print(f'wrote {len(result)} equation records'+(f', {len(warnings)} collapse warning(s) on stderr' if warnings else ''))
 
 
 if __name__=='__main__':

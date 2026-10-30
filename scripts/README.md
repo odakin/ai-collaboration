@@ -5,7 +5,7 @@ Each module's first docstring line is the description source of truth. Every scr
 
 | script | purpose |
 |---|---|
-| [`arxiv-equation-inventory.py`](arxiv-equation-inventory.py) | Extract numbered rows and complete equation groups from arXiv HTML without MathML duplication; --selftest. |
+| [`arxiv-equation-inventory.py`](arxiv-equation-inventory.py) | Extract numbered rows and complete equation groups from arXiv HTML without MathML duplication, warn on numbering gaps and duplicate rows; --selftest. |
 | [`check-edit-intent.py`](check-edit-intent.py) | AI 原稿改稿の意図記録 (edit-intent sidecar) の骨組み生成 + 機械検査: hunk 被覆 / 位置 / 種類 / ID 実在 / 裁量枠 / 削除 verbatim を PASS/FAIL + exit code で。 --selftest 内蔵。 正本 = conventions/edit-intent-record.md |
 | [`check-rename-purity.py`](check-rename-purity.py) | 機械的と主張される一括改稿 (記法 rename・単位変更・記号統一) の純粋性を、読まずに逆写像して検査する: new→old の逆写像を後版に当てて前版と diff し、残った行だけを非機械変更として出す + 旧綴りの残存 (orphan) 走査 + 変更行の前後行番号列挙。--selftest 内蔵、正本 = conventions/physics-verification-cycle.md#referee-side-kernels |
 | [`check-review-target.py`](check-review-target.py) | Refuse a blind-review target that carries its own history (comment text in .tex / .md / .bib, a body sentence saying the document was reviewed or corrected); warn on review vocabulary and self-reference that may read as history; --staged-warn flags review history written into tex comments at commit time; --selftest. |
