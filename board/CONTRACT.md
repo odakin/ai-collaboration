@@ -352,7 +352,9 @@ The worker's lease and the reviewer's obligation are distinct. An unanswered `bl
 reviewer even if the lease expires; inbox/show expose `claim_expired` and `lease_until` separately from `status` and
 `waiting_on`. Reclaiming, releasing or handing over the work does not answer the question, and a worker cannot
 submit while it is open. The reviewer's `update --reply-to <blocker>` resolves it. A submitted result still awaits
-receipt after lease expiry; only the reviewer can withdraw a request.
+receipt after lease expiry; only the reviewer can withdraw a request. A worker that takes over a request whose
+earlier claim expired reads `show --request <id>` and the files its notes name before starting: the earlier worker
+may have finished most of it, and the open step may be only an approval (measured).
 
 <a id="note-never-answers"></a>A `note` never answers a blocker: the request stays blocked and the worker cannot submit. A worker's stop or
 question posted as a `note` does not reach the reviewer as a question either; post it as a `blocker`. Each side

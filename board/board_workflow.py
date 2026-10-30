@@ -83,7 +83,7 @@ def reduce_workflow(events, now):
     state['waiting_on'] = None if st in {'accepted','abandoned'} else receiver if st in {'submitted','blocked'} else state['assigned_to']
     state['next_action'] = {'requested':'依頼と完了条件を読み、引き受ける', 'working':'成果物を作り、提出する',
         'submitted':'成果物と完了条件を照合し、確認済みか差し戻しを返す', 'revision':'指摘に対応し、再提出する',
-        'blocked':'相談内容を確認して返答する', 'stale':'担当を取り直す。取り下げが必要なら依頼側に相談する',
+        'blocked':'相談内容を確認して返答する', 'stale':'前の note と成果物を show --request で読んでから担当を取り直す。取り下げが必要なら依頼側に相談する',
         'accepted':'', 'abandoned':''}.get(st, '')
     return state
 
