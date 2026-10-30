@@ -185,6 +185,45 @@ The board may say "the numerical check found X" while work is in progress; it mu
 Once verified, X moves to the project and the board receives an event with `promoted_to` pointing there.
 Collaborators need only the project repository; deleting a board must not destroy a project's durable knowledge.
 
+## <a id="viewer"></a>The viewer
+
+A person opens the page to learn whose turn it is, so threads group by that and a detail page leads with the next mover
+and the completion conditions. A role is shown by its function, not as a vendor plus a long id. At hundreds of threads
+and thousands of events (実測) the same page failed differently from how it failed when small: most events were status
+notes, and most open threads were status threads that had stopped moving. Hence: threads idle for two weeks fold (a
+request that idles is marked, not folded, since someone owes it a move); a long history shows the request and the last
+few events; "new since you last opened it" is kept per browser, with the first visit as the baseline, so a first look is
+not a wall of marks. A filter lists the addresses that owe something now, not every address ever used.
+
+**Serving.** Synchronizing inside the request cost 3-10 s per view and a cold first render about 8 s (実測 with
+`curl -w '%{time_total}'`), so the page comes at once from the last render, the first render happens at process start,
+and synchronization runs behind it. The page polls `/version`; a newer head reloads it if the reader has not touched the
+page, and otherwise offers a reload, because moving text under someone reading is worse than a stale line.
+
+## <a id="handoff-queue"></a>The hand-off queue
+
+The wish was one click to get a stuck request moving. A web page cannot start a session, and the desktop app does not
+let a turn begun by a notification start one either, so the button only records the wish and a coordinating session does
+the move. That keeps the server free of any path that executes something: its one write is a file named after the
+request id, which makes "pending" a directory listing and a double click a no-op. `done/` keeps a moved request refused
+for an hour, because the board shows no change until the worker claims. Being on loopback is not a defence against a page
+in the same browser, so the write needs Host, Origin, a JSON body and a token only a rendered page carries.
+
+## <a id="pickup"></a>Pickup
+
+The board kept the record single (a second claim or accept is refused) but only when it was written; until then two
+coordinating sessions could each open a worker or read one submission through. Assigning the picking to one host would
+have moved that to a convention: nothing would stop a second picker, and a review would wait for that host. So the
+reservation is an event, and its check sits in `_validate_post`, which runs again after every rejected push: the push
+order decides, on any number of machines. It is not in the reducer, so history is not reinterpreted and a lost race
+cannot quarantine a thread. It ends at the request's next transition or after two hours, so a picker that stalls strands
+nothing. A claim still means a worker holds the work; a pickup means someone has taken the next move. Item claims stay
+for what is not a request, or where one machine is enough, because a pickup costs one commit and a network round trip.
+
+**Ended sessions.** A request addressed to a session that has ended is stuck the same way, but a session looks absent
+from every machine except its own. So a session counts as ended only where its transcript is: not live, and quiet for
+half an hour, since an app restart is not an end. Other machines report unknown and leave it to the machine that can see.
+
 ## Rejected alternatives
 
 - **A shared mutable `BOARD.md`**: a merge hotspot that invites accidental overwrite.
@@ -196,6 +235,16 @@ Collaborators need only the project repository; deleting a board must not destro
   `board_workflow.py`; rule = CONTRACT.md#role-any-agent).
 - **Pushing every heartbeat**: noisy, costly, not useful for decisions.
 - **Copying the engine into each board**: copies drift; each board holds only `board.json` and a pointer here.
+- **The hand-off button starting the worker from the server** (`launch --launch`): one click for real, but the worker
+  is a background CLI session the owner's app does not list, and the server would gain a path that executes something.
+- **A deep link to a new session** (`claude://code/new?q=…&folder=…`; read from the app bundle: it takes `q` or `prompt`,
+  `folder`, `file`, `environment`, `runner_pool`, and no model): puts the worker's text in front of the owner without a
+  coordinating session, but skips the launch record and the model and effort checks. Whether it sends by itself was not
+  tried. The next thing to try if pressing a card proves too heavy.
+- **Writing to a session's messaging socket**: an undocumented protocol, and it would let a local page drive an agent.
+- **Reusing `touch` for pickups**: first-declared-wins is the right order, but it only reports a loser instead of
+  refusing, and needs a path and a dated thread where a request already has both.
+- **Sharing the item-claim ledger between machines**: a second transport beside the board's own.
 
 ## Deferred
 

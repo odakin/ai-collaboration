@@ -318,6 +318,7 @@ when the project wires it: [#boards-and-audiences](#boards-and-audiences)).
 | `release` | claimant | returns an unsubmitted assignment |
 | `abandoned` | designated reviewer | withdraws the request |
 | `note` | any session | status that never moves a request (`--thread` + `--project` for a new thread, or `--request`) |
+| `pickup` | a session about to take the next move | reserves the request; of concurrent pickups exactly one lands ([#pickup](#pickup)) |
 
 `handover --role assignee|reviewer --to <agent> --to-session <id>` explicitly moves responsibility. Only the
 designated reviewer can do so; the owner may record a `human` handover when that session is unavailable. Agents must
@@ -445,7 +446,8 @@ free text for them).
 
 When several sessions on one machine receive the same list of pending items (a mail thread, a ledger entry, a request)
 from a start-of-session surface or an end-of-turn check, the first session to start on an item claims it; the others
-show who is on it instead of handling it again. A touch names a path; an item claim names a key the caller chooses.
+show who is on it instead of handling it again. A touch names a path; an item claim names a key the caller chooses. The
+ledger is local to the checkout, so it separates sessions on one machine; across machines, use [`pickup`](#pickup).
 
 ```sh
 python3 board_items.py hold    --root <board> --key mail:<id> --key todo:<id> --label '<short>'   # 2 = another session holds it
@@ -671,9 +673,10 @@ assignee, reviewer and the time); the server starts nothing and posts nothing. W
 (a coordinating session, a runner) does the move under that role id = opens the worker with `board.py launch --request
 <id>`, or reviews (`accept` / `revise`) or answers (`update --reply-to`) as the reviewer, and moves the file to
 `<dir>/done/`; for an hour after that the page shows it as taken and refuses a second hand-off, so one click cannot
-open two workers. Measured: in the Claude desktop app, a turn that a background task's notification started cannot
-start a session itself (a `start_session` with `user_asked` is refused there), so a consumer woken that way offers the
-owner a card for the worker; a review or an answer it can post itself. `GET /due` (read-only, with or without
+open two workers. A consumer woken by a background task's notification offers the owner a card for the worker, because
+such a turn cannot start a session
+([`multi-session-coordination.md#chip-in-event-turns`](../../claude-config/conventions/multi-session-coordination.md#chip-in-event-turns));
+a review or an answer it can post itself. `GET /due` (read-only, with or without
 `--handoff-dir`) lists the same requests as JSON, so a coordinating session can also pick them up by itself without a
 click. Both also cover a request whose next move is on a native Claude session that has ended (`stranded: true`):
 this machine holds its transcript, it is not in the live registry, and the transcript has been quiet for 30 minutes.

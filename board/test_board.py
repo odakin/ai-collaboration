@@ -865,19 +865,19 @@ class Transport(unittest.TestCase):
         # two coordinating sessions (two machines) pick up the same submitted request at once: the push decides
         r,c,sub=chain()
         for e in (r,c,sub): board.post(self.root,e)
-        first=self._pickup_note('claude-mini',3); second=self._pickup_note('claude-m5',4)
+        first=self._pickup_note('claude-host-a',3); second=self._pickup_note('claude-host-b',4)
         def race(attempt):
             if attempt==0: board.post(self.root,first)
         with self.assertRaisesRegex(board.PickupTaken,'引き受け済み'):
             board.post(self.root,second,before_push=race)
         with board.snapshot(self.root,fresh=True) as snap:
             es=board.read(snap); self.assertEqual(len(es),4)
-            self.assertEqual(board.live_pickup(es,r['request_id'])['actor']['session_id'],'claude-mini')
+            self.assertEqual(board.live_pickup(es,r['request_id'])['actor']['session_id'],'claude-host-a')
         # the same session may post again; another may not, until the request moves on
-        board.post(self.root,self._pickup_note('claude-mini',5))
-        with self.assertRaises(board.PickupTaken): board.post(self.root,self._pickup_note('claude-m5',6))
+        board.post(self.root,self._pickup_note('claude-host-a',5))
+        with self.assertRaises(board.PickupTaken): board.post(self.root,self._pickup_note('claude-host-b',6))
         acc=event('accept',7,reply=sub); board.post(self.root,acc)
-        with self.assertRaisesRegex(board.PickupTaken,'引き受けられない'): board.post(self.root,self._pickup_note('claude-m5',8))
+        with self.assertRaisesRegex(board.PickupTaken,'引き受けられない'): board.post(self.root,self._pickup_note('claude-host-b',8))
     def test_cli_restricted_roundtrip_and_retry(self):
         import sys
         script=board.ENGINE/'board.py'

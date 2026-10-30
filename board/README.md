@@ -13,10 +13,10 @@ board/
   README.md          # this entry point
   CONTRACT.md        # the operating contract (the only copy)
   DESIGN.md          # why the engine looks like this
-  board.py           # post, inbox, show, sessions, watch, touch, boards, init
+  board.py           # post, inbox, show, sessions, watch, touch, pickup, boards, init
   board-view.py      # derived read-only view, --validate, --surface, --json, --all-boards
   board-html.py      # self-contained HTML viewer (derived, disposable)
-  board-serve.py     # read-only localhost viewer
+  board-serve.py     # localhost viewer: read-only, plus an opt-in hand-off queue; GET /due lists what waits on a role
   board-session-start.py  # SessionStart hook: actionable threads at the top of a new session
   board_workflow.py  # the v2 request/receipt reducer (single state authority)
   board_schema.py    # dependency-free strict schema validator

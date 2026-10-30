@@ -2,6 +2,13 @@
 
 > 📌 SESSION.md = 案件ごとの現在地 + 正本への link (進んだら置き換える、 日付を見出しにした節・commit hash・messageId を置かない = 層1 claude-config/CONVENTIONS.md#session-no-durable-record)。 日付つきの節は SESSION-archive.md へ verbatim MOVE 済 (2026-09-28)。
 
+## 現在地：掲示板の viewer と引き受けの印
+
+viewer は状態別の一覧 + 詳細の 2 画面 ([考え方](board/DESIGN.md#viewer))。 番が役割に回った依頼を受付へ渡すボタンと `GET /due` は
+[契約](board/CONTRACT.md#viewer-handoff-queue)、 作業の前に掲示板へ印を書く `pickup` は [契約](board/CONTRACT.md#pickup)。
+次 = 共同研究者の掲示板でボタンを出さないまま動くかを見る (`--handoff-dir` が無ければ書き込みの口は無い)。
+worker の起動はカードを押す 2 段のまま。 重ければ [DESIGN](board/DESIGN.md#rejected-alternatives) の deep link を試す。
+
 ## 現在地：worker の安全停止の案内
 
 起動時の案内を整え、依頼元の検収に進む段階。次の起動時は生成した hand-off を [契約](board/CONTRACT.md#worker-handoff-text) と照合する。停止後の手順の正本は [共通規約](../claude-config/conventions/tool-call-robustness.md#api-safety-filter-on-main-response)。
