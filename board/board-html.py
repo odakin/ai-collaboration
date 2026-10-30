@@ -507,10 +507,11 @@ const store = {
   set(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} },
 };
 
-// ---- 引き受けを頼む (board-serve --handoff-dir のときだけ): 受け手を待つ依頼を、 押して受付の待ち行列に渡す
+// ---- 引き受けを頼む (board-serve --handoff-dir のときだけ): 番が役割 id に回っている依頼 (worker の着手・検収・相談への返事) を、
+// 押して受付の待ち行列に渡す
 const HAND = DATA.handoff || null;
 const handStates = new Map(Object.entries(HAND?.states || {}));   // request id → queued (渡した) | started (受付が worker を起こした)
-const handable = w => !!(HAND && w && w.request_id && ['requested', 'stale'].includes(w.status) && /^role-/.test(w.assignee?.session_id || ''));
+const handable = w => !!(HAND && w && w.request_id && ['requested', 'stale', 'submitted', 'blocked'].includes(w.status) && /^role-/.test(w.waiting_on?.session_id || ''));
 
 // ---- threads と、 セッション ID → 名前 (= 投稿時の --session-name) の対応
 const threads = DATA.threads.map(t => ({...t, key: t.project + '/' + t.thread_id}));
@@ -710,7 +711,7 @@ function row(t){
   const d = idleDays(t), st = idle(t);
   return `<button type="button" class="row${nw ? ' new' : ''}" data-go="${esc(t.key)}" aria-current="${state.sel === t.key}" title="${esc(t.thread_id)}">
     <span class="dot g-${g}" aria-hidden="true"></span>
-    <span class="rmain"><span class="rt">${hl(t._title)}</span>${sn ? `<span class="rs">${hl(sn)}</span>` : ''}<span class="rm"><span class="proj">${esc(projLabel(t.project))}</span>${turn ? `<span aria-hidden="true">·</span><span>${esc(turn)}</span>` : ''}${hs ? `<span aria-hidden="true">·</span><span class="hs">${hs === 'queued' ? '渡し済み' : '起動済み'}</span>` : ''}</span></span>
+    <span class="rmain"><span class="rt">${hl(t._title)}</span>${sn ? `<span class="rs">${hl(sn)}</span>` : ''}<span class="rm"><span class="proj">${esc(projLabel(t.project))}</span>${turn ? `<span aria-hidden="true">·</span><span>${esc(turn)}</span>` : ''}${hs ? `<span aria-hidden="true">·</span><span class="hs">${hs === 'queued' ? '渡し済み' : '対応中'}</span>` : ''}</span></span>
     <span class="ra${st ? ' stale' : ''}">${nw ? '<span class="nd" aria-hidden="true"></span><span class="vh">新着</span>' : ''}<time datetime="${esc(t.last_at)}" title="${esc(abs(t.last_at))}${st ? `・最後の動きから ${d} 日` : ''}">${esc(st ? `放置 ${d}日` : rel(t.last_at))}</time></span></button>`;
 }
 function renderList(){
@@ -747,7 +748,7 @@ function handHtml(w){
   if (!handable(w)) return '';
   const st = handStates.get(w.request_id);
   if (st === 'queued') return `<div class="hand"><span class="hand-st">${svg('check')}渡しました — 受け取り待ち</span></div>`;
-  if (st === 'started') return `<div class="hand"><span class="hand-st">${svg('check')}worker を起こしました — 着手待ち</span></div>`;
+  if (st === 'started') return `<div class="hand"><span class="hand-st">${svg('check')}受け取りました — 対応中</span></div>`;
   return `<div class="hand"><button type="button" class="hbtn" data-handoff="${esc(w.request_id)}">${esc(HAND.label)}</button></div>`;
 }
 async function handoff(btn){

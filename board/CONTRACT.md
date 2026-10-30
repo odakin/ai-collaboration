@@ -642,13 +642,17 @@ from its last render (the first one from the local checkout) and synchronizes in
 `/version` and reloads itself when the synchronized render is newer, or offers a reload if the reader has already
 started reading.
 
-<a id="viewer-handoff-queue"></a>**Hand-off queue (opt-in).** `board-serve.py --handoff-dir <dir>` gives every request
-that waits for its worker (a request to a role id whose status is `requested`, or `stale` = the worker's lease expired)
-a button (`--handoff-label`). A click writes `<dir>/<request id>.json` (the request id, project, thread, title, status,
-assignee and the time); the server starts nothing and posts nothing. Whoever the owner wires to the directory (a
-coordinating session, a runner) opens the worker with `board.py launch --request <id>` and moves the file to
-`<dir>/done/`; for an hour after that the page shows the worker as started and refuses a second hand-off, so one click
-cannot open two workers. The write is accepted only from a page this server rendered: Host and Origin must be the
+<a id="viewer-handoff-queue"></a>**Hand-off queue (opt-in).** `board-serve.py --handoff-dir <dir>` gives every open
+request whose next move is on a role id a button (`--handoff-label`): its worker is not there (`requested`) or its lease
+expired (`stale`), its submission waits for review (`submitted`), or its question waits for the reviewer (`blocked`).
+A click writes `<dir>/<request id>.json` (the request id, project, thread, title, status, the role it waits on,
+assignee, reviewer and the time); the server starts nothing and posts nothing. Whoever the owner wires to the directory
+(a coordinating session, a runner) does the move under that role id = opens the worker with `board.py launch --request
+<id>`, or reviews (`accept` / `revise`) or answers (`update --reply-to`) as the reviewer, and moves the file to
+`<dir>/done/`; for an hour after that the page shows it as taken and refuses a second hand-off, so one click cannot
+open two workers. Measured: in the Claude desktop app, a turn that a background task's notification started cannot
+start a session itself (a `start_session` with `user_asked` is refused there), so a consumer woken that way offers the
+owner a card for the worker; a review or an answer it can post itself. The write is accepted only from a page this server rendered: Host and Origin must be the
 server itself, the body must be JSON (no cross-site form can send it without a preflight, which the server never
 answers) and must carry the per-process token embedded in the page. Without `--handoff-dir` there is no write
 endpoint. A post wakes no session: delivery means pending work is visible on the

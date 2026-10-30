@@ -2,8 +2,9 @@
 """Localhost board viewer. A page is served at once from the last render (the first one from the local checkout),
 and a synchronized render is made in the background; the page asks /version and swaps itself in when that is newer.
 
-Read-only, except one opt-in write: with --handoff-dir, a request that waits for its worker (requested, or the worker's
-lease expired) gets a button, and POST /handoff puts it into that queue as one file per request. The server starts
+Read-only, except one opt-in write: with --handoff-dir, a request whose next move is on a role id (its worker is not
+there or its lease expired, its submission waits for review, or its question waits for the reviewer) gets a button, and
+POST /handoff puts it into that queue as one file per request. The server starts
 nothing; whoever the owner wires to the queue (a coordinating session, a runner) opens the worker and moves the file to
 <dir>/done/. Without --handoff-dir there is no write endpoint at all (CONTRACT.md#viewer-handoff-queue)."""
 import argparse
@@ -31,24 +32,29 @@ html=importlib.util.module_from_spec(spec); spec.loader.exec_module(html)
 # request, the local one about 1.5 s warm and 8 s cold (the first one after the process starts, so it is done at start);
 # the cached page is served in milliseconds.
 MIN_REFRESH_S=15
-# A handed-off request whose file the consumer moved to done/ shows "started" this long (the worker is opening and has
-# not claimed yet); a second hand-off of it is refused meanwhile, so one click cannot open two workers.
+# A handed-off request whose file the consumer moved to done/ shows "started" this long (the worker is opening, or the
+# review is under way, and the board has not moved yet); a second hand-off is refused meanwhile, so one click cannot
+# open two workers.
 STARTED_HOLD_S=3600
-HANDOFF_STATES=('requested','stale')
+HANDOFF_STATES=('requested','stale','submitted','blocked')
 RID=re.compile(r'[A-Za-z0-9][A-Za-z0-9-]{5,120}')
 CSP="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
 
 
 def handoff_waiting(payload):
-    """Requests the viewer may hand off: a workflow request to a role id (Claude or Codex) whose worker is not there yet
-    (requested) or whose lease expired (stale). Keyed by request id."""
+    """Requests the viewer may hand off: an open workflow request whose next move is on a role id (Claude or Codex) =
+    its worker is not there yet (requested) or its lease expired (stale), its submission waits for review (submitted), or
+    its question waits for the reviewer (blocked). A request someone is working on, or whose next move is on a native
+    session, is not handed off. Keyed by request id."""
     out={}
     for t in payload.get('threads') or []:
         w=t.get('workflow') or {}
-        asg=w.get('assignee') or {}
-        if w.get('status') in HANDOFF_STATES and w.get('request_id') and str(asg.get('session_id','')).startswith('role-'):
+        nxt=w.get('waiting_on') or {}
+        if (not t.get('closed') and w.get('status') in HANDOFF_STATES and w.get('request_id')
+                and str(nxt.get('session_id','')).startswith('role-')):
             out[w['request_id']]={'request_id':w['request_id'],'project':t.get('project'),'thread_id':t.get('thread_id'),
-                                  'title':(w.get('title') or '')[:300],'status':w.get('status'),'assignee':asg}
+                                  'title':(w.get('title') or '')[:300],'status':w.get('status'),'waiting_on':nxt,
+                                  'assignee':w.get('assignee'),'reviewer':w.get('reviewer')}
     return out
 
 
@@ -196,7 +202,7 @@ def main():
                 self.answer(200,ok=True,already=state,note=a.handoff_note); return
             with lock: req=cache['waiting'].get(rid)
             if not req:
-                self.answer(409,ok=False,why='受け手を待っている依頼ではない (もう受け手が居るか、 終わった)。 読み直して確かめる'); return
+                self.answer(409,ok=False,why='役割の番で止まっている依頼ではない (誰かが動いているか、 終わった)。 読み直して確かめる'); return
             try:
                 qdir.mkdir(parents=True,exist_ok=True)
                 rec=dict(req,asked_at=time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),asked_by='viewer',board=shown_root)
