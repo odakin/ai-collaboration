@@ -69,9 +69,10 @@ set -e
 for s in scripts/*.py; do python3 "$s" --selftest; done
 python3 board/board-view.py --selftest && python3 board/board-session-start.py --selftest && python3 board/board_transport.py --selftest && python3 board/board-post-reach-check.py --selftest && python3 board/test_board.py && python3 board/board_items.py --selftest   # git-crypt が要る (暗号化 transport の試験)
 AGENT_BOARD_TRANSPORT=clone python3 board/test_board.py   # 旧 transport (1 版だけ残す) も同じ試験を通す
+for m in scripts/*.mutants.json; do python3 ../claude-config/scripts/check-foil-teeth.py "$m"; done   # selftest の foil の歯 (修正の一部を外した mutant で落ちるか)、 claude-config の clone が隣に要る
 ```
 
-CI = `.github/workflows/checks.yml` (全 script の selftest。`secure-new-repo.sh --code` の baseline)。 `board/` の試験は CI に未配線 = 手元で回す (配線は本人の裁定待ち)。失敗した script の終了値を loop で失わない。
+CI = `.github/workflows/checks.yml` (全 script の selftest。`secure-new-repo.sh --code` の baseline)。 `board/` の試験と mutant の spec (`scripts/*.mutants.json`、 書式 = claude-config の `check-foil-teeth.py` 冒頭) は CI に未配線 = 手元で回す (配線は本人の裁定待ち)。失敗した script の終了値を loop で失わない。 foil の結果を記録に書くときは、 一時 file で書き換えて回した結果でなく spec にして同梱する ([`conventions/physics-verification-cycle.md#scratch-foil-not-bundled`](conventions/physics-verification-cycle.md#scratch-foil-not-bundled))。
 
 ## How to Resume
 

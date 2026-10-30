@@ -1,0 +1,34 @@
+{
+  "_comment": "verification-campaign-report.py の「--run なしの --write でも前回の実走の行を残す」 の selftest に歯があることを、 残し方の要所を 1 つずつ外した mutant 5 本で確かめる spec (claude-config の check-foil-teeth.py で回す)。",
+  "target": "verification-campaign-report.py",
+  "run": "python3 {} --selftest",
+  "fail_marker": "AssertionError: ",
+  "pass_marker": "PASS: ",
+  "mutants": [
+    {
+      "name": "前回の行を拾わない (--run なしでは行が消える、 直す前の挙動)",
+      "pairs": [["        prev = previous_run_row(camp)", "        prev = None"]],
+      "expect_fail": ["previous run row"]
+    },
+    {
+      "name": "前回の行を「前回」 と書き換えずに残す",
+      "pairs": [["                    return PREV_RUN_ROW + line[len(RUN_ROW):]", "                    return line"]],
+      "expect_fail": ["previous run row"]
+    },
+    {
+      "name": "既に「前回」 の形の行を拾わない (2 回目の --write で消える)",
+      "pairs": [["                if line.startswith(PREV_RUN_ROW):\n                    return line\n", ""]],
+      "expect_fail": ["previous run row"]
+    },
+    {
+      "name": "表に前回の行を出さない",
+      "pairs": [["    elif s.get('previous_run_row'):\n        lines.append(s['previous_run_row'])\n", ""]],
+      "expect_fail": ["previous run row"]
+    },
+    {
+      "name": "再実行していないことを stderr に言わない",
+      "pairs": [["            print(\"note: no --run; the previous run row is kept and marked as not re-run (add --run to refresh it)\", file=sys.stderr)", "            pass"]],
+      "expect_fail": ["previous run row"]
+    }
+  ]
+}

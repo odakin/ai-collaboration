@@ -576,14 +576,15 @@ def selftest() -> int:
         assert cli.returncode == 0, cli.stderr
         # A stats-only --write keeps the last run row, marked as not re-run, and stays byte-stable.
         cli = subprocess.run([sys.executable, __file__, str(camp), "--run", "--write"], capture_output=True, text=True)
-        assert cli.returncode == 0 and RUN_ROW in (camp / "results.md").read_text(encoding="utf-8"), cli.stderr
+        assert cli.returncode == 0 and RUN_ROW in (camp / "results.md").read_text(encoding="utf-8"), f"previous run row (setup): {cli.stderr}"
         cli = subprocess.run([sys.executable, __file__, str(camp), "--write"], capture_output=True, text=True)
         once = (camp / "results.md").read_text(encoding="utf-8")
-        assert cli.returncode == 0 and "not re-run" in cli.stderr, cli.stderr
-        assert PREV_RUN_ROW in once and RUN_ROW not in once and "checks 1/1 PASS, foils 2/2 teeth" in once, once
+        assert cli.returncode == 0 and "not re-run" in cli.stderr, f"previous run row (stderr note): {cli.stderr}"
+        assert PREV_RUN_ROW in once and RUN_ROW not in once and "checks 1/1 PASS, foils 2/2 teeth" in once, f"previous run row (relabel): {once}"
         subprocess.run([sys.executable, __file__, str(camp), "--write"], capture_output=True, text=True)
-        assert (camp / "results.md").read_text(encoding="utf-8") == once
+        assert (camp / "results.md").read_text(encoding="utf-8") == once, "previous run row (byte-stable second write)"
         assert PREV_RUN_ROW not in render(stats(camp, camp)) and RUN_ROW not in render(stats(camp, camp))  # foil: without the carry the row is gone
+        print("PASS: previous run row kept on a stats-only --write, relabelled, byte-stable")
     with tempfile.TemporaryDirectory() as td:
         root = Path(td); (root / "campaigns" / "retros").mkdir(parents=True)
         def mk(name, ledger=None, results=None):

@@ -153,15 +153,15 @@ def selftest():
     def rows(*pairs):
         return [dict(id=f'e{i}',number=n,numbered_row=f'{body} {n}',equation_group='') for i,(n,body) in enumerate(pairs)]
     clean=rows(('(1)','a'),('(2a)','b'),('(2b)','c'),('(3)','d'),('(A1)','e'),('(A2)','f'),('(2.1)','g'),('(2.2)','h'))
-    assert collapse_warnings(clean)==[],collapse_warnings(clean)
+    assert collapse_warnings(clean)==[],f'collapse warnings: clean series warned {collapse_warnings(clean)}'
     broken=rows(('(1)','a'),('(3)','b'),('(4a)','c'),('(4c)','d'),('(5)','c'),('(5)','x'),('(2.2)','y'))
     found=collapse_warnings(broken)
-    assert any('skips from 1 to (3)' in w for w in found),found
-    assert any('letters skip from 4a to (4c)' in w for w in found),found
-    assert any('(4a) and (5) have the same row text' in w for w in found),found
-    assert any('(5) appears twice' in w for w in found),found
-    assert any('series 2. starts at (2.2)' in w for w in found),found
-    assert len(found)==5,found
+    assert any('skips from 1 to (3)' in w for w in found),f'collapse warnings: {found}'
+    assert any('letters skip from 4a to (4c)' in w for w in found),f'collapse warnings: {found}'
+    assert any('(4a) and (5) have the same row text' in w for w in found),f'collapse warnings: {found}'
+    assert any('(5) appears twice' in w for w in found),f'collapse warnings: {found}'
+    assert any('series 2. starts at (2.2)' in w for w in found),f'collapse warnings: {found}'
+    assert len(found)==5,f'collapse warnings: {found}'
     with tempfile.TemporaryDirectory() as temp:
         source=Path(temp)/'input.html';output=Path(temp)/'output.json'
         source.write_text(fixture,encoding='utf-8');output.write_text('sentinel')
@@ -173,7 +173,7 @@ def selftest():
         gapped=fixture.replace('(II)','(4)').replace('(I)','(2)')
         source.write_text(gapped,encoding='utf-8')
         process=subprocess.run([sys.executable,__file__,str(source),'--output',str(output)],capture_output=True,text=True)
-        assert process.returncode==0 and 'WARNING' in process.stderr and 'skips from 2 to (4)' in process.stderr,process.stderr
+        assert process.returncode==0 and 'WARNING' in process.stderr and 'skips from 2 to (4)' in process.stderr,f'collapse warnings (CLI): {process.stderr}'
         assert len(json.loads(output.read_text()))==2
     print('PASS: equation groups, alttext, labels, row-loss foil, collapse warnings and fail-before-write guards')
 

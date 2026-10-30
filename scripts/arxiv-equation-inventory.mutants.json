@@ -1,0 +1,44 @@
+{
+  "_comment": "arxiv-equation-inventory.py の式目録の崩れの警告 (番号の飛び・番号の重複・同じ行の文・subequation の文字の飛び・CLI の出力) の selftest に歯があることを、 検査を 1 つずつ外した mutant 7 本で確かめる spec (claude-config の check-foil-teeth.py で回す)。",
+  "target": "arxiv-equation-inventory.py",
+  "run": "python3 {} --selftest",
+  "fail_marker": "AssertionError: ",
+  "pass_marker": "PASS: ",
+  "mutants": [
+    {
+      "name": "警告を 1 つも返さない",
+      "pairs": [["    return warnings", "    return []"]],
+      "expect_fail": ["collapse warnings"]
+    },
+    {
+      "name": "番号の飛び (と 1 から始まらない系列) を見ない",
+      "pairs": [["            if value!=previous+1 and value>previous:", "            if False:"]],
+      "expect_fail": ["collapse warnings"]
+    },
+    {
+      "name": "subequation の文字の飛びを見ない",
+      "pairs": [["            if letter!=expected and letter>letters[key]:", "            if False:"]],
+      "expect_fail": ["collapse warnings"]
+    },
+    {
+      "name": "番号の重複を見ない",
+      "pairs": [["        if label in seen:", "        if False:"]],
+      "expect_fail": ["collapse warnings"]
+    },
+    {
+      "name": "2 つの番号の同じ行の文を見ない",
+      "pairs": [["        if row and row in rows and rows[row]!=label:", "        if False:"]],
+      "expect_fail": ["collapse warnings"]
+    },
+    {
+      "name": "行の文から式番号を外さずに比べる (番号の違う同じ式を見落とす)",
+      "pairs": [["        row=(row[:cut]+row[cut+len(label):] if cut>=0 and label else row).strip()", "        row=row.strip()"]],
+      "expect_fail": ["collapse warnings"]
+    },
+    {
+      "name": "CLI が警告を stderr に出さない",
+      "pairs": [["        print(f'WARNING: {warning}',file=sys.stderr)", "        pass"]],
+      "expect_fail": ["collapse warnings"]
+    }
+  ]
+}
