@@ -13,6 +13,8 @@ test, its coefficients and its printed form stay with the project that claims th
 Conventions (explicit; each is asserted by --selftest):
   jets        Jet(val, d, dd): d[p, ...] = d_p(field)(0), dd[p, q, ...] = d_p d_q(field)(0), derivative indices in front.
               order = 0, 1 or 2 derivative levels kept; a product or sum has the lower order of its operands.
+              A contraction down to a scalar has a plain Fraction as its val (einsum drops the 0-d array), a constant
+              or det_jet() a 0-d array: read val[()] only on the latter.
   vierbein    E.val[a, m] = e^a_m;  geometry()["Ei"].val[a, m] = e_a^m (inverse);  frame indices move with eta.
   metric      g_mn = eta_ab e^a_m e^b_n;  Gamma^l_{rm} = (1/2) g^{lc} (-d_c g_{rm} + d_r g_{mc} + d_m g_{cr}).
   connection  Omega^a_{bm} = e^a_l (d_m e_b^l + Gamma^l_{rm} e_b^r), the torsion-free connection of

@@ -1,0 +1,31 @@
+{
+  "_comment": "compare-script-output.py の selftest の歯を、 比べ方の要所を 1 つずつ外した mutant で確かめる spec (claude-config の check-foil-teeth.py で回す)。",
+  "target": "compare-script-output.py",
+  "run": "python3 {} --selftest",
+  "mutants": [
+    {"name": "出力を比べない",
+     "pairs": [["if a == b and rc_old == rc_new == 0:", "if rc_old == rc_new == 0:"]],
+     "expect_fail": ["a changed value is reported"],
+     "expect_pass": ["a refactor with the same output and a different timing is SAME"]},
+    {"name": "終了値を比べない",
+     "pairs": [["if a == b and rc_old == rc_new == 0:", "if a == b:"]],
+     "expect_fail": ["a changed exit code with the same text is reported", "a script that fails on both sides does not pass"],
+     "expect_pass": ["a changed value is reported"]},
+    {"name": "時間の mask を外す",
+     "pairs": [["masks = [TIMING, *masks]", "masks = [*masks]"]],
+     "expect_fail": ["a refactor with the same output and a different timing is SAME"],
+     "expect_pass": ["a changed value is reported"]},
+    {"name": "2 つの root を揃えない",
+     "pairs": [["        text = text.replace(form, \"<root>\")\n", "        pass\n"]],
+     "expect_fail": ["the two roots are not a difference"],
+     "expect_pass": ["a changed value is reported"]},
+    {"name": "--link を張らない",
+     "pairs": [["            os.symlink(repo / name, old / name)\n", "            pass\n"]],
+     "expect_fail": ["an input outside the archive is shared with --link"],
+     "expect_pass": ["a changed value is reported"]},
+    {"name": "追加の mask を当てない",
+     "pairs": [["    for m in masks:\n        text = re.sub(m, \"<masked>\", text)\n", "    text = re.sub(TIMING, \"<masked>\", text)\n"]],
+     "expect_fail": ["an extra --mask hides only what it names"],
+     "expect_pass": ["a refactor with the same output and a different timing is SAME"]}
+  ]
+}
