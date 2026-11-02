@@ -1619,7 +1619,8 @@ class LaunchCommandCLI(Transport):
             ran=subprocess.run(fb.strip(),shell=True,capture_output=True,text=True)   # the line runs as printed (stub CLI)
             self.assertEqual(ran.returncode,0,ran.stderr); self.assertIn('起動した',ran.stdout); self.assertNotIn('remoteControlAtStartup',ran.stdout)
             self.assertEqual(board.launch_record(self.root,rid)['surface'],'background')
-            self.assertIn('Ask the owner for any approval',args['prompt'])         # approvals are asked in the worker's own window
+            self.assertIn('Send questions of judgment, approval or acceptance to the requester',args['prompt'])   # the requester decides them at review
+            self.assertIn('not to the owner in this window',args['prompt']); self.assertNotIn('Ask the owner for any approval',args['prompt'])
             os.environ['AGENT_BOARD_LAUNCH_SURFACE']='desktop'   # the owner's default chooses the surface as well
             out2=cli('request',*base,'--thread','2026-01-01-screen-b','--to','claude','--to-session','role-qproj-other')
             self.assertIn('desktop app の session として起こす',out2); self.assertNotIn('起動した',out2)

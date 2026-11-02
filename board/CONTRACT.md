@@ -599,8 +599,11 @@ python3 board_items.py list    --root <board>
   --launch` with the same model and effort and `AGENT_BOARD_LAUNCH_REMOTE_CONTROL=follow`, a background CLI session
   with Remote Control on under the same config dir, listed where the owner is reading (not the requester's child).
   `follow` = the worker takes the requester's exposure; a refusal shows that the owner kept Remote Control on in the
-  requester's window, so a forwarder that drops `1` for an account shared with other people lets `follow` through. The desktop hand-off text tells the worker to ask the owner for approvals in its own window and not
-  through the requester. **`--surface agent`** is for work the requester runs as its own subagent (Agent tool), which
+  requester's window, so a forwarder that drops `1` for an account shared with other people lets `follow` through. <a id="worker-questions-to-requester"></a>The desktop hand-off text sends the worker's
+  questions of judgment, approval and acceptance to the requester, which decides them at review and asks the owner where
+  the owner's own ruling is needed; the worker asks the owner in its own window only for what only that window can give
+  (a tool permission prompt). Measured: a question put to the owner in two windows reached the owner twice, and a worker
+  that asked the owner in its own window was sent back to the requester. **`--surface agent`** is for work the requester runs as its own subagent (Agent tool), which
   the app does not list: it prints no launch line, only the record and the hand-off file for the Agent's prompt. A
   subagent claiming a request launched for a desktop window is refused (`--subagent-ok` when the requester or the
   owner chose a subagent): measured, a request for a worker the owner wanted to watch was taken by a subagent. A

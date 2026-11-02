@@ -824,9 +824,14 @@ def handoff_text(root, role, request_id, spec, model, effort, surface='backgroun
         sm_cli=ENGINE.parent.parent/'claude-config'/'scripts'/'session-model.py'
         hold=(f"0. First run `python3 {sm_cli} self`: if the app's record (`app の記録`) is not {model}"+(f" with effort {effort}" if effort else '')
               +", stop at once without reading the request or its materials and say so in one line; the requester switches you and sends `go`.\n")
-    # A desktop window is the owner's own window: an approval asked there and relayed by the requester reached the owner
-    # twice (measured), so the worker asks in its window only.
-    ask=(" Ask the owner for any approval or OK in this window, where the owner reads it; do not ask the requester to relay it."
+    # A question put to the owner in more than one window reached the owner twice (measured), and the owner moved the
+    # worker's questions to the requester (measured: a worker asked the owner in its own window whether to keep a sentence
+    # of its deliverable, and the owner answered that the requester should decide it at review). The requester decides
+    # judgment and acceptance at review and asks the owner itself where the owner's own ruling is needed, so the worker
+    # asks the owner in its own window only for what only that window can give.
+    ask=(" Send questions of judgment, approval or acceptance to the requester (SendMessage or a board note), not to the owner"
+         " in this window: the requester decides them at review and asks the owner where the owner's own ruling is needed."
+         " Ask the owner here only for what only this window can give, such as a tool permission prompt."
          if surface=='desktop' else '')
     scope=(f" --project {project}" if project else '')+(f" --policy {policy}" if policy else '')
     # The requester relays a worker's summary to the owner, and labels made up during the work (option letters, item
