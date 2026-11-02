@@ -84,7 +84,8 @@ For each result the abstract and introduction announce: (a) restate the claim in
 ## 8. Presentation
 
 - Title and abstract vs content; overclaims; numbers in the abstract vs the body.
-- Opening italic sentences and "In summary" paragraphs vs content.
+- An italic sentence or paragraph right after a section heading (a summary of the section in italics) is a presentation defect: report each one as such, not only whether it matches the content. A section opens with at most a short roman sentence saying what the section does.
+- "In summary" paragraphs vs content.
 - Clarity, redundancy, undefined symbols, forward references, self-contained captions.
 
 ## 9. Handoff packet (required)
