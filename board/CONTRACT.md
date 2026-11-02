@@ -356,7 +356,10 @@ reviewer even if the lease expires; inbox/show expose `claim_expired` and `lease
 submit while it is open. The reviewer's `update --reply-to <blocker>` resolves it. A submitted result still awaits
 receipt after lease expiry; only the reviewer can withdraw a request. A worker that takes over a request whose
 earlier claim expired reads `show --request <id>` and the files its notes name before starting: the earlier worker
-may have finished most of it, and the open step may be only an approval (measured).
+may have finished most of it, and the open step may be only an approval (measured). The earlier worker, resuming
+after its lease expired (for example when the approval it waited for finally arrives), reads `show --request <id>
+--sync` before acting on it: another session may already have applied the change and submitted, and applying the old
+candidates again would overwrite edits made since (measured).
 
 <a id="note-never-answers"></a>A `note` never answers a blocker: the request stays blocked and the worker cannot submit. A worker's stop or
 question posted as a `note` does not reach the reviewer as a question either; post it as a `blocker`. Each side
