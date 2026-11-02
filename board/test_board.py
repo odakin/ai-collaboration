@@ -1666,6 +1666,11 @@ class LaunchCommandCLI(Transport):
             self.assertEqual((args['model'],args['effort'],args['name'],args['initiation']),('claude-fable-5-1','high','screen','user_asked'))
             self.assertEqual(args['title'],'画面が崩れる · Fable 5.1 high'); self.assertFalse(args['use_worktree'])
             self.assertIn('0. First run',args['prompt']); self.assertIn('must run on claude-fable-5-1 at high effort',args['prompt'])
+            # step 0 compares the record with the asked values and, on a mismatch, sends the requester a line before stopping
+            # (a clicked card has no watch, and the requester sleeps through a child's turn end while other children run)
+            self.assertIn('self --expect-model claude-fable-5-1 --expect-effort high',args['prompt'])
+            self.assertIn('first send the line it prints to the session that started you',args['prompt'])
+            self.assertIn('本人が押す card',out); self.assertIn('go 待ち',out)
             self.assertGreaterEqual(len(args['background']),80)
             rec=board.launch_record(self.root,rid); self.assertEqual((rec['surface'],rec['model'],rec['effort']),('desktop','claude-fable-5-1','high'))
             self.assertFalse(rec['detach']); self.assertNotIn('detach_session',out)   # stays the requester's child by default
@@ -1843,7 +1848,7 @@ class EffortFlag(unittest.TestCase):
         out=self.cli('request',*b,'--thread','2026-01-01-eff-a','--to','claude','--to-session','role-eproj-a','--surface','desktop','--effort','max').stdout
         rid=self.rid(out); args=json.loads((board.outbox_dir(self.root)/(rid+'.start_session.json')).read_text())
         self.assertEqual(args['effort'],'max'); self.assertTrue(args['title'].endswith('Opus 5.5 max'),args['title'])
-        self.assertIn('must run on claude-opus-5-5 at max effort',args['prompt']); self.assertIn('with effort max',args['prompt'])
+        self.assertIn('must run on claude-opus-5-5 at max effort',args['prompt']); self.assertIn('--expect-effort max',args['prompt'])
         self.assertEqual(board.launch_record(self.root,rid)['effort'],'max'); self.assertIn('effort max',out)
         # background: the CLI line and the hand-off file
         out=self.cli('request',*b,'--thread','2026-01-01-eff-b','--to','claude','--to-session','role-eproj-b','--surface','background','--effort','low').stdout

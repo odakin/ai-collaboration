@@ -812,18 +812,24 @@ def handoff_text(root, role, request_id, spec, model, effort, surface='backgroun
     """What a worker window starts from (CONTRACT.md#worker-handoff-text): role, request, spec, the model and effort it
     must run on, and the first two steps. Written to a file and passed to the CLI whole, so quoting never bites.
     A desktop window gets a step 0: the app starts it on the requester's model when the asked one is higher, and on
-    another effort (measured), so the worker reads the app's record first and stops when it differs. Step 0 holds back
-    the request and its materials only; a session's own start-up reads are not the task. The claim and submit steps
-    carry the whole command: a worker told only to `claim` with a session name found --root, --request, --project and
-    --policy by refused posts (measured)."""
+    another effort (measured), so the worker reads the app's record first and stops when it differs. Before stopping it
+    sends the requester the line the check prints: with other children running, the app does not wake the requester at
+    a child's turn end, and a card the owner clicks is no tool call of the requester's, so no watch exists for it
+    (measured: a max worker started from a card stood at its step 0 until the owner's next message), while a message
+    from the child starts a turn in an idle requester (measured). Step 0 holds back the request and its materials only;
+    a session's own start-up reads are not the task. The claim and submit steps carry the whole command: a worker told
+    only to `claim` with a session name found --root, --request, --project and --policy by refused posts (measured)."""
     run=(f" This window must run on {model}"+(f" at {effort} effort" if effort else '')
          +(f" (why this model and effort: {reason})" if reason else '')+'.') if model else ''
     eng=Path(__file__).resolve()
     hold=''
     if surface=='desktop' and model:
         sm_cli=ENGINE.parent.parent/'claude-config'/'scripts'/'session-model.py'
-        hold=(f"0. First run `python3 {sm_cli} self`: if the app's record (`app の記録`) is not {model}"+(f" with effort {effort}" if effort else '')
-              +", stop at once without reading the request or its materials and say so in one line; the requester switches you and sends `go`.\n")
+        hold=(f"0. First run `python3 {sm_cli} self --expect-model {model}"+(f" --expect-effort {effort}" if effort else '')
+              +"`: if it does not print ✅, stop at once without reading the request or its materials: first send the line it"
+              " prints to the session that started you (SendMessage to the `to` it names = your requester; your turn's end does"
+              " not wake it while its other children run, a message does), then say so in one line; the requester switches"
+              " you and sends `go`.\n")
     # A question put to the owner in more than one window reached the owner twice (measured), and the owner moved the
     # worker's questions to the requester (measured: a worker asked the owner in its own window whether to keep a sentence
     # of its deliverable, and the owner answered that the requester should decide it at review). The requester decides
@@ -961,6 +967,15 @@ def model_label(model, effort):
 
 
 STAY_NESTED=('。 worker は依頼元の下に子のまま並ぶ (既定 = 一覧の上の段に独立させない)。 子の turn の終わりの知らせは依頼元に届くが、 依頼元が動くのは掲示板の提出と blocker と起動の見張りの終わりと、 子が依頼元に出した問い (掲示板の note か SendMessage) だけ。 子の判断・承認・検収の問いは依頼元が検収で決め、 本人の裁定が要るものだけを依頼元の窓で 1 回本人に聞く (子の窓で本人に頼むのは、 その窓でしか出せない許可だけ)。 独立させるなら --detach')
+
+
+# A card has no session until the owner clicks it, and the click is no tool call of the requester's: no launch hook
+# fires and no watch can be started for it (measured: a max worker started from a card stood at its step 0 until the
+# owner's next message, while the requester's other children ran). The worker's own line at step 0 wakes the requester.
+CARD_NOTE=('  本人が押す card (initiation = own_initiative) で起こすときは、 押されるまで子が無いので見張りは出せず、 押す操作は依頼元の'
+           ' tool 呼び出しを経ないので起動の hook も出ない。 記録が違えば、 子が step 0 で「go 待ち」 の 1 行を依頼元へ SendMessage で'
+           ' 送ってくる (ほかの子が動いていても依頼元を起こす = 実測) = その 1 行で set_session_model → set_session_effort → 記録を'
+           '読んで go。')
 
 
 def first_turn_watch(args):
@@ -1148,6 +1163,7 @@ def announce_launch(a, ev, audience):
               ' set_session_effort の後にもう一度見張る / 合う = go を送る。 本人に「起きた」 と言うのは記録が合ってから'
               +('。 記録が合ったら detach_session(<local_…>) = 一覧の上の段に独立させる (--detach の指定。 子の turn の終わりの知らせが'
                 ' 依頼元に来なくなる。 提出と blocker は掲示板の watch で届く)' if detach else STAY_NESTED))
+        print(CARD_NOTE)
         print(remote_control_fallback(a.root,ev['event_id'],a.session,args.get('model'),args.get('effort'),getattr(a,'worktree',False),a.effort_quote,a.model_quote))
         if getattr(a,'launch',False): print('  (--launch は CLI の起動だけ = desktop の session は依頼元が start_session で起こす)')
         return None
@@ -1473,6 +1489,7 @@ def launch_claude_role(a, req, events):
               f' `{first_turn_watch(args)}` を Bash の run_in_background で出して turn を終え、 見張りの 1 行どおり'
               ' set_session_model → set_session_effort の後にもう一度見張る / 合えば go'
               +('。 合ったら detach_session (--detach の指定)' if a.detach else STAY_NESTED))
+        print(CARD_NOTE)
         return
     argv,env,line,hpath=launch_plan(a.root,role,a.request,spec,a.expect_model,a.session,project=project,policy=policy,
                                     effort=a.effort,reason=a.reason,worktree=a.worktree,source=getattr(a,'source',None),effort_quote=a.effort_quote,

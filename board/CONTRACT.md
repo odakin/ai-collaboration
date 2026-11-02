@@ -586,9 +586,10 @@ python3 board_items.py list    --root <board>
   `CLAUDE_CODE_ENTRYPOINT=claude-desktop`, whatever path called the engine; `AGENT_BOARD_LAUNCH_SURFACE` overrides;
   other requesters default to the shell line) prints, instead of the shell line, the desktop app's `start_session` arguments (also written as `<request id>.start_session.json`): the same model
   and effort, a title with the task first and the model last (the app's list cuts titles from the left, measured), and
-  the hand-off text with a step 0 = read the app's record of this window (`session-model.py self`) and stop in one
-  line when its model or effort differ, before reading the request or its materials (a session's own start-up reads
-  are not held back). Every hand-off text spells out the whole `claim` and `submit` commands, with the request's
+  the hand-off text with a step 0 = compare the app's record of this window with the asked model and effort
+  (`session-model.py self --expect-model … --expect-effort …`) and, when they differ, send the line it prints to the
+  session that started the window (the app's record names it, for a card the owner clicked too), then stop in one
+  line, before reading the request or its materials (a session's own start-up reads are not held back). Every hand-off text spells out the whole `claim` and `submit` commands, with the request's
   project and policy (measured: a worker told only to `claim` found them by refused posts). The board cannot open a desktop window; the requesting Claude session calls
   `start_session` with those arguments. The app drops a model above the caller's and the effort argument without an
   error (measured), so the requester reads the app's record of the new session. When it differs, the worker stops at
@@ -597,7 +598,10 @@ python3 board_items.py list    --root <board>
   requester at a child's turn end, while the end of a background command does, measured). At the end of the worker's
   first turn the watch prints the next step: switch with `set_session_model` then `set_session_effort` and watch again,
   send `go`, or, when the worker has claimed, wait for its submit
-  (claude-config `multi-session-coordination.md#desktop-start-model-cap`). The worker stays the requester's child and
+  (claude-config `multi-session-coordination.md#desktop-start-model-cap`). A card the owner clicks has no session
+  until the click, and the click is no tool call of the requester's, so neither the launch hook nor a watch exists for
+  it: the worker's step-0 line is what wakes the requester (a message starts a turn in an idle requester while its
+  other children run, measured), and the requester then switches the record and sends `go`. The worker stays the requester's child and
   is listed under it in the app (the view the owner reads: the workers under the session that sent them). Its turn
   ends reach the requester, which acts only on the board's submit and blocker and on the questions the child sends it
   (a board note or SendMessage); it decides them at review and puts to the owner, once and in its own window, only
