@@ -330,7 +330,10 @@ or return a pending submission first); a reviewer handover keeps the submission 
 Runners and dashboards read `inbox --json`: actionable requests and scoped error rows, warnings on stderr, `[]` when
 nothing waits. Each row carries the latest valid `question`, `answer`, `submission` and `review` with their own
 summary, author, event id, `reply_to`, references and deliverables. A later status note cannot replace a submission
-or receipt.
+or receipt. A worker that changes its deliverables after `submit` and before the review cannot submit again (the
+engine refuses with `already submitted`): it commits the change, posts a `note --reply-to <submission>` that names the
+new commit, and messages the reviewer; the reviewer names the commit it reviewed in its `accept`, or returns the
+submission with `revise` so that the worker submits again (measured).
 
 ### <a id="handoff-inspection"></a>Inspect messages and completed requests
 
