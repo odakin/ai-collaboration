@@ -427,6 +427,26 @@ class Pickup(unittest.TestCase):
         self.assertIsNone(board.pickup_problem([r,self.note(1,'a')],self.note(2,'a')))     # the same session again
         self.assertIn('引き受け済み',board.pickup_problem([r,self.note(1,'a')],self.note(2,'b')))
 
+class HandoffWaiting(unittest.TestCase):
+    """board-serve's GET /due rows name the native session behind the role whose move it is and the submission's author."""
+    def setUp(self):
+        spec=importlib.util.spec_from_file_location('board_serve',Path(__file__).with_name('board-serve.py'))
+        self.serve=importlib.util.module_from_spec(spec); spec.loader.exec_module(self.serve)
+    def row(self, events, status='submitted', waiting='role-p-owner-review'):
+        payload={'threads':[{'project':'p','thread_id':'t','closed':False,'events':events,
+                             'workflow':{'status':status,'request_id':'R1','waiting_on':{'agent':'claude','session_id':waiting}}}]}
+        return self.serve.handoff_waiting(payload).get('R1')
+    def ev(self, kind, sid, task=''):
+        return {'kind':kind,'request_id':'R1','created_at':'2026-11-02T00:00:00Z','actor':{'agent':'claude','session_id':sid,'task':task}}
+    def test_role_and_submitter(self):
+        evs=[self.ev('request','6fa02cac'),self.ev('claim','role-p-w','855058cc (opus)'),self.ev('submit','role-p-w','855058cc (opus)'),
+             self.ev('revise','role-p-owner-review','abcdef12 (opus)'),self.ev('submit','role-p-w','855058cc (opus)')]
+        r=self.row(evs)
+        self.assertEqual((r['waiting_native'],r['submitter_native']),('abcdef12','855058cc'))
+    def test_unnamed_role_and_no_submission(self):
+        r=self.row([self.ev('request','6fa02cac')],status='requested',waiting='role-p-w')
+        self.assertEqual((r['waiting_native'],r['submitter_native']),(None,None))   # nobody has acted as the role yet
+
 class SessionState(unittest.TestCase):
     def test_states(self):
         import os, time
@@ -1581,6 +1601,43 @@ class LaunchCommandCLI(Transport):
         finally:
             if saved is None: os.environ.pop('AGENT_BOARD_LAUNCH_MODEL',None)
             else: os.environ['AGENT_BOARD_LAUNCH_MODEL']=saved
+            os.environ.update({k:v for k,v in wiring.items() if v is not None})
+
+    def test_restricted_request_spec_local(self):
+        """--spec-local names the spec in the worker's hand-off and the local launch record, never in the post (a restricted
+        post refuses --reference): before it, every restricted hand-off said `(the request itself)` and was rewritten by hand."""
+        import sys, os
+        script=board.ENGINE/'board.py'
+        def cli(*args, ok=True):
+            p=subprocess.run([sys.executable,str(script),*args],capture_output=True,text=True)
+            if ok: self.assertEqual(p.returncode,0,p.stderr)
+            return p
+        spec=self.base/'worker-spec-fixture.md'; spec.write_text('fixture spec\n')
+        base=['--root',str(self.root),'--agent','claude','--session','claude-win-9','--source',str(self.root),'--policy','encrypted-metadata-only']
+        keys=('AGENT_BOARD_LAUNCH_DEFAULT','AGENT_BOARD_LAUNCH_CLI','AGENT_BOARD_LAUNCH_CONFIG_DIR','AGENT_BOARD_LAUNCH_EFFORT',
+              'AGENT_BOARD_LAUNCH_REMOTE_CONTROL','AGENT_BOARD_LAUNCH_SURFACE','AGENT_BOARD_LAUNCH_MODEL','CLAUDE_CODE_ENTRYPOINT')
+        wiring={k:os.environ.pop(k,None) for k in keys}; os.environ['AGENT_BOARD_LAUNCH_MODEL']='claude-model-y'
+        try:
+            out=cli('request',*base,'--thread','r-00112233aac1','--to','claude','--to-session','role-q-work','--spec-local',str(spec)).stdout
+            rid=next(l.split('=',1)[1] for l in out.splitlines() if l.startswith('event_id='))
+            hand=(board.outbox_dir(self.root)/(rid+'.handoff.txt')).read_text()
+            self.assertIn(f'spec `{spec.resolve()}`',hand); self.assertNotIn('(the request itself)',hand)
+            self.assertEqual(board.launch_record(self.root,rid)['spec'],str(spec.resolve()))
+            with board.snapshot(self.root,fresh=True) as snap:
+                req=next(e for e in board.read(snap) if e['event_id']==rid)
+            self.assertNotIn(spec.name,json.dumps(req,ensure_ascii=False,default=str))   # the path is not in the post
+            # a later `launch --request` (no --spec-local) takes the spec from this machine's launch record
+            (board.outbox_dir(self.root)/(rid+'.handoff.txt')).unlink()
+            cli('launch',*base[:6],'--request',rid,'--surface','background')
+            self.assertIn(f'spec `{spec.resolve()}`',(board.outbox_dir(self.root)/(rid+'.handoff.txt')).read_text())
+            # refused: a file that is not there, and a command that has no hand-off
+            bad=cli('request',*base,'--thread','r-00112233aac2','--to','claude','--to-session','role-q-work',
+                    '--spec-local',str(self.base/'no-such-spec.md'),ok=False)
+            self.assertNotEqual(bad.returncode,0); self.assertIn('no such file',bad.stderr)
+            bad2=cli('note',*base,'--request',rid,'--spec-local',str(spec),ok=False)
+            self.assertNotEqual(bad2.returncode,0); self.assertIn('request and launch only',bad2.stderr)
+        finally:
+            os.environ.pop('AGENT_BOARD_LAUNCH_MODEL',None)
             os.environ.update({k:v for k,v in wiring.items() if v is not None})
 
     def test_request_desktop_surface_prints_start_session_arguments(self):

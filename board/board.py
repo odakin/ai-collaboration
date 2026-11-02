@@ -939,6 +939,17 @@ def launch_record(root, request_id):
     except Exception: return None
 
 
+def handoff_spec(a, req=None, rec=None):
+    """The spec a worker's hand-off text names. --spec-local (a file on the requester's side) goes only into the hand-off
+    file and the local launch record, never into the post: a restricted request refuses --reference, so without it the
+    hand-off said `(the request itself)` and the requester rewrote the text by hand before every launch (measured).
+    Then, for a request posted before (`launch --request`): the request's first reference, else the
+    launch record's spec (a restricted request posted here with --spec-local); for a new request: its first --reference."""
+    if getattr(a,'spec_local',None): return a.spec_local
+    if req is not None: return next(iter(req.get('references') or []),None) or (rec or {}).get('spec')
+    return (a.reference or [None])[0]
+
+
 def model_label(model, effort):
     """'claude-fable-5-1', 'xhigh' → 'Fable 5.1 xhigh' (the tail of a worker's title in the app's list)."""
     m=re.match(r'claude-([a-z]+)-(\d+)(?:-(\d+))?',model or '')
@@ -1107,9 +1118,9 @@ def announce_launch(a, ev, audience):
         # Work the owner does not watch, run as the requester's own subagent: no window to open, so only the record
         # (the claim check compares the subagent's model with it) and the hand-off text the Agent tool's prompt carries.
         model,effort=launch_settings(a.expect_model,a.session,a.effort)
-        text=handoff_text(a.root,a.to_session,ev['event_id'],(a.reference or [None])[0],model,effort,project=a.project,policy=a.policy,reason=a.reason,source=a.source)
+        text=handoff_text(a.root,a.to_session,ev['event_id'],handoff_spec(a),model,effort,project=a.project,policy=a.policy,reason=a.reason,source=a.source)
         hpath=write_outbox(a.root,ev['event_id']+'.handoff.txt',text)
-        write_launch_record(a.root,ev['event_id'],role=a.to_session,model=model,effort=effort,surface='agent',requester=a.session,
+        write_launch_record(a.root,ev['event_id'],role=a.to_session,spec=handoff_spec(a),model=model,effort=effort,surface='agent',requester=a.session,
                             **({'reason':a.reason} if a.reason else {}),**({'effort_quote':a.effort_quote} if a.effort_quote else {}),
                             **({'model_quote':a.model_quote} if a.model_quote else {}))
         print(f'→ 受け手は依頼元の Agent tool (subagent) で起こす = app の一覧に出ない (本人が見ない手元の仕事だけ)。'
@@ -1120,7 +1131,7 @@ def announce_launch(a, ev, audience):
         # The worker the owner wants to watch: a desktop session is listed in the app (a background CLI session with
         # Remote Control off is listed nowhere, and with it on it sits on the shelf shared with other machines = measured).
         detach=bool(getattr(a,'detach',False))
-        args,spath=desktop_plan(a.root,a.to_session,ev['event_id'],(a.reference or [None])[0],a.expect_model,a.session,
+        args,spath=desktop_plan(a.root,a.to_session,ev['event_id'],handoff_spec(a),a.expect_model,a.session,
                                 title=getattr(a,'title',None),project=a.project,summary=ev.get('summary'),detach=detach,policy=a.policy,effort=a.effort,reason=a.reason,
                                 worktree=getattr(a,'worktree',False),source=a.source,effort_quote=a.effort_quote,model_quote=a.model_quote)
         sm_cli=ENGINE.parent.parent/'claude-config'/'scripts'/'session-model.py'
@@ -1139,7 +1150,7 @@ def announce_launch(a, ev, audience):
         return None
     # A role names a window nobody has opened: print the command that opens it with model, effort and account
     # pinned (measured: the chip opens on the parent's model, and a pasted hand-off ran on whatever the window had).
-    argv,env,line,hpath=launch_plan(a.root,a.to_session,ev['event_id'],(a.reference or [None])[0],a.expect_model,a.session,project=a.project,policy=a.policy,effort=a.effort,reason=a.reason,
+    argv,env,line,hpath=launch_plan(a.root,a.to_session,ev['event_id'],handoff_spec(a),a.expect_model,a.session,project=a.project,policy=a.policy,effort=a.effort,reason=a.reason,
                                     worktree=getattr(a,'worktree',False),source=a.source,effort_quote=a.effort_quote,model_quote=a.model_quote)
     if audience=='owner':
         print(f'→ 受け手を起こす (model・effort・account を固定、 貼り付け不要。 依頼元の shell でそのまま):\n  {line}')
@@ -1290,7 +1301,7 @@ def _codex_threads_ok():
 def codex_announce(a, ev, audience):
     """For a request to a Codex role: write the hand-off and the launch record, print how the worker starts, and return
     (argv, env) when it starts on this machine (None when another machine launches it, or for the headless line)."""
-    f=codex_fields(a); rid=ev['event_id']; spec=(a.reference or [None])[0]
+    f=codex_fields(a); rid=ev['event_id']; spec=handoff_spec(a)
     if f['surface']=='background':
         text=codex_handoff_text(a.root,a.to_session,rid,spec,f,project=a.project,policy=a.policy,source=a.source)
         hpath=write_outbox(a.root,rid+'.handoff.txt',text)
@@ -1394,7 +1405,7 @@ def cmd_launch(a):
     if f.get('surface')=='background':
         raise ValueError('この依頼は headless の codex exec を選んでいる (理由 = '+f.get('headless-reason','')+') = 依頼元の shell が起こす')
     a.policy=req['source_policy']; a.project=req['project']['key']
-    spec=next(iter(req.get('references') or []),None)
+    spec=handoff_spec(a,req,launch_record(a.root,a.request))
     argv,line,_=codex_plan(a.root,asg['session_id'],a.request,spec,f,project=a.project,policy=a.policy,source=getattr(a,'source',None),
                            title=f.get('title') or re.split(r'[。:：(（]',req.get('summary') or '')[0].strip() or None)
     print('→ 起こす: '+line)
@@ -1440,7 +1451,7 @@ def launch_claude_role(a, req, events):
     surface=(a.surface or os.environ.get(LAUNCH_SURFACE_ENV)
              or ('desktop' if os.environ.get('CLAUDE_CODE_ENTRYPOINT')=='claude-desktop' else 'background')).strip()
     if surface=='agent': raise ValueError('launch: --surface desktop か background (subagent に窓は要らない)')
-    project=req['project']['key']; policy=req['source_policy']; spec=next(iter(req.get('references') or []),None)
+    project=req['project']['key']; policy=req['source_policy']; spec=handoff_spec(a,req,rec)
     note=premium_note(*launch_settings(a.expect_model,a.session,a.effort),a.reason)
     if note: print(note)
     poster=(req.get('actor') or {}).get('session_id') or '?'
@@ -1645,6 +1656,10 @@ def main():
                     ' refused. Kept in the launch record')
     ap.add_argument('--summary'); ap.add_argument('--acceptance')
     ap.add_argument('--deliverable',action='append',default=[]); ap.add_argument('--reference',action='append',default=[])
+    ap.add_argument('--spec-local',help='request / launch to a role: the spec file on the requester\'s side, named only in the'
+                    ' worker\'s hand-off text and this machine\'s launch record, never in the post. A restricted request refuses'
+                    ' --reference, so this is how its worker finds the spec; on an ordinary request it takes the place of the'
+                    ' first --reference in the hand-off. Must exist; written as an absolute path')
     ap.add_argument('--review-target',action='append',default=[],help='request: a file the receiver reviews blind; refused '
                     'unless it is a referee copy (no comment text, scripts/check-review-target.py). Added to the references')
     ap.add_argument('--not-blind',action='store_true',help='request: reads like a review, but the receiver may read the '
@@ -1691,6 +1706,11 @@ def main():
         except ValueError as e: ap.error(str(e))
     if a.include_closed and a.command != 'inbox': ap.error('--include-closed is for inbox only')
     if a.effort and a.command not in {'request','handover','launch'}: ap.error('--effort is for request, handover and launch only')
+    if a.spec_local:
+        if a.command not in {'request','launch'}: ap.error('--spec-local is for request and launch only')
+        p=Path(a.spec_local).expanduser()
+        if not p.is_file(): ap.error(f'--spec-local: no such file: {a.spec_local}')
+        a.spec_local=str(p.resolve())
     if a.detach and a.nested: ap.error('--detach and --nested contradict (nested is the default)')
     if a.reason and a.command not in {'request','launch'}: ap.error('--reason is for request and launch only')
     if a.effort_quote and a.command not in {'request','launch'}: ap.error('--effort-quote is for request and launch only')

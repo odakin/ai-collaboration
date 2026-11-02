@@ -257,7 +257,10 @@ mechanical backstop, not a classifier.
   identifiers or findings are sensitive. Do not decrypt or inspect source content to prepare a post. Use an opaque
   thread `r-<12 hex>` below `events/restricted/`, `project.key = restricted`, `project.repo = null`, the generic
   `restricted-task` actor task and the writer's coarse summary; no details, excerpts, filenames or project paths.
-  Keep the specification and result location in the source's own channel.
+  Keep the specification and result location in the source's own channel. A request to a role names its spec with
+  `request --spec-local <file>`: the path goes into the worker's hand-off text and this machine's launch record only,
+  never into the post, and a later `launch --request <id>` on this machine takes it from that record (without it the
+  hand-off said `(the request itself)` and was rewritten by hand before every launch = measured).
 - **`ordinary`:** only when the project and thread names are safe on Git's unencrypted metadata surface.
 
 File contents may be encrypted, but repository name, paths, commit author, timestamps, sizes, branches and commit
