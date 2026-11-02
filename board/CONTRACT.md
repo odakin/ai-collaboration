@@ -283,7 +283,10 @@ project, thread, person, result or path in a commit subject or branch name.
 ## <a id="request-and-receipt-workflow-v2"></a>Request and receipt workflow (v2)
 
 One thread holds one request. **Submission is not completion.** The designated reviewer reviews the latest
-submission and is the only session allowed to `accept` or `revise`. The reviewer is the session named by
+submission and is the only session allowed to `accept` or `revise`. `accept` closes the request: the engine then
+refuses every later post on it (`note`, `submit` and the rest fail with "request already closed"). A reviewer who still
+has items to add answers with `revise`; work that comes up after an accept goes in a new request (measured: a
+resubmission after an accept was refused, and follow-up rulings meant for the same request had to travel by message). The reviewer is the session named by
 `request --reviewer <session id>` (posted as a reviewer handover right after the request, so old readers understand
 it), else the requesting session; on an owner board the environment variable `AGENT_BOARD_DEFAULT_REVIEWER` (with
 `<project>` expanding to the project key) supplies it for ordinary posts. Identity is `(agent, session_id)`. A native
