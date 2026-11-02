@@ -1670,6 +1670,7 @@ class LaunchCommandCLI(Transport):
             rec=board.launch_record(self.root,rid); self.assertEqual((rec['surface'],rec['model'],rec['effort']),('desktop','claude-fable-5-1','high'))
             self.assertFalse(rec['detach']); self.assertNotIn('detach_session',out)   # stays the requester's child by default
             self.assertIn('子のまま並ぶ',out); self.assertIn('--detach',out)
+            self.assertIn('子の判断・承認・検収の問いは依頼元が検収で決め',out); self.assertNotIn('取り次がない',out)   # the requester takes the child's questions; the owner hears a question once
             fb=next(l for l in out.splitlines() if 'AGENT_BOARD_LAUNCH_REMOTE_CONTROL=follow' in l)   # start_session refused under Remote Control
             self.assertIn(f'launch --root {self.root} --agent claude --session claude-win-9 --request {rid} --surface background',fb)
             self.assertIn('--expect-model claude-fable-5-1 --effort high --launch',fb)
@@ -1678,6 +1679,7 @@ class LaunchCommandCLI(Transport):
             self.assertEqual(board.launch_record(self.root,rid)['surface'],'background')
             self.assertIn('Send questions of judgment, approval or acceptance to the requester',args['prompt'])   # the requester decides them at review
             self.assertIn('not to the owner in this window',args['prompt']); self.assertNotIn('Ask the owner for any approval',args['prompt'])
+            self.assertIn('the permission check holds until the owner approves it in this session',args['prompt'])   # a relayed approval does not reach the worker's session
             os.environ['AGENT_BOARD_LAUNCH_SURFACE']='desktop'   # the owner's default chooses the surface as well
             out2=cli('request',*base,'--thread','2026-01-01-screen-b','--to','claude','--to-session','role-qproj-other')
             self.assertIn('desktop app の session として起こす',out2); self.assertNotIn('起動した',out2)
@@ -1926,6 +1928,7 @@ class LaunchClaudeRole(EffortFlag):
               '--surface','desktop','--expect-model','claude-opus-5-5','--effort','high')
         out=self.cli(*base).stdout
         self.assertFalse(board.launch_record(self.root,rid)['detach']); self.assertNotIn('detach_session',out); self.assertIn('子のまま並ぶ',out)
+        self.assertIn('子が依頼元に出した問い',out); self.assertNotIn('本人は worker の窓で答える',out)
         out=self.cli(*base,'--detach').stdout
         self.assertTrue(board.launch_record(self.root,rid)['detach']); self.assertIn('detach_session',out); self.assertNotIn('子のまま並ぶ',out)
         bad=self.cli(*base,'--detach','--nested',ok=False)

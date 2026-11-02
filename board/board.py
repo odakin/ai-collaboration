@@ -828,10 +828,13 @@ def handoff_text(root, role, request_id, spec, model, effort, surface='backgroun
     # worker's questions to the requester (measured: a worker asked the owner in its own window whether to keep a sentence
     # of its deliverable, and the owner answered that the requester should decide it at review). The requester decides
     # judgment and acceptance at review and asks the owner itself where the owner's own ruling is needed, so the worker
-    # asks the owner in its own window only for what only that window can give.
+    # asks the owner in its own window only for what only that window can give: a permission prompt, or an operation the
+    # permission check holds until the owner approves it in that session (an approval relayed from another session did not
+    # reach it, measured = claude-config claude-code-permissions.md#relayed-approval-does-not-reach).
     ask=(" Send questions of judgment, approval or acceptance to the requester (SendMessage or a board note), not to the owner"
          " in this window: the requester decides them at review and asks the owner where the owner's own ruling is needed."
-         " Ask the owner here only for what only this window can give, such as a tool permission prompt."
+         " Ask the owner here only for what only this window can give, such as a tool permission prompt or an operation"
+         " the permission check holds until the owner approves it in this session."
          if surface=='desktop' else '')
     scope=(f" --project {project}" if project else '')+(f" --policy {policy}" if policy else '')
     # The requester relays a worker's summary to the owner, and labels made up during the work (option letters, item
@@ -957,7 +960,7 @@ def model_label(model, effort):
     return (name+(' '+effort if effort else '')).strip()
 
 
-STAY_NESTED=('。 worker は依頼元の下に子のまま並ぶ (既定 = 一覧の上の段に独立させない)。 子の turn の終わりの知らせは依頼元に届くが、 依頼元が動くのは掲示板の提出と blocker と起動の見張りの終わりだけで、 子が本人に出す問いは取り次がない (本人は worker の窓で答える)。 独立させるなら --detach')
+STAY_NESTED=('。 worker は依頼元の下に子のまま並ぶ (既定 = 一覧の上の段に独立させない)。 子の turn の終わりの知らせは依頼元に届くが、 依頼元が動くのは掲示板の提出と blocker と起動の見張りの終わりと、 子が依頼元に出した問い (掲示板の note か SendMessage) だけ。 子の判断・承認・検収の問いは依頼元が検収で決め、 本人の裁定が要るものだけを依頼元の窓で 1 回本人に聞く (子の窓で本人に頼むのは、 その窓でしか出せない許可だけ)。 独立させるなら --detach')
 
 
 def first_turn_watch(args):

@@ -599,8 +599,10 @@ python3 board_items.py list    --root <board>
   send `go`, or, when the worker has claimed, wait for its submit
   (claude-config `multi-session-coordination.md#desktop-start-model-cap`). The worker stays the requester's child and
   is listed under it in the app (the view the owner reads: the workers under the session that sent them). Its turn
-  ends reach the requester, which acts only on the board's submit and blocker and does not relay the child's
-  questions to the owner (relayed, they reached the owner twice, measured). Only with `--detach` do the printed steps
+  ends reach the requester, which acts only on the board's submit and blocker and on the questions the child sends it
+  (a board note or SendMessage); it decides them at review and puts to the owner, once and in its own window, only
+  those that need the owner's own ruling (a question put to the owner in two windows reached the owner twice, measured;
+  [`#worker-questions-to-requester`](#worker-questions-to-requester)). Only with `--detach` do the printed steps
   end with `detach_session` once the model is right, so that the child's turn ends stop reaching the requester;
   submit and blocker still reach it through `watch`. <a id="remote-control-fallback"></a>The app starts a session only
   for an instruction typed in the desktop app (measured: a requester the owner drove through Remote Control was
@@ -611,7 +613,9 @@ python3 board_items.py list    --root <board>
   requester's window, so a forwarder that drops `1` for an account shared with other people lets `follow` through. <a id="worker-questions-to-requester"></a>The desktop hand-off text sends the worker's
   questions of judgment, approval and acceptance to the requester, which decides them at review and asks the owner where
   the owner's own ruling is needed; the worker asks the owner in its own window only for what only that window can give
-  (a tool permission prompt). Measured: a question put to the owner in two windows reached the owner twice, and a worker
+  (a tool permission prompt, or an operation the permission check holds until the owner approves it in that session:
+  an approval relayed from another session does not reach it = claude-config
+  `conventions/claude-code-permissions.md#relayed-approval-does-not-reach`). Measured: a question put to the owner in two windows reached the owner twice, and a worker
   that asked the owner in its own window was sent back to the requester. **`--surface agent`** is for work the requester runs as its own subagent (Agent tool), which
   the app does not list: it prints no launch line, only the record and the hand-off file for the Agent's prompt. A
   subagent claiming a request launched for a desktop window is refused (`--subagent-ok` when the requester or the
