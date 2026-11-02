@@ -698,6 +698,7 @@ class History(unittest.TestCase):
         self.assertEqual(board.view.validate(self.root, events, invalid), [])
         self.assertEqual(p.read_bytes(), original)
         self.assertTrue(errors(e, SCHEMA))
+        self.assertIn('1224 characters, at most 1000', errors(e, SCHEMA)[0])  # the refusal names the length and the limit
         self.assertRaises(ValueError, board.post, self.root, e)
         for changed in [dict(e, summary='x' * 4001), dict(e, source_policy='encrypted-metadata-only'),
                         dict(event('request', 0), summary='x' * 1224), dict(e, created_at='bad-time')]:

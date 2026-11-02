@@ -33,7 +33,8 @@ def errors(value, schema, at='$'):
             elif schema.get('additionalProperties') is False: bad(f'unknown field {key}')
     if isinstance(value,str):
         if len(value)<schema.get('minLength',0): bad('too short')
-        if len(value)>schema.get('maxLength',float('inf')): bad('too long')
+        if len(value)>schema.get('maxLength',float('inf')):
+            bad(f"too long ({len(value)} characters, at most {schema['maxLength']})")  # 上限と字数を出す = 投稿し直す側が削る量を知る
         if 'pattern' in schema and not re.search(schema['pattern'],value): bad('pattern mismatch')
         if schema.get('format') == 'date-time':
             try: timestamp(value)
@@ -65,7 +66,7 @@ def history_errors(value, schema, *, committed):
             and value.get('source_policy') == 'ordinary'
             and isinstance(value.get('summary'), str)
             and len(value['summary']) <= 4000
-            and problems == ['$.summary: too long']):
+            and len(problems) == 1 and problems[0].startswith('$.summary: too long')):
         return [], [f"legacy v1 summary ({len(value['summary'])} characters): "
                     "read unchanged; new posts remain limited to 1000"]
     return problems, []
