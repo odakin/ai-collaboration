@@ -941,7 +941,15 @@ def model_label(model, effort):
     return (name+(' '+effort if effort else '')).strip()
 
 
-STAY_NESTED=('。 worker は依頼元の下に子のまま並ぶ (既定 = 一覧の上の段に独立させない)。 子の turn の終わりの知らせは依頼元に届くが、 依頼元が動くのは掲示板の提出と blocker だけで、 子が本人に出す問いは取り次がない (本人は worker の窓で答える)。 独立させるなら --detach')
+STAY_NESTED=('。 worker は依頼元の下に子のまま並ぶ (既定 = 一覧の上の段に独立させない)。 子の turn の終わりの知らせは依頼元に届くが、 依頼元が動くのは掲示板の提出と blocker と起動の見張りの終わりだけで、 子が本人に出す問いは取り次がない (本人は worker の窓で答える)。 独立させるなら --detach')
+
+
+def first_turn_watch(args):
+    """The background watch on a desktop worker's first turn (claude-config session-launch-check.py --wait-first-turn): it
+    wakes the requester when the worker's first turn ends, even while other children run, and prints the next step."""
+    cli=ENGINE.parent.parent/'claude-config'/'scripts'/'session-launch-check.py'
+    return (f'python3 {cli} --wait-first-turn <返りの local_…>'+(f" --model {args['model']}" if args.get('model') else '')
+            +(f" --effort {args['effort']}" if args.get('effort') else ''))
 
 
 def remote_control_fallback(root, request_id, session, model, effort, worktree=False, effort_quote=None, model_quote=None):
@@ -1115,8 +1123,10 @@ def announce_launch(a, ev, audience):
         print(f'→ 受け手を desktop app の session として起こす (本人の左の一覧に出る)。 起こすのは依頼元の Claude の start_session'
               f' (この shell からは起こせない)。 引数 = {spath} (全文が下):\n  '+json.dumps(args,ensure_ascii=False))
         print(f'  起こした後: python3 {sm_cli} <返りの local_…> で app の記録が {want or "頼んだ値"} かを読む。'
-              ' start_session は呼び元より高い model と effort の指定を黙って捨てる (実測) = 違えば set_session_model → set_session_effort'
-              ' の順で直し (worker は step 0 で止まって 1 行返す)、 記録が合ってから go を送る。 本人に「起きた」 と言うのはその後'
+              ' start_session は呼び元より高い model と effort の指定を黙って捨てる (実測) = 違えば worker は step 0 で止まって go を待つ。'
+              f' 同じ turn に見張り `{first_turn_watch(args)}` を Bash の run_in_background で出して turn を終える (依頼元のほかの子が'
+              ' 動いていると、 worker が止まった知らせでは依頼元は起こされない = 実測)。 見張りの 1 行どおり: 違う = set_session_model →'
+              ' set_session_effort の後にもう一度見張る / 合う = go を送る。 本人に「起きた」 と言うのは記録が合ってから'
               +('。 記録が合ったら detach_session(<local_…>) = 一覧の上の段に独立させる (--detach の指定。 子の turn の終わりの知らせが'
                 ' 依頼元に来なくなる。 提出と blocker は掲示板の watch で届く)' if detach else STAY_NESTED))
         print(remote_control_fallback(a.root,ev['event_id'],a.session,args.get('model'),args.get('effort'),getattr(a,'worktree',False),a.effort_quote,a.model_quote))
@@ -1440,7 +1450,9 @@ def launch_claude_role(a, req, events):
         print(f'→ 既にある依頼 {a.request} の worker を desktop app の session として起こす引数 (掲示板には何も書いていない)。'
               ' 起こすのはこの session の start_session (本人が押す card なら initiation だけ own_initiative に替える)。'
               f' 引数 = {spath} (全文が下):\n  '+json.dumps(args,ensure_ascii=False))
-        print('  起こした後: app の記録で model・effort を読み、 違えば set_session_model → set_session_effort → worker の 1 行を待って go'
+        print('  起こした後: app の記録で model・effort を読み、 違えば同じ turn に見張り'
+              f' `{first_turn_watch(args)}` を Bash の run_in_background で出して turn を終え、 見張りの 1 行どおり'
+              ' set_session_model → set_session_effort の後にもう一度見張る / 合えば go'
               +('。 合ったら detach_session (--detach の指定)' if a.detach else STAY_NESTED))
         return
     argv,env,line,hpath=launch_plan(a.root,role,a.request,spec,a.expect_model,a.session,project=project,policy=policy,

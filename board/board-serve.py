@@ -47,7 +47,9 @@ def handoff_waiting(payload):
     its worker is not there yet (requested) or its lease expired (stale), its submission waits for review (submitted), or
     its question waits for the reviewer (blocked). The same for a native session that has ended on this machine
     (`stranded`, board.session_state). A request someone is working on or has picked up (CONTRACT.md#pickup), or whose
-    next move is on a session that may be alive, is not handed off. Keyed by request id."""
+    next move is on a session that may be alive, is not handed off. Keyed by request id. Each row carries the request's
+    `requester` ({agent, session_id} of the request event), so a consumer can tell a request its requester is still
+    about to launch from one left waiting."""
     out={}
     for t in payload.get('threads') or []:
         w=t.get('workflow') or {}
@@ -59,7 +61,8 @@ def handoff_waiting(payload):
         if (role or stranded) and not board.live_pickup(t.get('events') or [],w['request_id']):
             out[w['request_id']]={'request_id':w['request_id'],'project':t.get('project'),'thread_id':t.get('thread_id'),
                                   'title':(w.get('title') or '')[:300],'status':w.get('status'),'waiting_on':nxt,
-                                  'assignee':w.get('assignee'),'reviewer':w.get('reviewer'),'stranded':stranded}
+                                  'assignee':w.get('assignee'),'reviewer':w.get('reviewer'),'requester':w.get('requester'),
+                                  'stranded':stranded}
     return out
 
 

@@ -582,8 +582,12 @@ python3 board_items.py list    --root <board>
   are not held back). Every hand-off text spells out the whole `claim` and `submit` commands, with the request's
   project and policy (measured: a worker told only to `claim` found them by refused posts). The board cannot open a desktop window; the requesting Claude session calls
   `start_session` with those arguments. The app drops a model above the caller's and the effort argument without an
-  error (measured), so the requester reads the app's record of the new session, switches it with
-  `set_session_model` then `set_session_effort`, waits for the worker's one-line stop, and sends `go`
+  error (measured), so the requester reads the app's record of the new session. When it differs, the worker stops at
+  its step 0 and waits for `go`; the requester runs the background watch `session-launch-check.py --wait-first-turn
+  <local_…>` (claude-config) in the same turn and ends it (with other children running, the app does not wake the
+  requester at a child's turn end, while the end of a background command does, measured). At the end of the worker's
+  first turn the watch prints the next step: switch with `set_session_model` then `set_session_effort` and watch again,
+  send `go`, or, when the worker has claimed, wait for its submit
   (claude-config `multi-session-coordination.md#desktop-start-model-cap`). The worker stays the requester's child and
   is listed under it in the app (the view the owner reads: the workers under the session that sent them). Its turn
   ends reach the requester, which acts only on the board's submit and blocker and does not relay the child's
@@ -685,7 +689,9 @@ such a turn cannot start a session
 ([`multi-session-coordination.md#chip-in-event-turns`](../../claude-config/conventions/multi-session-coordination.md#chip-in-event-turns));
 a review or an answer it can post itself. `GET /due` (read-only, with or without
 `--handoff-dir`) lists the same requests as JSON, so a coordinating session can also pick them up by itself without a
-click. Both also cover a request whose next move is on a native Claude session that has ended (`stranded: true`):
+click. Each row carries the request's `requester` (`{agent, session_id}` of the request event): a request posted a few
+minutes ago by a session that is still alive is usually being launched by that session, so a coordinator that picks
+up waiting requests on its own leaves it for a while and, if it later picks it up, asks the requester first. Both also cover a request whose next move is on a native Claude session that has ended (`stranded: true`):
 this machine holds its transcript, it is not in the live registry, and the transcript has been quiet for 30 minutes.
 A session looks absent from every machine but its own, so a session with no transcript here is left to its own
 machine, and restricted threads are left out. Such a request needs a `handover` to a role before anyone can work on
