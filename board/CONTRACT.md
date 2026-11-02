@@ -700,7 +700,12 @@ a review or an answer it can post itself. `GET /due` (read-only, with or without
 `--handoff-dir`) lists the same requests as JSON, so a coordinating session can also pick them up by itself without a
 click. Each row carries the request's `requester` (`{agent, session_id}` of the request event): a request posted a few
 minutes ago by a session that is still alive is usually being launched by that session, so a coordinator that picks
-up waiting requests on its own leaves it for a while and, if it later picks it up, asks the requester first. Both also cover a request whose next move is on a native Claude session that has ended (`stranded: true`):
+up waiting requests on its own leaves it for a while and, if it later picks it up, asks the requester first. Each row
+also carries `waiting_native` (the native id prefix behind the role whose move it is, from that role's named events in
+the thread; null when nobody has acted as the role there) and `submitter_native` (the same for the latest submission's
+author while it waits for review), so such a coordinator can leave alone a role that a live session is using and not
+review a submission it wrote itself. Board ids are full ids or their first 8 characters: a liveness check against the
+live registry matches by prefix. Both also cover a request whose next move is on a native Claude session that has ended (`stranded: true`):
 this machine holds its transcript, it is not in the live registry, and the transcript has been quiet for 30 minutes.
 A session looks absent from every machine but its own, so a session with no transcript here is left to its own
 machine, and restricted threads are left out. Such a request needs a `handover` to a role before anyone can work on
