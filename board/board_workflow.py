@@ -129,7 +129,7 @@ def apply(s, e, seen):
             s['reviewer']=target
         else: raise ValueError('unknown handover role')
     elif kind == 'abandoned':
-        need(reviewer, 'only requester session can withdraw')
+        need(reviewer, 'only the reviewer session can withdraw (after a reviewer handover, post as that reviewer role)')
         s.update(status='abandoned', blocker=None)
     elif kind == 'claim':
         need(worker, 'only addressed session can claim')
