@@ -201,8 +201,15 @@ on one machine started a worker its owner meant to start from the other). **Head
 --headless-reason '<why>'`, e.g. a machine without the Codex app) prints the `codex exec` line with the reason in
 `CODEX_EXEC_REASON` and never starts it; layer-1 `claude-config/hooks/codex-headless-launch-check.sh` stops a headless
 `codex exec` that starts a board worker or a sealed-review judge without a reason. A sealed blind-review judge is not a
-board worker: the worker that holds the request starts it with `codex-app-launch.py start --sealed`
-([`cold-eyes-isolation.md#sealed-sandbox`](../conventions/cold-eyes-isolation.md#sealed-sandbox) step 5). The app runs it
+board worker: a Claude worker that holds the request starts it with `codex-app-launch.py start --sealed`
+([`cold-eyes-isolation.md#sealed-sandbox`](../conventions/cold-eyes-isolation.md#sealed-sandbox) step 5). A Codex worker
+cannot start one from inside its own sandbox (the launcher's one-shot app-server ends during initialize; measured), so it
+writes the judge's prompt in the sealed directory, records what must be recorded before the launch, and names the prompt
+file in a `blocker`; the requester reads the prompt, starts the judge and tells the worker when the judge's turn has
+ended (layer-1 `claude-config/conventions/codex-desktop-triage.md#launch-from-inside-sandbox`). A Codex worker that
+stops because the work writes outside its writable roots is started again as a new thread with the missing root, and
+releases the old claim of the same role before it claims
+(`claude-config/conventions/codex-desktop-triage.md#writable-root-relaunch`). The app runs the judge
 too, so its progress shows there; the launcher checks the instruction files first and refuses `--network` (an app turn
 falls back to the app's network default), so literature goes into the sandbox before the launch. The daemon as the
 writer (`--writer daemon`) shows no progress in the app and takes `--daemon-reason`; without a reason the launcher does
