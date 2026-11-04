@@ -1464,7 +1464,7 @@ def codex_headless_line(root, request_id, f, hpath):
     if f.get('effort'): parts+=['-c',f'model_reasoning_effort="{f["effort"]}"']
     parts+=['-c','approval_policy="never"','-c','sandbox_mode="workspace-write"']
     roots=[os.path.realpath(os.path.expanduser(r)) for r in f.get('writable-root') or []]
-    if roots: parts+=['-c','sandbox_workspace_write.writable_roots='+json.dumps(roots,ensure_ascii=False)]   # a TOML array of basic strings
+    if roots: parts+=['-c','sandbox_workspace_write.writable_roots='+json.dumps(roots,ensure_ascii=False)]   # a TOML array of basic strings; not ASCII-escaped: JSON writes a character outside the BMP as a surrogate pair (\ud83d…), which TOML's \u escape (scalar values only) rejects
     return (f"CODEX_EXEC_REASON={shlex.quote(f.get('headless-reason') or '')} "+' '.join(shlex.quote(x) for x in parts)
             +f' "$(cat {shlex.quote(str(hpath))})" </dev/null')
 

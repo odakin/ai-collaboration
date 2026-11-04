@@ -1,0 +1,33 @@
+{
+  "_comment": "board.py の Codex の役割宛ての --launch-writable-root の試験 (test_launch_writable_root_request_to_argv) が、 直した箇所を 1 つずつ外した版でそれぞれ落ちるか (unittest の FAIL 行で読む)",
+  "target": "board.py",
+  "run": "python3 test_board.py -v CodexLaunchCLI.test_launch_writable_root_request_to_argv",
+  "fail_marker": "FAIL: ",
+  "pass_marker": "test_",
+  "mutants": [
+    {"name": "起動の argv に request の dir を足さない",
+     "pairs": [["    for r in f.get('writable-root') or []: argv+=['--writable-root',os.path.expanduser(r)]", "    pass"]],
+     "expect_fail": ["test_launch_writable_root_request_to_argv"]},
+    {"name": "launch --request が起こす前に dir の有無を見ない",
+     "pairs": [["    if f.get('writable-root'): normalize_writable_roots(f['writable-root'])", "    pass"]],
+     "expect_fail": ["test_launch_writable_root_request_to_argv"]},
+    {"name": "同じ dir を 1 回にまとめない",
+     "pairs": [["        if p not in out: out.append(p)", "        out.append(p)"]],
+     "expect_fail": ["test_launch_writable_root_request_to_argv"]},
+    {"name": "details の launch-writable-root の行を list で読まない (最後の 1 行だけ残る)",
+     "pairs": [["        if k in CODEX_LIST_KEYS:", "        if False:"]],
+     "expect_fail": ["test_launch_writable_root_request_to_argv"]},
+    {"name": "headless の codex exec の行に dir を載せない",
+     "pairs": [["    if roots: parts+=['-c','sandbox_workspace_write.writable_roots='", "    if False: parts+=['-c','sandbox_workspace_write.writable_roots='"]],
+     "expect_fail": ["test_launch_writable_root_request_to_argv"]},
+    {"name": "home とその親を断らない (/ だけ断る)",
+     "pairs": [["        if rp==os.sep or rp==home or home.startswith(rp.rstrip(os.sep)+os.sep):", "        if rp==os.sep:"]],
+     "expect_fail": ["test_launch_writable_root_request_to_argv"]},
+    {"name": "home の下の dir を ~ の形に戻さずに details に書く",
+     "pairs": [["    roots=[home_tilde(r) for r in getattr(a,'launch_writable_root',None) or []]", "    roots=list(getattr(a,'launch_writable_root',None) or [])"]],
+     "expect_fail": ["test_launch_writable_root_request_to_argv"]},
+    {"name": "Claude の役割宛ての request を、 理由を言う文でなく一般の文で断る",
+     "pairs": [["    elif a.launch_writable_root and a.command=='request' and a.to=='claude':", "    elif False:"]],
+     "expect_fail": ["test_launch_writable_root_request_to_argv"]}
+  ]
+}
