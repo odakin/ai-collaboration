@@ -459,6 +459,25 @@ class AfterStartFix(unittest.TestCase):
         self.assertIn('最初の turn の後に set_session_model → set_session_effort',t)
         self.assertIn('claim した = go は要らない',t)
 
+
+class EffortCapNote(unittest.TestCase):
+    """A desktop request asking an effort above the requester's own says so when it is posted: start_session takes an
+    effort at or below the caller's and starts the worker on the caller's effort without a word (measured)."""
+    def test_above_the_requesters_effort(self):
+        import os
+        from unittest import mock
+        with mock.patch.dict(os.environ,{'CLAUDE_EFFORT':'xhigh'}):
+            t=board.effort_cap_note('max')
+            self.assertIn('effort max は、 依頼元 (この session) の effort xhigh より高い',t)
+            self.assertIn('set_session_effort(session_id=<返りの local_…>, effort=max)',t)
+            self.assertEqual([board.effort_cap_note(x) for x in ('xhigh','high',None,'')],['']*4)
+    def test_unknown_requester_effort_says_nothing(self):
+        import os
+        from unittest import mock
+        env={k:v for k,v in os.environ.items() if k not in ('CLAUDE_EFFORT','CLAUDE_CODE_SESSION_ID')}
+        with mock.patch.dict(os.environ,env,clear=True):
+            self.assertEqual(board.effort_cap_note('max'),'')
+
 class SessionState(unittest.TestCase):
     def test_states(self):
         import os, time

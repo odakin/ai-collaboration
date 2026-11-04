@@ -591,13 +591,18 @@ python3 board_items.py list    --root <board>
   session that started the window (the app's record names it, for a card the owner clicked too), then stop in one
   line, before reading the request or its materials (a session's own start-up reads are not held back). Every hand-off text spells out the whole `claim` and `submit` commands, with the request's
   project and policy (measured: a worker told only to `claim` found them by refused posts). The board cannot open a desktop window; the requesting Claude session calls
-  `start_session` with those arguments. The app drops a model above the caller's and the effort argument without an
-  error (measured), so the requester reads the app's record of the new session. When it differs, the worker stops at
-  its step 0 and waits for `go`; the requester runs the background watch `session-launch-check.py --wait-first-turn
-  <local_…>` (claude-config) in the same turn and ends it (with other children running, the app does not wake the
-  requester at a child's turn end, while the end of a background command does, measured). At the end of the worker's
-  first turn the watch prints the next step: switch with `set_session_model` then `set_session_effort` and watch again,
-  send `go`, or, when the worker has claimed, wait for its submit
+  `start_session` with those arguments. The app takes a model and an effort only at or below the caller's (its tool
+  description) and lowers a higher one without an error (measured), so the requester reads the app's record of the new
+  session; `request` already says so when it is posted with an effort above the requester's own. When only the effort
+  differs, the requester calls `set_session_effort` first, in the same turn (the app asks the owner to approve an effort
+  above the caller's): the worker's first turn begins about a minute after the start, and a record fixed before then is
+  what that turn runs on (measured), so the worker passes its step 0 and claims. When the model differs (a model switch
+  made before the first turn did not reach it, measured), or the approval comes after the first turn began, the worker
+  stops at its step 0 and waits for `go`. Either way the requester runs the background watch
+  `session-launch-check.py --wait-first-turn <local_…>` (claude-config) in the same turn and ends it (with other
+  children running, the app does not wake the requester at a child's turn end, while the end of a background command
+  does, measured). When the worker claims or its first turn ends, the watch prints the next step: no `go` after a claim;
+  otherwise switch with `set_session_model` then `set_session_effort` and watch again, or send `go`
   (claude-config `multi-session-coordination.md#desktop-start-model-cap`). A card the owner clicks has no session
   until the click, and the click is no tool call of the requester's, so neither the launch hook nor a watch exists for
   it: the worker's step-0 line is what wakes the requester (a message starts a turn in an idle requester while its

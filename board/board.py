@@ -986,6 +986,39 @@ def first_turn_watch(args):
             +(f" --effort {args['effort']}" if args.get('effort') else ''))
 
 
+def own_effort():
+    """The requester's own effort: the Bash env CLAUDE_EFFORT that Claude Code sets for the turn running this command,
+    else the desktop app's record of this session (claude-config scripts/lib/desktop_sessions.py, by CLAUDE_CODE_SESSION_ID);
+    '' when neither is readable (a Codex or terminal requester)."""
+    e=(os.environ.get('CLAUDE_EFFORT') or '').strip().lower()
+    if e in EFFORTS: return e
+    sid=(os.environ.get('CLAUDE_CODE_SESSION_ID') or '').strip()
+    if not sid: return ''
+    try:
+        lib=ENGINE.parent.parent/'claude-config'/'scripts'/'lib'/'desktop_sessions.py'
+        spec=importlib.util.spec_from_file_location('desktop_sessions_for_board',lib)
+        ds=importlib.util.module_from_spec(spec); spec.loader.exec_module(ds)
+        e=str((ds.find(sid) or {}).get('effort') or '').lower()
+    except Exception:
+        return ''
+    return e if e in EFFORTS else ''
+
+
+def effort_cap_note(asked):
+    """The warning a desktop request prints when it is posted with an effort above the requester's own: the app's
+    start_session takes an effort "at or below yours" (its tool description) and starts the worker on the requester's
+    effort without saying so (measured), so the requester learns it here, before the start, with the setter to call
+    right after it ('' when the asked effort is not higher or the requester's effort is unknown)."""
+    a=(asked or '').strip().lower(); own=own_effort()
+    if not (a in EFFORTS and own in EFFORTS and EFFORTS.index(a)>EFFORTS.index(own)):
+        return ''
+    return (f'  ⚠️ この依頼の effort {a} は、 依頼元 (この session) の effort {own} より高い。 desktop app の start_session は'
+            f' effort を呼び元以下でしか受けず (start_session の説明「at or below yours」)、 高い値は黙って呼び元の値にする (実測)'
+            f' = worker は {own} で起きる。 起こした直後の同じ turn に set_session_effort(session_id=<返りの local_…>, effort={a})'
+            ' を出す (呼び元より高い effort は app が本人に承認の確認を出す。 worker の最初の turn は起こしてから約 1 分後に始まり、'
+            f' その前に押されれば最初の turn から {a}、 遅れれば worker は step 0 で止まって go を待つ = 実測)。')
+
+
 def after_start_fix(args):
     """What the requester does when the app's record of a just-started desktop worker differs from the asked values.
     An effort is set at once: the worker's first turn begins about a minute after the start (its SessionStart hooks),
@@ -1173,6 +1206,8 @@ def announce_launch(a, ev, audience):
         want=' / '.join(x for x in (args.get('model'),('effort '+args['effort']) if args.get('effort') else '') if x)
         print(f'→ 受け手を desktop app の session として起こす (本人の左の一覧に出る)。 起こすのは依頼元の Claude の start_session'
               f' (この shell からは起こせない)。 引数 = {spath} (全文が下):\n  '+json.dumps(args,ensure_ascii=False))
+        cap=effort_cap_note(args.get('effort'))
+        if cap: print(cap)
         print(f'  起こした後: python3 {sm_cli} <返りの local_…> で app の記録が {want or "頼んだ値"} かを読む。'
               ' start_session は呼び元より高い model と effort の指定を黙って捨てる (実測)。 違えば:'+after_start_fix(args)
               +' 本人に「起きた」 と言うのは記録が合ってから'
@@ -1500,6 +1535,8 @@ def launch_claude_role(a, req, events):
         print(f'→ 既にある依頼 {a.request} の worker を desktop app の session として起こす引数 (掲示板には何も書いていない)。'
               ' 起こすのはこの session の start_session (本人が押す card なら initiation だけ own_initiative に替える)。'
               f' 引数 = {spath} (全文が下):\n  '+json.dumps(args,ensure_ascii=False))
+        cap=effort_cap_note(args.get('effort'))
+        if cap: print(cap)
         print('  起こした後: app の記録で model・effort を読み、 違えば:'+after_start_fix(args)
               +('。 合ったら detach_session (--detach の指定)' if a.detach else STAY_NESTED))
         print(CARD_NOTE)
