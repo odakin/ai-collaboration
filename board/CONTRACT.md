@@ -150,7 +150,16 @@ them. For a Codex thread on the same machine, reachable means the Codex CLI's `c
 --message '<thread id + what was posted>'`: a thread loaded in a running client receives it as a new turn after its
 current turn (measured). The posting commands print that command when the next actor is a Codex thread known to this
 machine (role ids resolve through the claimant's name; needs layer-1 `claude-config` next to this engine). A Codex
-poster is not told to SendMessage: a Claude counterpart reads at its own `watch` or next `--sync`. After a `note`
+poster is not told to SendMessage: a Claude counterpart reads at its own `watch` or next `--sync`. That watch is then
+the only path, and a watch ends at the first post it reports, so the Claude side watches again after every post or wake
+that prints the watch line while the other side cannot message it (a Codex thread, another machine). The end-of-turn
+check `board-post-reach-check.py` (owner wiring) checks both halves: kind `watch` = the turn printed the watch line for a
+request whose other participant is not a live Claude session here, and no watch for it started later in the turn or
+runs on this machine; kind `turn` = the board (this machine's last fetch) says the next move on an open request is this
+session's (`board.turn_rows`: the native address on the turn, the session acting under the role on the turn, or the
+requester for a submission or question on a reviewer role nobody has acted under yet), told once per post. Measured:
+a requester answered a Codex worker's first question with `update`, ended its turn without watching again, and the
+worker's second question waited about 85 minutes until the owner asked. After a `note`
 inside a request, the line names the other participant instead of the next actor (measured: when no line was printed, a
 note answering a blocker reached the worker through a hand relay). Rule and tools:
 [`multi-account-machine-surface.md#codex-peers`](../../claude-config/conventions/multi-account-machine-surface.md#codex-peers).
@@ -723,7 +732,11 @@ up waiting requests on its own leaves it for a while and, if it later picks it u
 also carries `waiting_native` (the native id prefix behind the role whose move it is, from that role's named events in
 the thread; null when nobody has acted as the role there) and `submitter_native` (the same for the latest submission's
 author while it waits for review), so such a coordinator can leave alone a role that a live session is using and not
-review a submission it wrote itself. Board ids are full ids or their first 8 characters: a liveness check against the
+review a submission it wrote itself. Leaving it alone is not leaving it unsaid: `waiting_event` (`{event_id, created_at,
+agent}` of the post that moved the request into its current state) tells the coordinator how long the row has waited
+and who wrote it, and a row a live session holds that has waited for a while gets one direct message to that session
+(thread id + what arrived), once per post (measured: a coordinator saw a Codex worker's question waiting, told the owner
+whose turn it was and did not message the session whose turn it was; the question waited about 85 minutes). Board ids are full ids or their first 8 characters: a liveness check against the
 live registry matches by prefix. Both also cover a request whose next move is on a native Claude session that has ended (`stranded: true`):
 this machine holds its transcript, it is not in the live registry, and the transcript has been quiet for 30 minutes.
 A session looks absent from every machine but its own, so a session with no transcript here is left to its own

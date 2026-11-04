@@ -628,6 +628,63 @@ def counterpart_note(me, ev, events):
         return None
 
 
+TURN_STATES=('requested','revision','submitted','blocked')   # the next move waits on one session (working = it is moving; stale = a lease, no post)
+
+
+def last_transition(events, request_id):
+    """The event that moved the request into its current state (the same transitions live_pickup counts), or None."""
+    evs=[e for e in events if e.get('request_id')==request_id and
+         (e.get('kind') in PICKUP_RESET or (e.get('kind')=='update' and e.get('reply_to')))]
+    return evs[-1] if evs else None
+
+
+def _native_match(nid, me):
+    """Whether a native id or its 8-character prefix (the board's form) names the session `me` (a full or prefix id)."""
+    nid,me=str(nid or ''),str(me or '')
+    return len(nid)>=8 and len(me)>=8 and (me.startswith(nid) or nid.startswith(me))
+
+
+def turn_rows(events, now=None, states=TURN_STATES):
+    """Open requests whose next move waits on one Claude session, as rows with `native` = that session's native id (or
+    its 8-character prefix): the native address on the turn, or for a role id the session that last acted under it with
+    its id in its name (native_session). A role nobody has acted under yet, on a submission or a question, is the
+    requester's to answer (the requester reviews under the standing reviewer id while it is alive): `native` = the
+    requester's. None when no Claude session is known (a Codex address, an unnamed role on a fresh request).
+
+    Why (measured): a requester answered a Codex worker's first question and ended its turn without watching again; the
+    worker's second question waited about 85 minutes until the owner asked. Codex has no SendMessage, so only the board said
+    whose turn it was, and the requester's own end-of-turn check is the place that reads it (board-post-reach-check.py)."""
+    now=now or view.now_utc()
+    threads={}
+    for e in events: threads.setdefault((e['project']['key'],e['thread_id']),[]).append(e)
+    out=[]
+    for (proj,tid),thread in threads.items():
+        if not any(e.get('kind')=='request' and e.get('schema_version')==2 for e in thread): continue
+        w=reduce_workflow(thread,now)
+        st=w.get('status'); wo=w.get('waiting_on') or {}
+        if st not in states or not w.get('request') or not wo.get('session_id'): continue
+        sid=wo['session_id']
+        if is_role(sid):
+            nid=native_session('claude',sid,thread)
+            if nid is None and st in ('submitted','blocked'):
+                ra=w['request'].get('actor') or {}
+                nid=native_session('claude',ra.get('session_id'),thread) if ra.get('agent')=='claude' else None
+        else:
+            nid=sid if wo.get('agent')=='claude' else None
+        rid=w['request']['event_id']; ev=last_transition(thread,rid) or w['request']
+        out.append({'request_id':rid,'project':proj,'thread_id':tid,'status':st,'label':LABELS.get(st,st),
+                    'waiting_on':{'agent':wo.get('agent'),'session_id':sid},'native':nid,
+                    'event_id':ev['event_id'],'kind':ev.get('kind'),'created_at':ev.get('created_at'),
+                    'by':(ev.get('actor') or {}).get('agent'),
+                    'title':' '.join(str(w['request'].get('summary') or '').split())[:200]})
+    return out
+
+
+def turns_for(events, me, now=None, states=TURN_STATES):
+    """turn_rows whose `native` names the Claude session `me` (full id or prefix)."""
+    return [r for r in turn_rows(events,now,states) if _native_match(r['native'],me)]
+
+
 def codex_target_model(to_session):
     """(model, effort) of a Codex thread on this machine (local state, read-only), or None. Never raises."""
     try:

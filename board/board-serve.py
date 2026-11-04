@@ -52,7 +52,10 @@ def handoff_waiting(payload):
     about to launch from one left waiting. It also carries `waiting_native` (the native id prefix behind the role whose
     move it is, from that role's named events in this thread = board.native_session; None when the role has none) and
     `submitter_native` (the same for the latest submission's author, when the request waits for review), so a consumer
-    can leave alone a role that a live session is using and a submission it wrote itself."""
+    can leave alone a role that a live session is using and a submission it wrote itself. `waiting_event` = the post
+    that moved the request into its current state ({event_id, created_at, agent}, board.last_transition), so a consumer
+    that leaves the row to a live session can still tell how long it has waited and who wrote it (a Codex post reaches
+    no one by itself)."""
     out={}
     for t in payload.get('threads') or []:
         w=t.get('workflow') or {}
@@ -65,12 +68,15 @@ def handoff_waiting(payload):
         if (role or stranded) and not board.live_pickup(events,w['request_id']):
             subs=[e for e in events if e.get('kind')=='submit' and e.get('request_id')==w['request_id']]
             by=(subs[-1].get('actor') or {}) if subs and w.get('status')=='submitted' else {}
+            last=board.last_transition(events,w['request_id']) or {}
             out[w['request_id']]={'request_id':w['request_id'],'project':t.get('project'),'thread_id':t.get('thread_id'),
                                   'title':(w.get('title') or '')[:300],'status':w.get('status'),'waiting_on':nxt,
                                   'assignee':w.get('assignee'),'reviewer':w.get('reviewer'),'requester':w.get('requester'),
                                   'stranded':stranded,
                                   'waiting_native':board.native_session(nxt.get('agent'),nxt.get('session_id'),events) if role else None,
-                                  'submitter_native':board.native_session(by.get('agent'),by.get('session_id'),events) if by else None}
+                                  'submitter_native':board.native_session(by.get('agent'),by.get('session_id'),events) if by else None,
+                                  'waiting_event':{'event_id':last.get('event_id'),'created_at':last.get('created_at'),
+                                                   'agent':(last.get('actor') or {}).get('agent')} if last else None}
     return out
 
 

@@ -446,6 +446,43 @@ class HandoffWaiting(unittest.TestCase):
     def test_unnamed_role_and_no_submission(self):
         r=self.row([self.ev('request','6fa02cac')],status='requested',waiting='role-p-w')
         self.assertEqual((r['waiting_native'],r['submitter_native']),(None,None))   # nobody has acted as the role yet
+    def test_waiting_event_is_the_last_transition(self):
+        # a consumer that leaves the row to a live session still needs how long it has waited and who wrote it
+        evs=[dict(self.ev('request','6fa02cac'),event_id='E0'),dict(self.ev('claim','role-p-w','855058cc (opus)'),event_id='E1'),
+             dict(self.ev('blocker','role-p-w','855058cc (opus)'),event_id='E2',created_at='2026-11-02T01:00:00Z'),
+             dict(self.ev('note','role-p-w','855058cc (opus)'),event_id='E3')]
+        evs[2]['actor']['agent']='codex'
+        r=self.row(evs,status='blocked')
+        self.assertEqual(r['waiting_event'],{'event_id':'E2','created_at':'2026-11-02T01:00:00Z','agent':'codex'})   # a note does not move it
+
+
+class Turns(unittest.TestCase):
+    """turn_rows / turns_for: the open requests whose next move waits on one Claude session (the requester's end-of-turn
+    check reads them; measured: a Codex worker's question waited about 85 minutes for a requester that had stopped watching)."""
+    ME='claude-session-001'
+    def test_question_and_submission_wait_on_the_requester(self):
+        r,c,sub=chain(); b1=event('blocker',2,reply=c); a1=event('update',3,agent='claude',reply=b1); b2=event('blocker',4,reply=c)
+        self.assertEqual(board.turns_for([r,c],self.ME),[])                       # the worker is on it
+        got=board.turns_for([r,c,b1],self.ME)
+        self.assertEqual([(x['status'],x['event_id'],x['by']) for x in got],[('blocked',b1['event_id'],'codex')])
+        self.assertEqual(board.turns_for([r,c,b1,a1],self.ME),[])                 # answered = the worker's again
+        self.assertEqual(board.turns_for([r,c,b1,a1,b2],self.ME)[0]['event_id'],b2['event_id'])   # the second question is a new event
+        self.assertEqual(board.turns_for([r,c,sub],self.ME)[0]['status'],'submitted')
+        self.assertEqual(board.turns_for([r,c,sub],self.ME[:8]+'-other'),[])      # another session
+        self.assertEqual(board.turns_for([r,c,b1],'claude-s'),board.turns_for([r,c,b1],self.ME))   # an 8-character prefix names it too
+    def test_role_reviewer_named_or_not(self):
+        r,c,sub=chain()
+        h=event('handover',0,agent='claude',reply=r); h.update(handover_role='reviewer',target={'agent':'claude','session_id':'role-example-owner-review'})
+        h['event_id']=r['event_id'][:-6]+'00000f'
+        self.assertEqual(board.turns_for([r,h,c,sub],self.ME)[0]['native'],self.ME)   # nobody acted as the role yet = the requester's
+        rv=event('revise',3,agent='claude',reply=sub); rv['actor'].update(session_id='role-example-owner-review',task='abcdef12 (opus)')
+        sub2=event('submit',5,reply=c)
+        self.assertEqual(board.turns_for([r,h,c,sub,rv,sub2],self.ME),[])          # a named session acts as the role now
+        self.assertEqual(board.turns_for([r,h,c,sub,rv,sub2],'abcdef12-0000-4000-8000-000000000000')[0]['event_id'],sub2['event_id'])
+    def test_worker_side_and_codex_addresses(self):
+        r,c,sub=chain(); rv=event('revise',3,reply=sub)
+        self.assertEqual([x['native'] for x in board.turn_rows([r,c,sub,rv])],[None])   # a revision waits on the Codex worker
+        self.assertEqual([(x['status'],x['native']) for x in board.turn_rows([r])],[('requested',None)])   # a request to Codex: no Claude session
 
 
 class AfterStartFix(unittest.TestCase):

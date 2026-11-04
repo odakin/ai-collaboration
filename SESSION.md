@@ -2,6 +2,12 @@
 
 > 📌 SESSION.md = 案件ごとの現在地 + 正本への link (進んだら置き換える、 日付を見出しにした節・commit hash・messageId を置かない = 層1 claude-config/CONVENTIONS.md#session-no-durable-record)。 日付つきの節は SESSION-archive.md へ verbatim MOVE 済 (2026-09-28)。
 
+## 現在地：Codex の書き込みを Claude 側に届ける網
+
+Codex の書き込みは SendMessage で届かないので、 Claude 側の Stop の検査 `board/board-post-reach-check.py` が「見張りを張り直したか」 と「掲示板がこの session の番と言う依頼」 を見る ([契約](board/CONTRACT.md#codex-reach))。
+`GET /due` の `waiting_event` で、 拾わない行も番の session に 1 行知らせられる ([契約](board/CONTRACT.md#viewer-handoff-queue))。
+次 = 既存の送り忘れの検査 (observe のまま) を block に上げるかを、 observe の記録で決める。
+
 ## 現在地：掲示板の viewer と引き受けの印
 
 viewer は状態別の一覧 + 詳細の 2 画面 ([考え方](board/DESIGN.md#viewer))。 番が役割に回った依頼を受付へ渡すボタンと `GET /due` は
