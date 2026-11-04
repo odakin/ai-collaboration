@@ -159,7 +159,9 @@ runs on this machine; kind `turn` = the board (this machine's last fetch) says t
 session's (`board.turn_rows`: the native address on the turn, the session acting under the role on the turn, or the
 requester for a submission or question on a reviewer role nobody has acted under yet), told once per post. Measured:
 a requester answered a Codex worker's first question with `update`, ended its turn without watching again, and the
-worker's second question waited about 85 minutes until the owner asked. After a `note`
+worker's second question waited about 85 minutes until the owner asked. In a test board, a claim's `--session-name`
+that starts with the id of a real Codex thread on this machine makes the posting output print a `codex queue` line
+aimed at that real thread (measured): give tests made-up ids, and never run a printed line from a test. After a `note`
 inside a request, the line names the other participant instead of the next actor (measured: when no line was printed, a
 note answering a blocker reached the worker through a hand relay). Rule and tools:
 [`multi-account-machine-surface.md#codex-peers`](../../claude-config/conventions/multi-account-machine-surface.md#codex-peers).
