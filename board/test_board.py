@@ -1560,6 +1560,13 @@ class LaunchCommand(unittest.TestCase):
             self.assertTrue(board.launch_record(root,'20260101T000000Z-claude-000012')['worktree'])
             args,_=board.desktop_plan(root,'role-p-f','20260101T000000Z-claude-000013',None,None,'claude-session-001',worktree=True)
             self.assertTrue(args['use_worktree']); self.assertIn("needs the owner's OK",args['prompt'])
+            self.assertNotIn('cwd',args)   # no source given = nothing to name
+            src=Path(td.name)/'proj'; src.mkdir(); subprocess.run(['git','init','-q',str(src)],check=True)
+            args,_=board.desktop_plan(root,'role-p-f','20260101T000000Z-claude-000014',None,None,'claude-session-001',worktree=True,source=src/'.')
+            self.assertEqual(Path(args['cwd']).resolve(),src.resolve())   # the worktree is cut from the project, not the requester's folder
+            self.assertIn('unless you already work in one',args['prompt'])
+            args,_=board.desktop_plan(root,'role-p-f','20260101T000000Z-claude-000015',None,None,'claude-session-001',source=src)
+            self.assertNotIn('cwd',args)   # no worktree asked = the session shares the requester's folder as before
             self.assertIn(' --worktree --launch',board.remote_control_fallback(root,'20260101T000000Z-claude-000013','s',None,None,True))
         finally:
             for k,v in saved.items():

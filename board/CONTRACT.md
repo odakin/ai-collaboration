@@ -560,8 +560,11 @@ python3 board_items.py list    --root <board>
   `none` in the same `--settings` JSON (an environment variable on the launch line does not reach the job, measured),
   and the hand-off text says to commit by explicit paths and push to main without `EnterWorktree`. A worktree is for
   work that shares files with a parallel writer, and only when the requester says so: `--worktree` on `request` or
-  `launch` drops the setting (and sets `use_worktree` in the desktop arguments), and the hand-off text then tells the
-  worker to push its branch, not to merge it, and to name it in the submit, since merging into main needs the owner's OK.
+  `launch` drops the setting (and sets `use_worktree` in the desktop arguments, with `cwd` = the project's checkout: the
+  app cuts the worktree from the folder the new session starts in, and a requester working in a folder that is not a
+  git repository otherwise got no worktree, measured), and the hand-off text then tells the worker to call
+  `EnterWorktree` unless it already works in one, to push its branch, not to merge it, and to name it in the submit,
+  since merging into main needs the owner's OK.
   The text itself: "You are the board worker for role `<role id>`, request
   `<request event id>`, spec `<path>`; execute it yourself. This window must run on <model> at <effort> effort.
   Work in the repository's own working tree on its main branch: do not call EnterWorktree or create a branch; commit by

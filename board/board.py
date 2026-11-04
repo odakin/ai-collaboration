@@ -849,8 +849,8 @@ def handoff_text(root, role, request_id, spec, model, effort, surface='backgroun
            " letters, item or finding numbers); if you keep one, say what it refers to right after it.")
     # Where the work lands: a worker that went into a worktree pushed it to a branch the sessions reading main did not
     # see, and merging it back waited on the owner (measured). A worktree only when the requester asked for one.
-    tree=(" Work in a git worktree of your own (the requester asked for one): call EnterWorktree before your first edit and"
-          " commit and push its branch. Merging that branch into the main branch needs the owner's OK: do not merge it"
+    tree=(" Work in a git worktree of your own (the requester asked for one): unless you already work in one, call"
+          " EnterWorktree before your first edit; commit and push its branch. Merging that branch into the main branch needs the owner's OK: do not merge it"
           " yourself; name the branch in the submit." if worktree else
           " Work in the repository's own working tree on its main branch: do not call EnterWorktree or create a branch;"
           " commit by explicit paths and push to main.")
@@ -1077,6 +1077,12 @@ def desktop_plan(root, role, request_id, spec, expect, session, title=None, proj
           'prompt':text,'background':(f'Board request {request_id} for role {role}, posted by session {(session or "")[:8]}. The request and its'
                                       ' spec are the task; report through the board (claim, a note at each milestone, submit). The requester'
                                       ' reviews the submission on the board.')}
+    if worktree:
+        # The app cuts the worktree from the folder the new session starts in = the requester's own folder unless `cwd`
+        # names the repository (measured: a requester working in a folder that is not a git repository got no worktree,
+        # and the worker would have begun writing in main's working tree). source_gate has made sure the source is one.
+        top=bc.toplevel(source) if source else None
+        if top: args['cwd']=str(top)
     if model: args['model']=model
     if effort: args['effort']=effort
     path=write_outbox(root,request_id+'.start_session.json',json.dumps(args,ensure_ascii=False,indent=1))
