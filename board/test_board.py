@@ -1672,6 +1672,24 @@ class LaunchCommandCLI(Transport):
             os.environ.pop('AGENT_BOARD_LAUNCH_MODEL',None)
             os.environ.update({k:v for k,v in wiring.items() if v is not None})
 
+    def test_request_desktop_above_own_effort_says_so_before_the_arguments(self):
+        """A desktop request asking an effort above the requester's own (the Bash env CLAUDE_EFFORT) says so, with the
+        setter to call right after the start, before the start_session arguments: the start lowers it without a word."""
+        import sys, os
+        src=self.base/'qproj'
+        if not src.exists(): subprocess.run(['git','init','-q','-b','main',str(src)],check=True)
+        env={k:v for k,v in os.environ.items() if not k.startswith('AGENT_BOARD_LAUNCH') and k!='CLAUDE_CODE_ENTRYPOINT'}
+        env['CLAUDE_EFFORT']='xhigh'
+        p=subprocess.run([sys.executable,str(board.ENGINE/'board.py'),'request','--root',str(self.root),'--agent','claude',
+                          '--session','claude-win-9','--source',str(src),'--policy','ordinary','--project','qproj',
+                          '--summary','重い検算を頼む。 仕様 = 参照','--acceptance','検算の結果','--thread','2026-01-01-heavy-a',
+                          '--to','claude','--to-session','role-qproj-heavy','--expect-model','claude-opus-5-5','--effort','max',
+                          '--reason','式を導出から確かめる','--surface','desktop','--title','重い検算'],capture_output=True,text=True,env=env)
+        self.assertEqual(p.returncode,0,p.stderr)
+        self.assertIn('effort max は、 依頼元 (この session) の effort xhigh より高い',p.stdout)
+        self.assertIn('set_session_effort(session_id=<返りの local_…>, effort=max)',p.stdout)
+        self.assertLess(p.stdout.index('⚠️ この依頼の effort max'),p.stdout.index('desktop app の session として起こす'))
+
     def test_request_desktop_surface_prints_start_session_arguments(self):
         """--surface desktop (or the owner's env default) prints the desktop app's start_session arguments = model, effort,
         a title with the task first and the model last, the hand-off with step 0 = and writes them and the launch record

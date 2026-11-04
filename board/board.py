@@ -1204,10 +1204,10 @@ def announce_launch(a, ev, audience):
                                 worktree=getattr(a,'worktree',False),source=a.source,effort_quote=a.effort_quote,model_quote=a.model_quote)
         sm_cli=ENGINE.parent.parent/'claude-config'/'scripts'/'session-model.py'
         want=' / '.join(x for x in (args.get('model'),('effort '+args['effort']) if args.get('effort') else '') if x)
+        cap=effort_cap_note(args.get('effort'))   # said before the arguments: the start lowers it without a word
+        if cap: print(cap.strip())
         print(f'→ 受け手を desktop app の session として起こす (本人の左の一覧に出る)。 起こすのは依頼元の Claude の start_session'
               f' (この shell からは起こせない)。 引数 = {spath} (全文が下):\n  '+json.dumps(args,ensure_ascii=False))
-        cap=effort_cap_note(args.get('effort'))
-        if cap: print(cap)
         print(f'  起こした後: python3 {sm_cli} <返りの local_…> で app の記録が {want or "頼んだ値"} かを読む。'
               ' start_session は呼び元より高い model と effort の指定を黙って捨てる (実測)。 違えば:'+after_start_fix(args)
               +' 本人に「起きた」 と言うのは記録が合ってから'
@@ -1532,11 +1532,11 @@ def launch_claude_role(a, req, events):
                             f' {(a.session or "")[:8]}. The request and its spec are the task; report through the board (claim,'
                             ' a note at each milestone, submit). The poster reviews the submission on the board.')
         spath=write_outbox(a.root,a.request+'.start_session.json',json.dumps(args,ensure_ascii=False,indent=1))
+        cap=effort_cap_note(args.get('effort'))   # said before the arguments: the start lowers it without a word
+        if cap: print(cap.strip())
         print(f'→ 既にある依頼 {a.request} の worker を desktop app の session として起こす引数 (掲示板には何も書いていない)。'
               ' 起こすのはこの session の start_session (本人が押す card なら initiation だけ own_initiative に替える)。'
               f' 引数 = {spath} (全文が下):\n  '+json.dumps(args,ensure_ascii=False))
-        cap=effort_cap_note(args.get('effort'))
-        if cap: print(cap)
         print('  起こした後: app の記録で model・effort を読み、 違えば:'+after_start_fix(args)
               +('。 合ったら detach_session (--detach の指定)' if a.detach else STAY_NESTED))
         print(CARD_NOTE)
