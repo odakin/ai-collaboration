@@ -447,6 +447,18 @@ class HandoffWaiting(unittest.TestCase):
         r=self.row([self.ev('request','6fa02cac')],status='requested',waiting='role-p-w')
         self.assertEqual((r['waiting_native'],r['submitter_native']),(None,None))   # nobody has acted as the role yet
 
+
+class AfterStartFix(unittest.TestCase):
+    """The requester's line after start_session: a capped effort is set at once, before the worker's first turn begins
+    (measured: raised then, the first turn ran at the asked effort; raised after it, the worker stopped at step 0); a
+    model is set after the first turn (a switch before it did not reach it, measured); the watch reads either outcome."""
+    def test_effort_first_model_after_the_first_turn(self):
+        t=board.after_start_fix({'model':'claude-opus-5-5','effort':'max'})
+        self.assertLess(t.index('effort だけが違う = 同じ turn にすぐ set_session_effort'),t.index('--wait-first-turn'))
+        self.assertIn('--wait-first-turn <返りの local_…> --model claude-opus-5-5 --effort max',t)
+        self.assertIn('最初の turn の後に set_session_model → set_session_effort',t)
+        self.assertIn('claim した = go は要らない',t)
+
 class SessionState(unittest.TestCase):
     def test_states(self):
         import os, time
