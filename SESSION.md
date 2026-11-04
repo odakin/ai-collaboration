@@ -72,6 +72,11 @@ owner 専用の掲示板から engine を移し、 共同研究の repo に層2 
 
 再開前後の比較には [snapshot helper](scripts/review-artifact-snapshot.py) を使える。次の利用時は baseline の対象と writer の停止を確認し、追加物の回収範囲は呼び元で指定する。運用入口は [CLAUDE](CLAUDE.md)。
 
+## 現在地：Codex の worker に作業 dir の外の書き込み dir を渡す
+
+Codex の役割宛ての request は `--launch-writable-root <dir>` (繰り返し可) で、 作業 dir の外に書く dir を起動の時点で渡す ([契約](board/CONTRACT.md#codex-worker-launch))。 request の details に 1 dir 1 行で載り、 `launch --request` が読み戻して起動の道具の `--writable-root` に足す。
+次 = 実際の Codex の worker で、 名指した dir に app の turn から書けるかを見る。 headless の行の `-c sandbox_workspace_write.writable_roots=[…]` も実機ではまだ走らせていない。
+
 ## 残タスク
 
 - 状態識別の数式と道具を追加。入口 = [証明と利用範囲](docs/state-discrimination.md)、[library](scripts/state_discrimination.py)、[検証時の certificate](conventions/physics-verification-cycle.md#state-discrimination-certificates)。reporter は未知の foil crash と marker 後の非ゼロ終了を失敗にし、`--run` の失敗を呼び元へ返す。実装判断 = DESIGN.md。

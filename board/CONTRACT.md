@@ -186,20 +186,28 @@ time with every value typed out (measured: a command chained after another with 
 `claim` whose `--session-name` used `${CODEX_THREAD_ID:0:8}`; the same worker's plain `inbox --sync`, `claim` and
 `note` reached the board). Model = `--expect-model`, else
 `AGENT_BOARD_CODEX_MODEL`, else Codex's own `config.toml`; effort = `--effort`, else `AGENT_BOARD_CODEX_EFFORT`, else the
-same file; working directory = `--launch-cwd`, else the workspace; the thread's name in the app = `--title`, else the
+same file; working directory = `--launch-cwd`, else the workspace; directories outside it that the work writes (a
+blind-review sandbox, another working place) = `--launch-writable-root <dir>`, repeatable, named in the request because a
+running thread cannot be given one (they join the board's own cache, checkout and git dir; `~` is expanded on the
+machine that starts the worker; a directory missing there, `/`, the home directory and its parents are refused before
+anything starts; a repository's `.git` stays read-only unless its git dir is named too, layer-1
+`claude-config/conventions/codex-desktop-triage.md#sandbox-git-dir-readonly`; a Claude role's request refuses the
+option, since its worker has no such sandbox); the thread's name in the app = `--title`, else the
 summary's first clause, then the model. The thread runs unattended (approval `never`), asks the requester's questions as
 a `blocker`, and starts with step 0 = `codex-app-launch.py check-self` (its own model and effort in Codex's local
 record). Being in Codex's local store, the thread is reachable by `codex queue` ([#codex-reach](#codex-reach)): the app
 takes a queued message as the thread's next turn (measured). On an owner board with the launch default the request
 starts the worker at once; `--no-launch` prints the line only. **Which machine**: the request's `details` carry
-`launch-host`, `launch-model`, `launch-effort`, `launch-cwd`, `launch-surface` and `launch-title` lines (`--launch-host
-<name>`; default = the requester's machine), so every machine reads them. A request for another machine is not started here: a session on that machine runs
+`launch-host`, `launch-model`, `launch-effort`, `launch-cwd`, `launch-writable-root` (one line per directory),
+`launch-surface` and `launch-title` lines (`--launch-host <name>`; default = the requester's machine), so every machine
+reads them and `launch --request <id>` starts the worker with the same values. A request for another machine is not started here: a session on that machine runs
 `launch --request <id>`, which reads the board again and refuses when the request names another machine, when a launch
 note (`起動した: Codex thread …`) is already on the request, or when the work is claimed. Every launch posts that note,
 so a session that reads the board learns that the worker runs before it would start a second one (measured: a session
 on one machine started a worker its owner meant to start from the other). **Headless** (`--surface background
---headless-reason '<why>'`, e.g. a machine without the Codex app) prints the `codex exec` line with the reason in
-`CODEX_EXEC_REASON` and never starts it; layer-1 `claude-config/hooks/codex-headless-launch-check.sh` stops a headless
+--headless-reason '<why>'`, e.g. a machine without the Codex app) prints the `codex exec` line, with the request's
+writable roots as `-c sandbox_workspace_write.writable_roots=[…]` and the reason in `CODEX_EXEC_REASON`, and never
+starts it; layer-1 `claude-config/hooks/codex-headless-launch-check.sh` stops a headless
 `codex exec` that starts a board worker or a sealed-review judge without a reason. A sealed blind-review judge is not a
 board worker: a Claude worker that holds the request starts it with `codex-app-launch.py start --sealed`
 ([`cold-eyes-isolation.md#sealed-sandbox`](../conventions/cold-eyes-isolation.md#sealed-sandbox) step 5). A Codex worker
@@ -207,9 +215,9 @@ cannot start one from inside its own sandbox (the launcher's one-shot app-server
 writes the judge's prompt in the sealed directory, records what must be recorded before the launch, and names the prompt
 file in a `blocker`; the requester reads the prompt, starts the judge and tells the worker when the judge's turn has
 ended (layer-1 `claude-config/conventions/codex-desktop-triage.md#launch-from-inside-sandbox`). A Codex worker that
-stops because the work writes outside its writable roots is started again as a new thread with the missing root, and
-releases the old claim of the same role before it claims
-(`claude-config/conventions/codex-desktop-triage.md#writable-root-relaunch`). The app runs the judge
+stops at a directory the request did not name is started again as a new thread with the missing root (the launcher's
+`start --writable-root`: `launch --request` refuses once the launch note is on), and releases the old claim of the same
+role before it claims (`claude-config/conventions/codex-desktop-triage.md#writable-root-relaunch`). The app runs the judge
 too, so its progress shows there; the launcher checks the instruction files first and refuses `--network` (an app turn
 falls back to the app's network default), so literature goes into the sandbox before the launch. The daemon as the
 writer (`--writer daemon`) shows no progress in the app and takes `--daemon-reason`; without a reason the launcher does

@@ -1327,24 +1327,64 @@ def codex_fields(a):
     if getattr(a,'_codex_fields',None): return a._codex_fields
     dm,de=codex_defaults()
     cwd=a.launch_cwd or str(bc.workspace(a.root))
-    home=str(Path.home())
     f={'host':a.launch_host or this_host(),
        'model':(a.expect_model or os.environ.get(CODEX_MODEL_ENV) or dm or '').strip(),
        'effort':(a.effort or os.environ.get(CODEX_EFFORT_ENV) or de or '').strip(),
-       'cwd':'~'+cwd[len(home):] if cwd==home or cwd.startswith(home+os.sep) else cwd,
+       'cwd':home_tilde(cwd),
        'surface':'background' if a.surface=='background' else 'codex-app'}
+    roots=[home_tilde(r) for r in getattr(a,'launch_writable_root',None) or []]
+    if roots: f['writable-root']=roots   # dirs outside cwd the worker writes: an unattended thread cannot be given one later
     if getattr(a,'title',None): f['title']=' '.join(a.title.split())   # the thread's name in the app (measured: --title was ignored)
     if a.surface=='background': f['headless-reason']=' '.join((a.headless_reason or '').split())
     a._codex_fields=f
     return f
 
 
+def home_tilde(path):
+    """A path under the home directory written from `~`, so a machine with another home reads the same place."""
+    home=str(Path.home())
+    return '~'+path[len(home):] if path==home or path.startswith(home+os.sep) else path
+
+
+CODEX_LIST_KEYS=frozenset({'writable-root'})   # `details` keys that may repeat: one line per value, read back as a list
+
+
 def codex_details(f):
-    return '\n'.join(f'launch-{k}: {v}' for k,v in f.items() if v)
+    """The request's `launch-<key>: <value>` lines; a list value (the writable roots) gives one line per item."""
+    return '\n'.join(f'launch-{k}: {x}' for k,v in f.items() for x in (v if isinstance(v,list) else [v]) if x)
 
 
 def parse_codex_details(text):
-    return {m.group(1):m.group(2).strip() for m in re.finditer(r'(?m)^launch-([a-z-]+):[ \t]*(.*)$',text or '')}
+    f={}
+    for m in re.finditer(r'(?m)^launch-([a-z-]+):[ \t]*(.*)$',text or ''):
+        k,v=m.group(1),m.group(2).strip()
+        if k in CODEX_LIST_KEYS:
+            if v: f.setdefault(k,[]).append(v)
+        else: f[k]=v
+    return f
+
+
+def normalize_writable_roots(roots, check_exists=True):
+    """`--launch-writable-root` values as absolute paths (`~` expanded; a relative path is taken from the current
+    directory), each once. Refused: a value a `details` line cannot carry back (a line break, or space at either end);
+    `/`, the home directory or a directory above it (the sandbox would bound nothing); and, when this machine starts
+    the worker (check_exists), a path that is not an existing directory, so the request says so before anything
+    starts instead of the worker stopping at its first write there. A repository's `.git` stays read-only inside a
+    writable root unless the git dir is named as a root too (claude-config codex-desktop-triage.md
+    #sandbox-git-dir-readonly): it is not added here, since a writable git dir lets the sandboxed worker change hooks
+    that later run outside the sandbox."""
+    out=[]; home=os.path.realpath(str(Path.home()))
+    for raw in roots:
+        r=str(raw)
+        if not r.strip() or r!=r.strip() or any(c in r for c in '\r\n'):
+            raise ValueError(f'--launch-writable-root {r!r}: 空・前後の空白・改行を含む path は details の行で運べない')
+        p=os.path.abspath(os.path.expanduser(r)); rp=os.path.realpath(p)
+        if rp==os.sep or rp==home or home.startswith(rp.rstrip(os.sep)+os.sep):
+            raise ValueError(f'--launch-writable-root {r}: / ・home・その上の dir は渡さない (sandbox が何も囲わなくなる) = 書く dir だけを名指す')
+        if check_exists and not os.path.isdir(p):
+            raise ValueError(f'--launch-writable-root {r}: この機械に dir が無い ({p}) = 作ってから出し直すか、 path を直す')
+        if p not in out: out.append(p)
+    return out
 
 
 def codex_handoff_text(root, role, request_id, spec, f, project=None, policy=None, source=None):
@@ -1390,7 +1430,8 @@ def codex_plan(root, role, request_id, spec, f, project=None, policy=None, title
     thread is listed nowhere in the app; a thread the shared daemon runs shows no progress there). A board worker posts:
     the board's cache and checkout writable, and the board engine's worker subcommands allowed outside the sandbox by a
     Codex rule (the app's sandbox has no network); network on for the daemon fallback (approval never: it runs
-    unattended). The thread's name = the request's --title (else the summary's first clause) and the model."""
+    unattended, so the dirs outside cwd it writes, the request's --launch-writable-root, are named here, at the start).
+    The thread's name = the request's --title (else the summary's first clause) and the model."""
     text=codex_handoff_text(root,role,request_id,spec,f,project=project,policy=policy,source=source)
     hpath=write_outbox(root,request_id+'.handoff.txt',text)
     rec=write_launch_record(root,request_id,role=role,spec=spec,model=f.get('model'),effort=f.get('effort'),surface='codex-app',
@@ -1406,6 +1447,7 @@ def codex_plan(root, role, request_id, spec, f, project=None, policy=None, title
     cache=Path(os.environ.get('AGENT_BOARD_CACHE_DIR') or Path.home()/'.cache'/'agent-board')
     gd=run(root,'rev-parse','--path-format=absolute','--git-common-dir',check=False).stdout.decode().strip()
     argv+=['--network','--writable-root',str(cache),'--writable-root',str(Path(root).resolve())]+(['--writable-root',gd] if gd else [])
+    for r in f.get('writable-root') or []: argv+=['--writable-root',os.path.expanduser(r)]   # the request's own (--launch-writable-root)
     argv+=['--allow-board-engine',str(Path(__file__).resolve())]
     line=' '.join(shlex.quote(x) for x in ['python3',*argv[1:]] if x!='--json')
     return argv,line,hpath
@@ -1421,6 +1463,8 @@ def codex_headless_line(root, request_id, f, hpath):
     if f.get('model'): parts+=['-m',f['model']]
     if f.get('effort'): parts+=['-c',f'model_reasoning_effort="{f["effort"]}"']
     parts+=['-c','approval_policy="never"','-c','sandbox_mode="workspace-write"']
+    roots=[os.path.realpath(os.path.expanduser(r)) for r in f.get('writable-root') or []]
+    if roots: parts+=['-c','sandbox_workspace_write.writable_roots='+json.dumps(roots,ensure_ascii=False)]   # a TOML array of basic strings
     return (f"CODEX_EXEC_REASON={shlex.quote(f.get('headless-reason') or '')} "+' '.join(shlex.quote(x) for x in parts)
             +f' "$(cat {shlex.quote(str(hpath))})" </dev/null')
 
@@ -1444,12 +1488,14 @@ def codex_announce(a, ev, audience):
         return None
     argv,line,hpath=codex_plan(a.root,a.to_session,rid,spec,f,project=a.project,policy=a.policy,source=a.source,
                                title=f.get('title') or re.split(r'[。:：(（]',ev.get('summary') or '')[0].strip() or None)
+    extra=f' / 作業 dir の外に書く dir {", ".join(f["writable-root"])}' if f.get('writable-root') else ''
     print('→ 受け手を Codex アプリに出る形で起こす (thread を作って起動文を予約し、 アプリに開かせる = アプリが走らせる。'
-          f' model {f.get("model") or "既定"} / effort {f.get("effort") or "既定"} / cwd {f["cwd"]} / 機械 {f["host"]} を固定):\n  {line}')
+          f' model {f.get("model") or "既定"} / effort {f.get("effort") or "既定"} / cwd {f["cwd"]}{extra} / 機械 {f["host"]} を固定):\n  {line}')
     print(f'  (hand-off 文 = {hpath}。 進行はアプリに出て、 その窓から話しかけられる)')
     if not same_host(f['host'],this_host()):
         print(f'→ 起動する機械 = {f["host"]} (この機械 {this_host()} ではない) = ここでは起こさない。 {f["host"]} の session が'
-              f' board.py launch --request {rid} で起こす (掲示板の details に機械・model・effort・cwd がある)')
+              f' board.py launch --request {rid} で起こす (掲示板の details に機械・model・effort・cwd がある)'
+              +('。 作業 dir の外に書く dir がその機械に在るかは、 その launch が起こす前に確かめる' if f.get('writable-root') else ''))
         return None
     a._codex_launch=True
     return argv,dict(os.environ)
@@ -1536,6 +1582,7 @@ def cmd_launch(a):
         raise ValueError(f"この依頼の起動する機械 = {f['host']} (この機械 = {this_host()})。 {f['host']} の session が起こす")
     if f.get('surface')=='background':
         raise ValueError('この依頼は headless の codex exec を選んでいる (理由 = '+f.get('headless-reason','')+') = 依頼元の shell が起こす')
+    if f.get('writable-root'): normalize_writable_roots(f['writable-root'])   # this machine starts it: each root must be a dir here
     a.policy=req['source_policy']; a.project=req['project']['key']
     spec=handoff_spec(a,req,launch_record(a.root,a.request))
     argv,line,_=codex_plan(a.root,asg['session_id'],a.request,spec,f,project=a.project,policy=a.policy,source=getattr(a,'source',None),
@@ -1809,6 +1856,12 @@ def main():
     ap.add_argument('--title',help='request to a role (--surface desktop, or a Codex role): the worker\'s title in the app\'s list (default: the summary\'s first clause); the model is added at the end')
     ap.add_argument('--launch-host',help='request to a Codex role: the machine that starts the worker (default: this one). Written in the request; another machine\'s session starts it with `launch --request <id>`, this one does not')
     ap.add_argument('--launch-cwd',help='request to a Codex role: the worker\'s working directory (default: the workspace). A sealed blind-review judge is not a board worker: the worker starts it with codex-app-launch.py start --sealed (cold-eyes-isolation.md#board-blind-variant)')
+    ap.add_argument('--launch-writable-root',action='append',default=[],metavar='DIR',help='request to a Codex role: a directory'
+                    ' outside the working directory that the worker writes (repeatable; `~` expanded, relative = from here). The'
+                    ' thread runs unattended and cannot be given one later. Written in the request (one launch-writable-root line'
+                    ' each), so `launch --request <id>` on another machine starts it the same way. Must be a directory on the'
+                    ' machine that starts the worker; `/`, the home directory and its parents are refused. A repository\'s `.git`'
+                    ' stays read-only unless its git dir is named too')
     ap.add_argument('--headless-reason',help='request to a Codex role with --surface background: why a headless `codex exec` (listed nowhere in the Codex app) instead of the app-visible launch')
     ap.add_argument('--detach',action='store_true',help='request / launch to a role with --surface desktop: detach the worker from the requester once its model is right (default: it stays the requester\'s child, listed under it)')
     ap.add_argument('--worktree',action='store_true',help='request / launch to a Claude role: the worker works in a git worktree of its own'
@@ -1869,8 +1922,16 @@ def main():
             ap.error('--surface desktop / agent は Claude の worker 用。 Codex の役割は既定 (アプリに出る起動) か --surface background --headless-reason')
         if a.surface=='background' and not (a.headless_reason or '').strip():
             ap.error("headless の codex exec は Codex アプリのどこにも出ない = 本人か依頼元が選んだときだけ: --headless-reason '<理由>' を付ける")
-    elif any((a.launch_host,a.launch_cwd,a.headless_reason)):
-        ap.error('--launch-host / --launch-cwd / --headless-reason は Codex の役割 id 宛ての request だけ')
+        if a.launch_writable_root:
+            # checked before anything is posted; a dir on another machine is checked there by `launch --request`
+            here=same_host(a.launch_host or this_host(),this_host())
+            try: a.launch_writable_root=normalize_writable_roots(a.launch_writable_root,check_exists=here)
+            except ValueError as e: ap.error(str(e))
+    elif a.launch_writable_root and a.command=='request' and a.to=='claude':
+        ap.error('--launch-writable-root は Codex の worker の sandbox に書き込み可の dir を渡す option。 Claude の worker は'
+                 ' その sandbox を持たない = 渡す先が無い (要らない)')
+    elif any((a.launch_host,a.launch_cwd,a.headless_reason,a.launch_writable_root)):
+        ap.error('--launch-host / --launch-cwd / --launch-writable-root / --headless-reason は Codex の役割 id 宛ての request だけ')
     a.root=bc.resolve(a.root,a.board)
     ws=touch_base(a.root)
     if a.command=='launch':

@@ -1894,6 +1894,94 @@ class CodexLaunchCLI(Transport):
             for k in self.KEYS: os.environ.pop(k,None)
             os.environ.update({k:v for k,v in wiring.items() if v is not None})
 
+    def test_launch_writable_root_request_to_argv(self):
+        """--launch-writable-root: an unattended Codex thread cannot be given a writable dir once it runs (measured: a
+        worker that had to write outside its working directory stopped with a blocker and was started again). Each dir is
+        written in the request's details (one line each, once, in order) and read back by `launch --request` into the
+        launcher's --writable-root after the board's own three; `~` is kept in the request and expanded where the worker
+        starts; the headless line carries the same dirs. Refused before anything is posted: a Claude role (no Codex
+        sandbox), `/` or the home directory, and a dir missing on this machine when this machine starts the worker; a
+        dir removed before `launch --request` stops that launch."""
+        import sys, os
+        script=board.ENGINE/'board.py'
+        def cli(*args, ok=True):
+            p=subprocess.run([sys.executable,str(script),*args],capture_output=True,text=True)
+            if ok: self.assertEqual(p.returncode,0,p.stderr)
+            return p
+        def rid_of(out): return next(l.split('=',1)[1] for l in out.splitlines() if l.startswith('event_id='))
+        def details(rid):
+            with board.snapshot(self.root,fresh=True) as snap: return next(e for e in board.read(snap) if e['event_id']==rid)['details']
+        def n_events():
+            with board.snapshot(self.root,fresh=True) as snap: return len(board.read(snap))
+        src=self.base/'qproj'
+        if not src.exists(): subprocess.run(['git','init','-q','-b','main',str(src)],check=True)
+        base=['--root',str(self.root),'--agent','claude','--session','claude-win-9','--source',str(src),'--policy','ordinary',
+              '--project','qproj','--summary','別の作業場所に表を書き出す。 仕様 = 参照','--acceptance','書き出した表']
+        launch=['launch','--root',str(self.root),'--agent','claude','--session','claude-win-9']
+        wiring={k:os.environ.pop(k,None) for k in self.KEYS}
+        log=self.base/'stub-argv.jsonl'; stub=self.base/'codex-launch-stub.py'
+        stub.write_text('import json,sys\nopen(%r,"a").write(json.dumps(sys.argv[1:])+"\\n")\n'
+                        'print(json.dumps({"thread_id":"01cccccc-0000-7000-8000-000000000003","host":"fixture","model":"gpt-fixture",'
+                        '"effort":"xhigh","revealed":True,"instruction_sources":[]}))\n' % str(log))
+        os.environ.update({'AGENT_BOARD_LAUNCH_DEFAULT':'1','AGENT_BOARD_CODEX_LAUNCHER':str(stub),'AGENT_BOARD_CODEX_MODEL':'gpt-fixture',
+                           'AGENT_BOARD_CODEX_EFFORT':'xhigh','CODEX_HOME':str(self.base/'no-codex-home')})
+        calls=lambda: log.read_text().splitlines() if log.exists() else []
+        roots_of=lambda argv: [argv[i+1] for i,x in enumerate(argv) if x=='--writable-root']
+        sb1=self.base/'sandbox one'; sb2=self.base/'out'; sb3=self.base/'gone'
+        for d in (sb1,sb2,sb3): d.mkdir()
+        try:
+            out=cli('request',*base,'--thread','2026-01-01-wr-a','--to','codex','--to-session','role-qproj-wr','--no-launch',
+                    '--launch-writable-root',str(sb1),'--launch-writable-root',str(sb2),'--launch-writable-root',str(sb1)).stdout
+            rid=rid_of(out); self.assertEqual(calls(),[]); self.assertIn('作業 dir の外に書く dir',out)
+            det=details(rid)
+            self.assertEqual([l for l in det.splitlines() if l.startswith('launch-writable-root:')],
+                             [f'launch-writable-root: {sb1}',f'launch-writable-root: {sb2}'])   # once each, in order; a space in the path survives
+            self.assertEqual(board.parse_codex_details(det)['writable-root'],[str(sb1),str(sb2)])
+            self.assertIn('起動した: Codex thread 01cccccc',cli(*launch,'--request',rid).stdout)
+            roots=roots_of(json.loads(calls()[-1]))
+            self.assertEqual(len(roots),5); self.assertEqual(roots[3:],[str(sb1),str(sb2)])   # the board's cache, checkout, git dir, then the request's
+            # a dir removed before the launch stops `launch --request` before the launcher runs
+            out=cli('request',*base,'--thread','2026-01-01-wr-b','--to','codex','--to-session','role-qproj-wr2','--no-launch',
+                    '--launch-writable-root',str(sb3)).stdout
+            sb3.rmdir(); p=cli(*launch,'--request',rid_of(out),ok=False)
+            self.assertNotEqual(p.returncode,0); self.assertIn('dir が無い',p.stderr); self.assertEqual(len(calls()),1)
+            # refused before anything is posted: a missing dir here, `/`, the home directory, a Claude role
+            before=n_events()
+            for bad in (str(sb3),'/','~'):
+                p=cli('request',*base,'--thread','2026-01-01-wr-c','--to','codex','--to-session','role-qproj-wr3','--launch-writable-root',bad,ok=False)
+                self.assertNotEqual(p.returncode,0,bad); self.assertIn('--launch-writable-root',p.stderr)
+            p=cli('request',*base,'--thread','2026-01-01-wr-d','--to','claude','--to-session','role-qproj-wr4','--launch-writable-root',str(sb1),ok=False)
+            self.assertNotEqual(p.returncode,0); self.assertIn('Claude の worker',p.stderr)
+            self.assertNotEqual(cli(*launch,'--request',rid,'--launch-writable-root',str(sb1),ok=False).returncode,0)   # request only
+            self.assertEqual(n_events(),before); self.assertEqual(len(calls()),1)
+            # another machine starts it: not checked here, `~` kept in the request for that machine's home
+            out=cli('request',*base,'--thread','2026-01-01-wr-e','--to','codex','--to-session','role-qproj-wr5','--launch-host','fixture-other-mac',
+                    '--launch-writable-root','~/board-fixture-not-here').stdout
+            self.assertIn('その launch が起こす前に確かめる',out); self.assertEqual(len(calls()),1)
+            self.assertEqual(board.parse_codex_details(details(rid_of(out)))['writable-root'],['~/board-fixture-not-here'])
+            # the headless line names the same dirs
+            out=cli('request',*base,'--thread','2026-01-01-wr-f','--to','codex','--to-session','role-qproj-wr6','--surface','background',
+                    '--headless-reason','fixture: この機械に Codex アプリが無い','--launch-writable-root',str(sb1)).stdout
+            self.assertIn('sandbox_workspace_write.writable_roots='+json.dumps([os.path.realpath(sb1)],ensure_ascii=False),out)
+            # `~` is expanded on the machine that starts the worker (in process: HOME points into the fixture)
+            home=self.base/'home'; (home/'sb').mkdir(parents=True); saved=os.environ.get('HOME'); os.environ['HOME']=str(home)
+            try:
+                self.assertEqual(board.normalize_writable_roots(['~/sb']),[str(home/'sb')])
+                self.assertEqual(board.home_tilde(str(home/'sb')),'~/sb')
+                argv,_,_=board.codex_plan(self.root,'role-qproj-wr7','fixture-wr-home',None,{'host':board.this_host(),'cwd':'~','writable-root':['~/sb']})
+                self.assertEqual(roots_of(argv)[-1],str(home/'sb'))
+                with self.assertRaises(ValueError): board.normalize_writable_roots([str(home)])
+                with self.assertRaises(ValueError): board.normalize_writable_roots([str(home.parent)])
+            finally:
+                if saved is None: os.environ.pop('HOME',None)
+                else: os.environ['HOME']=saved
+            cwd0=os.getcwd(); os.chdir(self.base)
+            try: self.assertEqual([os.path.realpath(x) for x in board.normalize_writable_roots(['out'])],[os.path.realpath(self.base/'out')])   # relative = from the current directory
+            finally: os.chdir(cwd0)
+        finally:
+            for k in self.KEYS: os.environ.pop(k,None)
+            os.environ.update({k:v for k,v in wiring.items() if v is not None})
+
 
 class EffortFlag(unittest.TestCase):
     """--effort on a request to a role decides the worker's effort ahead of the owner's default and the requester's
