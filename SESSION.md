@@ -75,7 +75,7 @@ owner 専用の掲示板から engine を移し、 共同研究の repo に層2 
 ## 現在地：Codex の worker に作業 dir の外の書き込み dir を渡す
 
 Codex の役割宛ての request は `--launch-writable-root <dir>` (繰り返し可) で、 作業 dir の外に書く dir を起動の時点で渡す ([契約](board/CONTRACT.md#codex-worker-launch))。 request の details に 1 dir 1 行で載り、 `launch --request` が読み戻して起動の道具の `--writable-root` に足す。
-次 = 実際の Codex の worker で、 名指した dir に app の turn から書けるかを見る。 headless の行の `-c sandbox_workspace_write.writable_roots=[…]` も実機ではまだ走らせていない。
+app の turn から名指した dir に書けることは実機で確かめた (Codex の worker が作業 dir の外の共有フォルダに成果物を書けた)。 次 = headless の行の `-c sandbox_workspace_write.writable_roots=[…]` は実機ではまだ走らせていない。
 
 ## 残タスク
 
