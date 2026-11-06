@@ -470,6 +470,34 @@ Fierz--Pauli からの自由 propagator) と [`covariant_action_audit.py`](../sc
 - **低い次元の検算は、 周辺化と条件つきの区別を隠す。** 1 次元では行列の対角成分と逆行列の対角成分の逆数が一致するので、 どちらが効くかを区別できない。 非等方な設定を 2 次元以上で 1 つ入れる。 積分する変数と固定する変数の選び方、 分散の強さの領域ごとに、 効く組み合わせが変わりうる。
 - **新しい式の限界も同じ検算で出す。** 新しい式が合わなくなる所を、 原因の候補 (止めた依存性、 捨てた極、 分散) ごとに分けて報告させ、 診断用の補正で誤差が消えるかを見る。 補正で消えない残差は「原因未特定」 として記録する。
 
+## <a id="preregistered-comparison-receipt"></a>22. 事前登録した比較実験の受領
+
+モデル・設定を比較する受領では、入力の同一性、意味の採点、集計規則、実際の採用を別々に記録する。
+前提検証は [§12](#external-ai-referee-premise-verification)、隔離は
+[cold-eyes-isolation](cold-eyes-isolation.md#sealed-sandbox) が持つ。本節はその比較実験への適用である。
+
+1. **採点の答えは登録した版から読む。** working tree が更新されていても、登録した commit と path の
+   blob を hash 照合して使う。最新版との不一致と登録版の欠落を区別する。登録規則を、受領時の常識で
+   補正しない。仕様にある境界条件を試験点にして、規則の文と実装を対応づける。
+2. **匿名の対応表は判定役を起こす前に固定する。** 対応表の hash、入力一覧、各入力の hash、匿名化の
+   対象と変換を受領記録へ保存する。判定結果を受け取るときに同じものと照合する。採点原本を保持し、
+   後からの補足・受領側の確認・集計を別 file にする。再実行で対応を振り直さない。
+3. **数えられたことと正しく判定したことを分ける。** ケースの coverage、点数の和、根拠の file・行範囲、
+   hash の一致は機械検査できる。行範囲が存在しても、そこで主張が立つとは限らない。汚染語の一致件数も
+   汚染の意味判断とは別で、読む権限が無い文脈は未確認とする。
+4. **複合した追加指摘は、前提の再現だけで丸ごと加点しない。** 比や数値を再現できても、そこに続く
+   必要条件・実験との対応・修正要求まで確かめたことにはならない。確認した命題と未確認の命題を明示し、
+   登録した加点単位に従う。部分点の規則が無いなら新設せず、未確認点を含む得点幅と規則への影響を別に示す。
+5. **登録した判定規則は、良い成績ほど必ず選ばれる形とは限らない。** 「差が小さい場合」の枝は、
+   その条件を満たすときだけ採る。どの枝にも当たらない結果は、そのまま報告する。
+   規則の改善案や人の採用判断は、元の規則による結果と別に記録する。判定後の規則改訂を元の実験へ遡及しない。
+6. **費用の代理量には、どの値をどう足したかを付ける。** assistant 行の usage の単純和、重複を除いた
+   request 単位の token 数、請求量は別の量である。時刻から成果物の mtime までの差も作業時間の代理量で、
+   実行中の時間とは限らない。main と子の範囲、欠損、重複の扱い、終了時点を明記し、自己申告で穴を埋めない。
+7. **実験の原本と再利用用コードを分ける。** 回収した独立検算は保存し、共通 library の alias にして
+   独立経路と数え続けない。一般手順だけを上げ、個別判定・未確認の導出・固有入力は呼び元に残す。
+   再利用候補は実行契約・副作用・適用範囲を確認してから抽出する。
+
 ## <a id="sibling-routing"></a>16. 隣接 doc への routing
 
 自著の投稿前検査 = [`paper-audit.md`](../../claude-config/conventions/paper-audit.md) / ノートの書き方 = [`physics-notes.md`](../../claude-config/conventions/physics-notes.md) / 数値検証 kernel = [`scientific-computing.md`](../../claude-config/conventions/scientific-computing.md) / 審査側 = [`peer-review-workflow.md`](../../claude-config/conventions/peer-review-workflow.md) / 文脈手術時の散文 sweep = [`paper-audit.md#relocation-rebinding-sweep`](../../claude-config/conventions/paper-audit.md#relocation-rebinding-sweep) / 検出失敗 RCA の方法論 = [`convention-design-principles.md#detection-zero-location`](../../claude-config/docs/convention-design-principles.md#detection-zero-location) / 委譲・cold-eyes の機構 = [`multi-session-coordination.md`](../../claude-config/conventions/multi-session-coordination.md)。 **どう回し続けるか (導出 state・台帳 3 種・retro・無人層・fresh session の手順) = [`verification-cycle-ops.md`](verification-cycle-ops.md)**。 符号・全体規格化を持つ印字量の外部 anchor 登録簿と foil の歯 = [`scripts/check-sign-anchors.py`](../scripts/check-sign-anchors.py) ([§3 全体反転 foil](#global-flip-foil))。 campaign の道具 = 層1 [`scripts/ledger-commit-cadence-gate.py`](../scripts/ledger-commit-cadence-gate.py) + [`scripts/verification-campaign-report.py`](../scripts/verification-campaign-report.py) + [`scripts/gpt_measurements.py`](../scripts/gpt_measurements.py) (数学 library、 [§定義 level 判定](#definition-level-judge))。 **決定を AI が原稿に実装する pass の意図記録 (hunk → finding / decision / 裁量 / 削除 の sidecar + commit 前 gate `check-edit-intent.py`) = [`edit-intent-record.md`](edit-intent-record.md)** (= [§12](#external-ai-referee-premise-verification) の次の station、 2026-09-08)。

@@ -77,6 +77,12 @@ owner 専用の掲示板から engine を移し、 共同研究の repo に層2 
 Codex の役割宛ての request は `--launch-writable-root <dir>` (繰り返し可) で、 作業 dir の外に書く dir を起動の時点で渡す ([契約](board/CONTRACT.md#codex-worker-launch))。 request の details に 1 dir 1 行で載り、 `launch --request` が読み戻して起動の道具の `--writable-root` に足す。
 app の turn から名指した dir に書けることは実機で確かめた (Codex の worker が作業 dir の外の共有フォルダに成果物を書けた)。 次 = headless の行の `-c sandbox_workspace_write.writable_roots=[…]` は実機ではまだ走らせていない。
 
+## 現在地：事前登録した比較実験の受領
+
+受領時に照合する範囲を [共通手順](conventions/physics-verification-cycle.md#preregistered-comparison-receipt) に整理した。
+次の比較実験では、登録した版と判定規則、匿名対応表の固定時点、部分確認した指摘の加点単位を仕様で確かめる。
+個別の得点・採用判断・独立検算の原本は呼び元が持つ。
+
 ## 残タスク
 
 - 状態識別の数式と道具を追加。入口 = [証明と利用範囲](docs/state-discrimination.md)、[library](scripts/state_discrimination.py)、[検証時の certificate](conventions/physics-verification-cycle.md#state-discrimination-certificates)。reporter は未知の foil crash と marker 後の非ゼロ終了を失敗にし、`--run` の失敗を呼び元へ返す。実装判断 = DESIGN.md。
