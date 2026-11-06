@@ -791,6 +791,89 @@ def check_review_target(a):
                          '読ませる非盲検の検収なら --not-blind (cold-eyes-isolation.md#contamination-channels (d))')
 
 
+# Policy stage of a request (claude-config conventions/policy-before-implementation.md#machine-nets, CONTRACT.md
+# #policy-stage-check): the requester says whether the request asks for a policy only, an implementation of a confirmed
+# policy, or work that needs no policy stage. A policy error found after the implementation costs the whole
+# implementation (measured), so an unmarked request, and an implementation request quoting no confirmed policy, get a
+# one-line notice when the board turns the check on. Notices only: whether to refuse is the owner's call after months
+# of records, so the marks go into the request's `details` (one `policy-<key>: <value>` line each).
+POLICY_STAGES=('policy','implement','exempt')
+POLICY_STAGE_RULE='claude-config conventions/policy-before-implementation.md'
+NO_POLICY_STAGE_ITEMS=range(1,9)   # the numbered list at policy-before-implementation.md#no-policy-stage
+# The reply-version net: words that ask for a draft of text sent in the owner's name ...
+# (calibrated on an owner board's past requests, measured: bare 下書き / 起草 / draft in a spec's body fired mostly on other
+#  uses of the words; these reply-specific forms fired on few, most of them asking for a draft to be sent = CONTRACT.md
+#  #policy-stage-check)
+DRAFT_INTENT=re.compile(r'(?:返信|返事|返答|回答|メール|便)の?(?:案|下書き|草稿|文案|起草)|返信文|英文の(?:答え|返答)|返答書の?(?:草稿|案|起草|記入例|下書き|第 ?\d+ ?版)'
+                      r'|(?i:\b(?:reply|response|rebuttal) (?:draft|letter draft)\b)')
+# ... and words that say the request is the policy stage, or quotes a confirmed policy (then nothing is said).
+POLICY_ONLY=re.compile(r'方針だけ|方針のみ|方針の段|(?i:\bpolicy (?:only|stage)\b)')
+POLICY_CONFIRMED=re.compile(r'確認済みの方針|確認した方針|確定した方針|確定済みの方針|方針の確認|本人の確認|(?i:\bconfirmed policy\b)')
+POLICY_SPEC_READ_BYTES=200_000
+# The worker's own stop (policy-before-implementation.md#delegating): read first by every worker, so it reaches the
+# work without a detector (nothing to misfire). Step 3 of both hand-off texts starts with it.
+POLICY_FIRST_HANDOFF=("If the spec asks for an implementation (making or changing a document, code, hook, tool, setting"
+    " or rule document, or drafting text sent in the owner's name) but quotes neither a confirmed policy (the owner's"
+    " confirming words verbatim, or the file holding the confirmed policy) nor a reason the work needs no policy stage,"
+    " submit only the policy and stop, saying so in the submit (claude-config conventions/policy-before-implementation.md"
+    "#delegating). Otherwise do the work the spec asks for")
+
+
+def policy_stage_details(a):
+    """The `details` lines a request's policy stage marks write (empty when no --stage): kept on the event so the
+    owner can later read how often each stage was used and how often an implementation quoted its policy."""
+    stage=getattr(a,'stage',None)
+    if not stage: return ''
+    one=lambda s,n: ' '.join(str(s or '').split())[:n]
+    lines=[f'policy-stage: {stage}']
+    if getattr(a,'policy_ref',None): lines.append(f"policy-ref: {one(a.policy_ref,400)}")
+    if getattr(a,'policy_quote',None): lines.append(f"policy-quote: {one(a.policy_quote,600)}")
+    if getattr(a,'stage_reason',None): lines.append(f"policy-stage-reason: {one(a.stage_reason,400)}")
+    return '\n'.join(lines)
+
+
+def _request_spec_texts(a):
+    """The spec files a request names (--spec-local, else its references), read up to a cap; unreadable ones skipped."""
+    out=[]
+    for p in [x for x in [getattr(a,'spec_local',None)] if x]+list(getattr(a,'reference',None) or []):
+        q=Path(str(p)).expanduser()
+        if not q.is_absolute() and getattr(a,'source',None): q=Path(a.source)/q
+        try: out.append(q.read_bytes()[:POLICY_SPEC_READ_BYTES].decode('utf-8','replace'))
+        except OSError: continue
+    return out
+
+
+def policy_stage_note(cfg, a, texts=None):
+    """One notice line for a request whose policy stage needs a look, or ''. Only on a board whose board.json sets
+    `policy_stage_check` ({"rule": "<where the rule is written>", "confirmed_words": [<extra words>]}); a board
+    without it (the engine's default, a collaborators board unless it sets one) and a restricted request say nothing."""
+    pc=cfg.get('policy_stage_check')
+    if not pc or a.command!='request' or a.policy=='encrypted-metadata-only': return ''
+    rule=(pc.get('rule') if isinstance(pc,dict) else '') or POLICY_STAGE_RULE
+    stage=getattr(a,'stage',None)
+    if stage=='implement' and not (getattr(a,'policy_quote',None) or getattr(a,'policy_ref',None)):
+        return (f"⚠️ 実装の段 (--stage implement) なのに、 確認済みの方針の引用 (--policy-quote '<本人の確認の発言>') も"
+                f" file (--policy-ref <確認済みの方針の file>) も無い = worker は方針だけを出して止まる (規則 = {rule})")
+    if stage=='implement' and getattr(a,'policy_ref',None):
+        ref=Path(str(a.policy_ref)).expanduser()
+        if not ref.is_absolute() and getattr(a,'source',None): ref=Path(a.source)/ref
+        if not ref.exists(): return f"⚠️ --policy-ref {a.policy_ref} が見つからない (確認済みの方針の file を commit してから出す。 規則 = {rule})"
+    if stage=='exempt':
+        m=re.match(r'\s*(\d+)\s*[:：.、 ]\s*(\S.*)',getattr(a,'stage_reason',None) or '')
+        if not m or int(m.group(1)) not in NO_POLICY_STAGE_ITEMS:
+            return (f"⚠️ 方針の段を立てない作業 (--stage exempt) には --stage-reason '<一覧の番号 1〜8>: <1 行の理由>' を書く"
+                    f" (一覧 = {rule}#no-policy-stage)")
+    if stage: return ''
+    extra=[w for w in ((pc.get('confirmed_words') or []) if isinstance(pc,dict) else []) if isinstance(w,str) and w]
+    body='\n'.join([a.summary or '',a.acceptance or '',*(texts if texts is not None else _request_spec_texts(a))])
+    confirmed=POLICY_CONFIRMED.search(body) or any(w in body for w in extra)
+    if DRAFT_INTENT.search(body) and not POLICY_ONLY.search(body) and not confirmed:
+        return (f"⚠️ 返信・返答の起草を頼む request に、 方針の段 (「方針だけ」) も確認済みの方針の引用も無い = 先に方針だけの"
+                f" request を出すか、 確認済みの方針を引いて --stage implement で出し直す (規則 = {rule}#drafting)")
+    return (f"ℹ️ この request に段の印が無い: --stage policy (方針だけ) / implement (--policy-quote か --policy-ref を添える) /"
+            f" exempt (--stage-reason '<番号>: <理由>') のどれかを書く (規則 = {rule}#delegating)")
+
+
 def event_from(a, events):
     restricted=a.policy=='encrypted-metadata-only'
     if a.command=='request' or (a.command=='note' and not a.request):
@@ -850,6 +933,12 @@ def event_from(a, events):
         ev['assignee']={'agent':a.to,'session_id':a.to_session}
         ev['acceptance']='Confirm completion in source.' if restricted else a.acceptance
         if not restricted and is_codex_role_request(a): ev['details']=codex_details(codex_fields(a))   # every machine reads where and how it starts
+        if not restricted:
+            # a quote or a policy file says implement, a reason says exempt (the flag itself may be left out)
+            if not getattr(a,'stage',None) and (getattr(a,'policy_quote',None) or getattr(a,'policy_ref',None)): a.stage='implement'
+            elif not getattr(a,'stage',None) and getattr(a,'stage_reason',None): a.stage='exempt'
+            if policy_stage_details(a):
+                ev['details']='\n'.join(x for x in (ev.get('details'),policy_stage_details(a)) if x)
     if kind=='handover':
         if not a.to or not a.to_session or not a.role: raise ValueError('handover needs --to, --to-session, --role')
         ev.update(target={'agent':a.to,'session_id':a.to_session},handover_role=a.role)
@@ -933,7 +1022,7 @@ def handoff_text(root, role, request_id, spec, model, effort, surface='backgroun
             +hold+
             f"1. `python3 {eng} inbox --root {root} --agent claude --session {role} --sync`; if the request is not visible, do not read the spec — ask the requester or `watch`.\n"
             f"2. `python3 {eng} claim --root {root} --agent claude --session {role} --request {request_id}{scope}{src}{claim_tail}`; if refused with *another live claim exists*, stop and say so in one line.\n"
-            f"3. Do the work the spec asks for; when done, `submit` with the same --root, --session, --request{scope}{src},{submit_tail}{plain}{ask}\n" + safety_stop_handoff_text())
+            f"3. {POLICY_FIRST_HANDOFF}; when done, `submit` with the same --root, --session, --request{scope}{src},{submit_tail}{plain}{ask}\n" + safety_stop_handoff_text())
 
 
 def own_model(session):
@@ -1424,7 +1513,7 @@ def codex_handoff_text(root, role, request_id, spec, f, project=None, policy=Non
             f"2. `python3 {eng} claim --root {root} --agent codex --session {role} --request {request_id}{scope}{src}{claim_tail}`"
             +('' if restricted else " (read the thread id first with a separate `echo $CODEX_THREAD_ID`)")
             +"; if refused with *another live claim exists*, stop and say so in one line.\n"
-            f"3. Do the work the spec asks for; when done, `submit` with the same --root, --agent, --session, --request{scope}{src},{submit_tail}"
+            f"3. {POLICY_FIRST_HANDOFF}; when done, `submit` with the same --root, --agent, --session, --request{scope}{src},{submit_tail}"
             +('' if restricted else " Write every `submit` and `note` summary in plain words: do not use labels made up during the work (option letters, item"
             " or finding numbers); if you keep one, say what it refers to right after it.")
             +" Ask a question for the requester as a"
@@ -1860,6 +1949,15 @@ def main():
                     'unless it is a referee copy (no comment text, scripts/check-review-target.py). Added to the references')
     ap.add_argument('--not-blind',action='store_true',help='request: reads like a review, but the receiver may read the '
                     'repository and its records (claude-config multi-session-coordination.md#review-handoff)')
+    ap.add_argument('--stage',choices=POLICY_STAGES,help='request: the policy stage (claude-config'
+                    ' policy-before-implementation.md#delegating): policy = the deliverable is a policy only; implement = an'
+                    ' implementation of a confirmed policy (add --policy-quote and/or --policy-ref); exempt = work that needs'
+                    ' no policy stage (add --stage-reason). Written in the request\'s details; a board whose board.json sets'
+                    ' policy_stage_check prints a notice for an unmarked request (CONTRACT.md#policy-stage-check)')
+    ap.add_argument('--policy-quote',help='request --stage implement: the owner\'s words confirming the policy, verbatim')
+    ap.add_argument('--policy-ref',help='request --stage implement: the committed file holding the confirmed policy')
+    ap.add_argument('--stage-reason',help='request --stage exempt: \'<item number 1-8 of policy-before-implementation.md'
+                    '#no-policy-stage>: <one line>\'')
     ap.add_argument('--lease-hours',type=float,default=12)
     ap.add_argument('--sync',action='store_true',help='read latest remote inbox in an isolated checkout')
     ap.add_argument('--preview',action='store_true',help='validate and show the proposed event without posting')
@@ -2152,6 +2250,10 @@ def main():
         # the context and cache); a title tag is a recommendation, so read the transcript instead.
         note=target_model_note(a.to_session,a.expect_model,a.to,a.effort)
         if note: print(note)
+    if a.command=='request':
+        try: pnote=policy_stage_note(cfg,a)
+        except Exception: pnote=''   # a notice never stops a post
+        if pnote: print(pnote,file=sys.stderr)
     claim_model_check(a)   # a worker on another model than its request was launched for does not take the work (measured: the app started one on the requester's model)
     if a.preview:
         from board_schema import errors

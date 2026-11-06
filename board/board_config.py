@@ -10,7 +10,8 @@ board.json (format 1):
      "branch": "main", "sources": ["<project key>", ...], "readable": ["<checkout>", ...], "name": "...",
      "labels": {"codex": "..."}, "description": "...",
      "launch_effort_floor": {"effort": "low" | "medium" | "high" | "xhigh" | "max", "rule": "<where the rule is written>"},
-     "launch_model_allow": {"tiers": ["opus", ...], "rule": "<where the rule is written>"}}
+     "launch_model_allow": {"tiers": ["opus", ...], "rule": "<where the rule is written>"},
+     "policy_stage_check": {"rule": "<where the rule is written>", "confirmed_words": ["<word>", ...]}}
 
 - `audience: owner` — only the owner reads it; any source may post (still subject to source classification).
 - `audience: collaborators` — the collaborators of the listed `sources` read it. Only those projects may post,
@@ -25,6 +26,10 @@ board.json (format 1):
 - `launch_model_allow` (optional) — the model tiers (`fable` / `opus` / `sonnet` / `haiku`) a Claude role's worker is
   started on from this board: `request` and `launch --request` refuse another tier in one line naming `rule`, unless
   `--model-quote` carries the owner's own words naming that model. Absent = every tier (the engine's default).
+- `policy_stage_check` (optional) — `request` prints one notice line (never a refusal) for a request without a policy
+  stage mark (`--stage`), an implementation quoting no confirmed policy, and a reply-drafting request with neither a
+  policy stage nor a confirmed policy; `confirmed_words` adds the board's own words that say a policy was confirmed.
+  Absent = no notice (the engine's default).
 """
 from __future__ import annotations
 
@@ -40,7 +45,7 @@ CONFIG = 'board.json'
 GITCRYPT_MAGIC = b'\x00GITCRYPT'
 AUDIENCES = {'owner', 'collaborators'}
 ENCRYPTIONS = {'git-crypt', 'none'}
-FIELDS = {'board_format', 'name', 'audience', 'encryption', 'branch', 'sources', 'readable', 'labels', 'description', 'launch_effort_floor', 'launch_model_allow'}
+FIELDS = {'board_format', 'name', 'audience', 'encryption', 'branch', 'sources', 'readable', 'labels', 'description', 'launch_effort_floor', 'launch_model_allow', 'policy_stage_check'}
 EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')   # a worker's reasoning effort, lowest first
 KEY_RE = re.compile(r'[a-z0-9][a-z0-9-]{1,63}')
 
@@ -117,6 +122,12 @@ def validate(cfg: dict) -> dict:
                                   and allow['tiers'] and all(isinstance(t, str) and t.strip() for t in allow['tiers'])
                                   and isinstance(allow.get('rule', ''), str)):
         problems.append('launch_model_allow is {"tiers": ["<tier>", ...], "rule": "<where the rule is written>"}')
+    psc = cfg.get('policy_stage_check')
+    if psc is not None and not (isinstance(psc, dict) and set(psc) <= {'rule', 'confirmed_words'}
+                                and isinstance(psc.get('rule', ''), str)
+                                and isinstance(psc.get('confirmed_words', []), list)
+                                and all(isinstance(w, str) and w.strip() for w in psc.get('confirmed_words', []))):
+        problems.append('policy_stage_check is {"rule": "<where the rule is written>", "confirmed_words": ["<word>", ...]}')
     if problems:
         raise ValueError(f'{CONFIG}: ' + '; '.join(problems))
     return {'branch': 'main', 'labels': {}, **cfg}

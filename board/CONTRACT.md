@@ -434,6 +434,27 @@ without posting. An attempted post is saved (`.local/outbox/` when a whole-repo
 board has an ignored `.local/`, else `<git dir>/board-outbox/`); after an uncertain network outcome use `retry --event-id <id>` with the same
 identity and policy, never a second request.
 
+### <a id="policy-stage-check"></a>Policy stage of a request
+
+A request says which stage of [policy before implementation](../../claude-config/conventions/policy-before-implementation.md#delegating)
+it asks for: `--stage policy` (the deliverable is a policy only), `--stage implement` (an implementation of a confirmed
+policy: add `--policy-quote '<the owner's confirming words>'` and/or `--policy-ref <the committed policy file>`; either
+one alone also means `implement`), or `--stage exempt` (work that needs no policy stage: `--stage-reason '<item 1-8 of
+#no-policy-stage>: <one line>'`; a reason alone also means `exempt`). The marks go into the request's `details` as
+`policy-<key>: <value>` lines, so the owner can later read how often each stage was used.
+
+A board whose `board.json` sets `policy_stage_check` (`{"rule": "<where the rule is written>", "confirmed_words":
+["<the board's own words that say a policy was confirmed>", ...]}`) prints one notice line on `request` (never a
+refusal) for: an unmarked request; `implement` with neither a quote nor a file, or with a file that does not exist;
+`exempt` without an item number. An unmarked request whose summary, acceptance or named spec asks for a draft of text
+to be sent (a reply, a response letter, a mail) and says neither that it is the policy stage nor that its policy was
+confirmed gets the notice in that form (the reply-drafting net). Calibrated on an owner board's past requests
+(measured): the bare words for a draft (下書き, 起草, draft) anywhere in a spec fired mostly on other uses of the words;
+the reply-specific forms the engine uses fired on few requests, most of which asked for a draft of text to be sent.
+Refusing is the owner's call after the records show how the marks are used. A board without
+the field (the engine's default, and a collaborators board unless it sets one) says nothing, and a restricted request
+carries no marks.
+
 ## <a id="path-touches"></a>Declaring the files you are about to write (touch)
 
 When several sessions may write the same files at once, each declares its paths before writing. The first to
@@ -607,7 +628,11 @@ python3 board_items.py list    --root <board>
   a worker given the ordinary steps was refused at claim, then at submit). Step 3 also asks for
   every `submit` and `note` summary in plain words, without labels made up during the work (option letters, item
   numbers) unless explained right after: the requester relays the summary to the owner, and such labels came through
-  unexplained (measured). Paste that file's text
+  unexplained (measured). Step 3 starts with the policy-first stop: a spec that asks for an implementation (a document,
+  code, hook, tool, setting or rule document, or text sent in the owner's name) and quotes neither a confirmed policy
+  nor a reason the work needs no policy stage gets only a policy back
+  ([claude-config conventions/policy-before-implementation.md#delegating](../../claude-config/conventions/policy-before-implementation.md#delegating);
+  the worker reads this first, so it reaches the work without a detector). Paste that file's text
   only into a window opened by other means (a desktop window someone wants to steer, another machine): a window runs
   on whatever model it happens to have (measured), so the model and effort are in the text as well. The native id in
   the name lets a second worker under the same role see the claim is not its own.

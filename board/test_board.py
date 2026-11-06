@@ -2344,6 +2344,65 @@ class ModelAllow(EffortFlag):
             board.check_model_allow({**ok,'launch_model_allow':{'tiers':['opus']}},'claude-fable-5-1',None)
 
 
+class PolicyStage(EffortFlag):
+    """A request's policy stage (CONTRACT.md#policy-stage-check): --stage policy|implement|exempt and its quote, file
+    or reason go into the request's details; a board whose board.json sets policy_stage_check prints one notice line
+    for an unmarked request, an implementation quoting no confirmed policy, an exempt mark without its item number, and
+    names the reply-drafting case. A board without the field says nothing, and nothing is ever refused. Every worker's
+    hand-off text starts step 3 with the policy-first stop."""
+    test_order = test_three_surfaces = test_refusals_and_live_note = None   # EffortFlag's tests run once, in EffortFlag
+    RULE='owner-notes/policy.md'
+
+    def turn_on(self):
+        cfg=json.loads((self.root/'board.json').read_text()); cfg['policy_stage_check']={'rule':self.RULE,'confirmed_words':['FIXTURE-OK']}
+        (self.root/'board.json').write_text(json.dumps(cfg))
+        board.run(self.root,'commit','-q','-am','Turn the policy stage check on'); board.run(self.root,'push','-q','origin','main')
+
+    def details(self, rid):
+        with board.snapshot(self.root,fresh=True) as snap:
+            return next(e for e in board.read(snap) if e['event_id']==rid).get('details') or ''
+
+    def test_off_by_default_and_marks_recorded(self):
+        b=self.post_args()
+        p=self.cli('request',*b,'--thread','2026-01-01-ps-a','--to','codex','--to-session','codex-x')
+        self.assertNotIn('段の印',p.stderr)                                   # no board.json field: no notice
+        p=self.cli('request',*b,'--thread','2026-01-01-ps-b','--to','codex','--to-session','codex-x',
+                   '--policy-quote','その案で  進めて')                       # a quote alone means implement
+        d=self.details(self.rid(p.stdout))
+        self.assertIn('policy-stage: implement',d); self.assertIn('policy-quote: その案で 進めて',d)
+
+    def test_notices(self):
+        self.turn_on(); b=self.post_args()
+        req=lambda t,*x: self.cli('request',*b,'--thread',t,'--to','codex','--to-session','codex-x',*x)
+        err=req('2026-01-01-ps-c').stderr                                       # unmarked
+        self.assertIn('段の印が無い',err); self.assertIn(self.RULE,err)
+        self.assertEqual(len([l for l in err.splitlines() if '段の印' in l]),1)
+        self.assertIn('確認済みの方針の引用',req('2026-01-01-ps-d','--stage','implement').stderr)   # implement, no quote or file
+        self.assertIn('見つからない',req('2026-01-01-ps-e','--stage','implement','--policy-ref','no/such/policy.md').stderr)
+        self.assertIn('--stage-reason',req('2026-01-01-ps-f','--stage','exempt').stderr)
+        for k,reason in enumerate(('もう決まっている','9: 範囲外の番号')):
+            self.assertIn('--stage-reason',req(f'2026-01-01-ps-f{k}','--stage','exempt','--stage-reason',reason).stderr)
+        for k,x in enumerate((('--stage','policy'),('--stage','exempt','--stage-reason','1: 記録の書き換えだけ'),
+                              ('--stage','implement','--policy-quote','この方針でいい'))):
+            err=req(f'2026-01-01-ps-g{k}',*x).stderr
+            self.assertNotIn('⚠️',err); self.assertNotIn('段の印',err)
+        self.assertIn('返信・返答の起草',req('2026-01-01-ps-h','--summary','共同研究者への返信案を書く').stderr)
+        self.assertNotIn('返信・返答の起草',req('2026-01-01-ps-i','--summary','共同研究者への返信の方針だけを出す').stderr)
+        self.assertNotIn('返信・返答の起草',req('2026-01-01-ps-j','--summary','返信案を書く (FIXTURE-OK)').stderr)   # the board's own words
+
+    def test_handoff_starts_step_three_with_the_stop(self):
+        texts=[board.codex_handoff_text(Path('/fixture/board'),'role-fixture-worker','20990101T000000Z-codex-000001',
+                                        'fixture/spec.md',{'model':'fixture-model','effort':'high'})]
+        for surface in ('desktop','background','agent'):
+            texts.append(board.handoff_text(Path('/fixture/board'),'role-fixture-worker','20990101T000000Z-claude-000001',
+                                            'fixture/spec.md','fixture-model','high',surface=surface))
+        for t in texts:
+            step3=t.split('\n3. ',1)[1]
+            self.assertTrue(step3.startswith('If the spec asks for an implementation'),step3[:80])
+            self.assertIn('policy-before-implementation.md#delegating',step3)
+            self.assertIn('Otherwise do the work the spec asks for; when done',step3)
+
+
 class ClaimModelCheck(unittest.TestCase):
     """A claim that does not match the request's launch record is refused: another model tier (the transcript decides,
     not the label in --session-name; --model-ok passes), and a subagent (Agent tool) claiming a request launched for a
