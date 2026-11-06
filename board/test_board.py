@@ -1407,6 +1407,17 @@ class Watch(unittest.TestCase):
         r,c,_=chain(); note=event('note',3,agent='codex')
         self.assertIsNone(board.watch_wake([r],set(),me,set(),[]))
         self.assertEqual([e['kind'] for e in board.watch_wake([r,note],{r['event_id']},me,set(),[])],['note'])
+    def test_closed_request_is_not_watched_unless_since_is_given(self):
+        # Measured: a watch started on a request accepted minutes before waited for its whole --max-minutes, and as a
+        # live background task it kept the desktop app from archiving the session.
+        r,c,sub=chain(); acc=event('accept',3,reply=sub)
+        ids=[e['event_id'] for e in (r,c,sub,acc)]
+        line=board.watch_closed_line([r,c,sub,acc],'',ids)
+        self.assertIn('終了している',line); self.assertIn('確認済み',line); self.assertIn('--since '+acc['event_id'],line)
+        self.assertIsNone(board.watch_closed_line([r,c,sub,acc],acc['event_id'],ids))     # an explicit --since still watches
+        self.assertIsNone(board.watch_closed_line([r,c,sub],'',ids[:3]))                   # submitted = open: watched
+        ab=event('abandoned',3)
+        self.assertIn('取り下げ',board.watch_closed_line([r,c,ab],'',[r['event_id'],c['event_id'],ab['event_id']]))
     def test_only_sync_failures_are_transient(self):
         self.assertTrue(board.transient_sync_error(ValueError('git clone failed: Connection reset by peer')))
         self.assertTrue(board.transient_sync_error(subprocess.TimeoutExpired('git',1)))
@@ -1492,6 +1503,14 @@ class FetchTransport(Transport):
         time.sleep(2); board.post(self.root,c)
         out,err=w.communicate(timeout=60)
         self.assertEqual(w.returncode,0,err); self.assertIn('claim',out); self.assertIn(c['event_id'][:10],out)
+    def test_watch_on_a_closed_request_ends_at_once(self):
+        import sys
+        r,c,sub=chain(); acc=event('accept',3,reply=sub)
+        for e in (r,c,sub,acc): board.post(self.root,e)
+        p=subprocess.run([sys.executable,str(board.ENGINE/'board.py'),'watch','--root',str(self.root),'--agent','codex',
+                          '--session','codex-session-001','--request',r['event_id'],'--interval','1','--max-minutes','1'],
+                         capture_output=True,text=True,timeout=60)
+        self.assertEqual(p.returncode,0,p.stderr); self.assertIn('終了している',p.stdout); self.assertIn(acc['event_id'],p.stdout)
     def test_watch_timeout_while_the_sync_fails_does_not_say_no_new_posts(self):
         # Measured: the remote was unreachable for the whole watch, and the timeout said there were no new posts.
         import sys, shutil

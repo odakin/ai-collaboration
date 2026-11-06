@@ -72,6 +72,22 @@ def watch_wake(thread, seen, me, quiet, pending):
     out=pending+new; pending.clear(); return out
 
 
+def watch_closed_line(thread, since, ids):
+    """watch: the line to print instead of watching when the request is already closed (accepted / withdrawn), else None.
+
+    Measured: a session started a watch on a request that had been accepted minutes before. Nothing moves a closed
+    request (only notes may still be posted), so the watch waited for its whole --max-minutes, and as a live background
+    task it kept the desktop app from archiving the session. An explicit --since is the caller's choice to wait for a
+    note after the close, and still watches."""
+    if since: return None
+    w=reduce_workflow(thread,view.now_utc())
+    st=w.get('status')
+    if st not in {'accepted','abandoned'}: return None
+    last=ids[-1] if ids else ''
+    return (f"watch: この依頼は終了している ([{LABELS.get(st,st)}]) = 見張りを始めずに終える。"
+            f" 閉じた後の note を待つなら --since {last} を付けて起こし直す")
+
+
 def transient_sync_error(ex):
     """watch: a failed sync (network reset, git timeout) is retried; a validation error still ends the watch."""
     if isinstance(ex,(subprocess.TimeoutExpired,OSError)): return True
@@ -2008,6 +2024,8 @@ def main():
             ids=[e['event_id'] for e in thread]
             if seen is None:
                 if a.since and a.since not in ids: raise ValueError('--since event not in this thread: '+a.since)
+                closed=watch_closed_line(thread,a.since,ids)
+                if closed: print(closed); return
                 seen=set(ids[:ids.index(a.since)+1]) if a.since else set(ids)
             new=watch_wake(thread,seen,me,quiet,pending)
             if new:
