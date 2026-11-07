@@ -285,11 +285,17 @@ mechanical backstop, not a classifier.
 - **`encrypted-metadata-only`** (owner boards only): a `git-crypt` source or any project whose names, paths, people,
   identifiers or findings are sensitive. Do not decrypt or inspect source content to prepare a post. Use an opaque
   thread `r-<12 hex>` below `events/restricted/`, `project.key = restricted`, `project.repo = null`, the generic
-  `restricted-task` actor task and the writer's coarse summary; no details, excerpts, filenames or project paths.
-  Keep the specification and result location in the source's own channel. A request to a role names its spec with
-  `request --spec-local <file>`: the path goes into the worker's hand-off text and this machine's launch record only,
-  never into the post, and a later `launch --request <id>` on this machine takes it from that record (without it the
-  hand-off said `(the request itself)` and was rewritten by hand before every launch = measured).
+  `restricted-task` actor task and a fixed coarse summary per kind, which the engine writes; no details, excerpts,
+  filenames or project paths. Keep the specification and result location in the source's own channel. A request to a
+  role names its spec with `request --spec-local <file>`: the path goes into the worker's hand-off text and this
+  machine's launch record only, never into the post, and a later `launch --request <id>` on this machine takes it from
+  that record (without it the hand-off said `(the request itself)` and was rewritten by hand before every launch =
+  measured). The requester picks the opaque thread: a restricted `request` without `--thread r-<12 hex>` is refused
+  with "needs --thread and --project (or restricted policy)", where the restricted policy waives only `--project`. The
+  refusal "restricted posts forbid descriptive metadata" does not name the flag: leave `--summary`, `--acceptance`,
+  `--reference`, `--deliverable`, `--project`, `--repo` and `--touch` off every restricted post. `--session-name`,
+  `--stage`, `--stage-reason`, `--policy-quote` and `--policy-ref` pass but are not written into the event, so the
+  policy stage of a restricted request lives in its spec file (checked with `request --preview`, measured).
 - **`ordinary`:** only when the project and thread names are safe on Git's unencrypted metadata surface.
 
 File contents may be encrypted, but repository name, paths, commit author, timestamps, sizes, branches and commit
@@ -431,7 +437,7 @@ python3 board.py accept --root $B --agent claude --session CLAUDE_SESSION_ID --r
 
 On an owner board add `--source <workspace>/<project> --policy ordinary --project <project>` (`--source` defaults to
 `<workspace>/<project>`). For encrypted sources use `--policy encrypted-metadata-only`, omit every identifying
-option and use an opaque thread; the writer supplies coarse text. `no-post` stops before event construction.
+option and use an opaque thread; the engine writes the coarse text. `no-post` stops before event construction.
 
 Each command validates the event against the branch as just fetched and posts it as one commit built in the
 repository's object store (a temporary index, never the caller's). On a concurrent push it fetches and validates
