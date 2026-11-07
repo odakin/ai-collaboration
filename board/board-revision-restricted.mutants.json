@@ -1,0 +1,178 @@
+{
+ "_comment": "board.py の修正待ちの出し直しの知らせと restricted の断りの文・黙って落ちる引数の知らせを、 直した箇所を 1 つずつ外した版で試験がそれぞれ落とすか (unittest の FAIL 行で読む)",
+ "target": "board.py",
+ "run": "python3 test_board.py -v RestrictedArguments StateAndKindHints Transport.test_cli_restricted_roundtrip_and_retry LaunchCommand.test_handoff_restricted_policy",
+ "fail_marker": "FAIL: ",
+ "pass_marker": "test_",
+ "mutants": [
+  {
+   "name": "修正待ちの状態の行に出し直しの command を出さない",
+   "pairs": [
+    [
+     "    if st=='revision' and c:",
+     "    if False and st=='revision' and c:"
+    ]
+   ],
+   "expect_fail": [
+    "test_revision_names_the_resubmission_and_an_update_is_not_one"
+   ]
+  },
+  {
+   "name": "出し直しの command が今の claim でなく revise の event を指す",
+   "pairs": [
+    [
+     "--reply-to {c['event_id']}\"\n                f\" (今の claim",
+     "--reply-to {(w.get('review') or c)['event_id']}\"\n                f\" (今の claim"
+    ]
+   ],
+   "expect_fail": [
+    "test_revision_names_the_resubmission_and_an_update_is_not_one"
+   ]
+  },
+  {
+   "name": "修正待ちの claimant の update / note に知らせを出さない",
+   "pairs": [
+    [
+     "    if kind in ('update','note') and is_claimant and w.get('status')=='revision':",
+     "    if False:"
+    ]
+   ],
+   "expect_fail": [
+    "test_revision_names_the_resubmission_and_an_update_is_not_one"
+   ]
+  },
+  {
+   "name": "知らせを update にだけ出し、 note に出さない",
+   "pairs": [
+    [
+     "    if kind in ('update','note') and is_claimant and w.get('status')=='revision':",
+     "    if kind in ('update',) and is_claimant and w.get('status')=='revision':"
+    ]
+   ],
+   "expect_fail": [
+    "test_revision_names_the_resubmission_and_an_update_is_not_one"
+   ]
+  },
+  {
+   "name": "知らせを claimant でない参加者 (依頼元) にも出す",
+   "pairs": [
+    [
+     "    if kind in ('update','note') and is_claimant and w.get('status')=='revision':",
+     "    if kind in ('update','note') and w.get('status')=='revision':"
+    ]
+   ],
+   "expect_fail": [
+    "test_revision_names_the_resubmission_and_an_update_is_not_one"
+   ]
+  },
+  {
+   "name": "知らせを修正待ちでない状態でも出す",
+   "pairs": [
+    [
+     "    if kind in ('update','note') and is_claimant and w.get('status')=='revision':",
+     "    if kind in ('update','note') and is_claimant:"
+    ]
+   ],
+   "expect_fail": [
+    "test_revision_names_the_resubmission_and_an_update_is_not_one",
+    "test_stop_posted_as_a_note_by_the_claimant_gets_a_hint"
+   ]
+  },
+  {
+   "name": "黙って落ちる引数の一覧から --review-target を外す",
+   "pairs": [
+    [
+     "('--policy-ref','policy_ref'),('--review-target','review_target'))",
+     "('--policy-ref','policy_ref'))"
+    ]
+   ],
+   "expect_fail": [
+    "test_dropped_flags_are_named"
+   ]
+  },
+  {
+   "name": "黙って落ちる引数の一覧から --policy-quote を外す",
+   "pairs": [
+    [
+     "    ('--policy-quote','policy_quote'),",
+     "    "
+    ]
+   ],
+   "expect_fail": [
+    "test_dropped_flags_are_named"
+   ]
+  },
+  {
+   "name": "黙って落ちる引数の知らせを投稿の出力に出さない",
+   "pairs": [
+    [
+     "    dnote=restricted_dropped_note(a)\n",
+     "    dnote=''\n"
+    ]
+   ],
+   "expect_fail": [
+    "test_cli_restricted_roundtrip_and_retry"
+   ]
+  },
+  {
+   "name": "restricted の --thread の欠けを別の文で断らない",
+   "pairs": [
+    [
+     "        if restricted and not a.thread:\n",
+     "        if False:\n"
+    ]
+   ],
+   "expect_fail": [
+    "test_refusals_name_the_flag"
+   ]
+  },
+  {
+   "name": "断る引数の一覧から --acceptance を外す (黙って落ちる)",
+   "pairs": [
+    [
+     "given=[f for f,v in (('--summary',a.summary),('--acceptance',a.acceptance),",
+     "given=[f for f,v in (('--summary',a.summary),"
+    ]
+   ],
+   "expect_fail": [
+    "test_refusals_name_the_flag"
+   ]
+  },
+  {
+   "name": "断る引数の一覧から --touch を外す (黙って落ちる)",
+   "pairs": [
+    [
+     ",('--touch',getattr(a,'touch',None))) if v]",
+     ") if v]"
+    ]
+   ],
+   "expect_fail": [
+    "test_refusals_name_the_flag"
+   ]
+  },
+  {
+   "name": "hand-off の文を「--session-name も断る」 の古い文に戻す",
+   "pairs": [
+    [
+     "a restricted post refuses --summary and\"\n                    \" --deliverable and does not write --session-name",
+     "a restricted post refuses --summary,\"\n                    \" --deliverable and --session-name"
+    ]
+   ],
+   "expect_fail": [
+    "test_handoff_restricted_policy"
+   ]
+  },
+  {
+   "name": "方針の段の印が落ちたときに「spec の file に書く」 を言わない",
+   "pairs": [
+    [
+     "+(\" = 方針の段の印は spec の file に書く\" if stage else '')",
+     ""
+    ]
+   ],
+   "expect_fail": [
+    "test_dropped_flags_are_named"
+   ]
+  }
+ ]
+}

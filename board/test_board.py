@@ -738,6 +738,11 @@ class RestrictedArguments(unittest.TestCase):
             board.event_from(argparse.Namespace(**base),[])
         with self.assertRaisesRegex(ValueError,r'forbid descriptive metadata \(--summary, --deliverable\)'):
             board.event_from(argparse.Namespace(**{**base,'thread':'r-0123456789ab','summary':'x','deliverable':['a.md']}),[])
+        for flag,attr,val in (('--summary','summary','x'),('--acceptance','acceptance','x'),('--reference','reference',['r.md']),
+                              ('--deliverable','deliverable',['d.md']),('--project','project','example'),('--repo','repo','o/example'),
+                              ('--touch','touch',['t.md'])):
+            with self.subTest(flag=flag), self.assertRaisesRegex(ValueError,r'forbid descriptive metadata \('+flag+r'\)'):
+                board.event_from(argparse.Namespace(**{**base,'thread':'r-0123456789ab',attr:val}),[])
     def test_dropped_flags_are_named(self):
         import argparse
         def ns(**k): return argparse.Namespace(**{'policy':'encrypted-metadata-only','session_name':None,'stage':None,
@@ -746,6 +751,10 @@ class RestrictedArguments(unittest.TestCase):
         self.assertIn('--session-name, --stage',line); self.assertIn('spec の file',line)
         self.assertNotIn('spec の file',board.restricted_dropped_note(ns(session_name='abcd1234 (opus)')))
         self.assertEqual(board.restricted_dropped_note(ns()),'')
+        for flag,attr,val in (('--session-name','session_name','x'),('--stage','stage','policy'),('--stage-reason','stage_reason','5: x'),
+                              ('--policy-quote','policy_quote','q'),('--policy-ref','policy_ref','p.md'),('--review-target','review_target',['t.tex'])):
+            with self.subTest(flag=flag):
+                self.assertIn(flag+' を event に書かない',board.restricted_dropped_note(ns(**{attr:val})))
         self.assertEqual(board.restricted_dropped_note(ns(policy='ordinary',session_name='x',stage='policy')),'')
 
 class History(unittest.TestCase):
@@ -992,16 +1001,20 @@ class Transport(unittest.TestCase):
     def test_cli_restricted_roundtrip_and_retry(self):
         import sys
         script=board.ENGINE/'board.py'
+        errs=[]
         def cli(kind, agent, *args):
             cmd=[sys.executable,str(script),kind,'--root',str(self.root),'--agent',agent,'--session',agent+'-cli-session']
             if kind!='inbox': cmd += ['--instance',agent+'@fixture/cli','--source',str(self.root),'--policy','encrypted-metadata-only']
             p=subprocess.run(cmd+list(args),capture_output=True,text=True)
             self.assertEqual(p.returncode,0,p.stderr)
+            errs.append(p.stderr)
             return p.stdout
         def eid(output): return next(l.split('=',1)[1] for l in output.splitlines() if l.startswith('event_id='))
         req=eid(cli('request','claude','--thread','r-a1b2c3d4e5f6','--to','codex','--to-session','codex-cli-session'))
+        self.assertNotIn('event に書かない',errs[-1])   # nothing dropped, nothing said
         self.assertIn('codex / codex-cli-session 対応待ち',cli('inbox','codex','--sync'))
-        claim=eid(cli('claim','codex','--request',req))
+        claim=eid(cli('claim','codex','--request',req,'--session-name','abcd1234 (fixture)'))
+        self.assertIn('--session-name を event に書かない',errs[-1])   # the post itself says what it dropped
         sub=eid(cli('submit','codex','--request',req,'--reply-to',claim))
         self.assertIn('確認待ち',cli('inbox','claude','--sync'))
         accept=eid(cli('accept','claude','--request',req,'--reply-to',sub))
@@ -1400,6 +1413,7 @@ class StateAndKindHints(unittest.TestCase):
         stop=event('note',4); stop['summary']='停止: 指摘の 2 が読めない'
         self.assertEqual(len(board.kind_hints(stop,w,self.CLAIMANT)),2)   # not a resubmission, and a question is a blocker
         self.assertEqual(board.kind_hints(up,w,self.REVIEWER),[])           # the reviewer's own update gets no worker hint
+        self.assertEqual(board.kind_hints(event('update',4,reply=c),self.w([r,c]),self.CLAIMANT),[])   # working, not revision: no hint
         sub2=event('submit',5,reply=c)
         self.assertNotIn('出し直し',board.request_state_line(self.w([r,c,sub,rv,sub2])))   # resubmitted: back to the plain line
     def test_update_to_an_answered_blocker_with_nothing_open_says_so(self):
