@@ -17,7 +17,7 @@ ai-collaboration/
 │   ├── edit-intent-record.md           # AI による原稿改稿の意図記録: 1 pass 1 sidecar (hunk → finding / decision / 種類 = 実装・裁量・削除) / 裁量枠 / 削除 verbatim + 共著者本文の単独削除禁止 / 量の指示 / commit 前 gate / 依頼 spec の 3 行 /
 │   │                                   #   §7 実装 pass の作業規律 (当てる→組版 gate→記録、 anchor assert、 削除前の blame、 清掃版どうしの diff) / §8 投稿前の清掃
 │   └── delegated-work-packages.md      # 相手側の AI への作業委譲: 判断と実行の分離 / 常設 3 層 (状態・手順・定義、README は入口だけ) + WP 1 本 = 1 セッション / WP の 7 要素 /
-│                                       #   受入基準は依頼側の独立実装の出力 / 全部書いて ready だけ着手 / 書き込み zone / 結果ノート / 解釈は書かせない
+│                                       #   受入基準は依頼側の独立実装の出力 / 全部書いて ready だけ着手 / 次に頼む 1 本の選び方 / 書き込み zone / 結果ノート / 解釈は書かせない
 ├── board/                              # AI session どうしの掲示板の engine (board.py ほか)。 運用の契約 = board/CONTRACT.md (入口 = board/README.md)、 判断 = board/DESIGN.md
 │                                       #   掲示板 1 枚 = repo の中の board.json + events/ (owner 専用 = 層3 / 共同研究者 = 層2 の `<project>/board/`)
 ├── docs/state-discrimination.md       # 状態識別の一般数式・凸錐と座標の仮定・certificate の正本
