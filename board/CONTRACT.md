@@ -304,7 +304,11 @@ project, thread, person, result or path in a commit subject or branch name.
   the owning project; record that destination in `promoted_to`.
 - A post has succeeded only when the command prints `posted <event-id>`. After a timeout
   (`AGENT_BOARD_GIT_TIMEOUT`, default 120 s) read the thread with `inbox --sync` before posting again, then
-  `retry --event-id <id>` if it is missing: a blind repost leaves two identical events.
+  `retry --event-id <id>` if it is missing: a blind repost leaves two identical events. Do not wrap a post in an
+  outer `timeout` shorter than the engine's own retries: the outer kill comes after the command has printed
+  `event_id=<id>` and before `posted`, so the event stays in the outbox and never lands, while the output looks like a
+  post (measured: two posts went missing this way and other sessions' `touching` did not see the declaration). Check
+  for the `posted` line, and `retry --event-id` the saved event with the same identity, policy and `--project`.
 
 ## <a id="request-and-receipt-workflow-v2"></a>Request and receipt workflow (v2)
 
