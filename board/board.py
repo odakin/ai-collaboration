@@ -131,6 +131,12 @@ def request_state_line(w):
     if st=='blocked' and b:
         return (f"{head} / 開いた blocker = {b['event_id']} ({_who(_actor(b))}, {b.get('created_at','')[:16]}Z)"
                 f" → 答えるのは依頼元の update --request {rid} --reply-to {b['event_id']} (note は答えにならない)")
+    c=w.get('claim')
+    if st=='revision' and c:
+        # Measured: after a revise the worker answered with an update (still revision, the accept was refused) and with
+        # submit --reply-to <the revise> (refused); the resubmission names the current claim, as the first submit did.
+        return (f"{head} / 出し直し = 担当の submit --request {rid} --reply-to {c['event_id']}"
+                f" (今の claim。 revise の event でも update でもない)")
     q,ans=w.get('question'),w.get('answer')
     if q and ans:
         return f"{head} / 開いた blocker なし (最後の blocker {q['event_id']} は update {ans['event_id']} で回答済み)"
@@ -148,6 +154,13 @@ def kind_hints(ev, w, me):
     is_reviewer=same_session(w.get('reviewer'),me)
     is_claimant=bool(w.get('claim')) and same_session(_actor(w['claim']),me)
     b=w.get('blocker') if w.get('status')=='blocked' else None
+    if kind in ('update','note') and is_claimant and w.get('status')=='revision':
+        # An update or a note never moves a request out of revision (measured: the requester's accept was then refused).
+        out=[f"ℹ️ 修正待ちの依頼に {kind} を出しても提出にならない (修正待ちのまま = 依頼元は accept できない)。"
+             f" 出し直しは submit --request {rid} --reply-to {w['claim']['event_id']} (今の claim)"]
+        if kind=='note' and STOP_WORDS.search(ev.get('summary') or ''):
+            out.append("ℹ️ 依頼元の判断を待つ停止・質問なら blocker で出す (依頼元の inbox に質問として載る)")
+        return out
     if kind=='note' and is_reviewer and b:
         return [f"⚠️ 開いた blocker {b['event_id']} ({_who(_actor(b))}, {b.get('created_at','')[:16]}Z) は未回答のまま。"
                 f" note は依頼を動かさない (blocked のまま = 相手は submit できない)。 答えは update --request {rid} --reply-to {b['event_id']}"]
@@ -853,6 +866,23 @@ def _request_spec_texts(a):
     return out
 
 
+RESTRICTED_UNWRITTEN=(('--session-name','session_name'),('--stage','stage'),('--stage-reason','stage_reason'),
+    ('--policy-quote','policy_quote'),('--policy-ref','policy_ref'),('--review-target','review_target'))
+
+
+def restricted_dropped_note(a):
+    """One notice line for a restricted post given flags the board accepts but does not write into the event, or ''.
+
+    Measured: these passed without a word and were missing from the event (`request --preview`), so a requester who
+    marked the policy stage could not tell it was gone (CONTRACT.md, encrypted-metadata-only: the stage lives in the spec)."""
+    if getattr(a,'policy',None)!='encrypted-metadata-only': return ''
+    given=[flag for flag,attr in RESTRICTED_UNWRITTEN if getattr(a,attr,None)]
+    if not given: return ''
+    stage=any(f in given for f in ('--stage','--stage-reason','--policy-quote','--policy-ref'))
+    return (f"ℹ️ restricted の投稿は {', '.join(given)} を event に書かない (断らずに落とす)"
+            +(" = 方針の段の印は spec の file に書く" if stage else '')+"。 書かれる形は --preview で見られる")
+
+
 def policy_stage_note(cfg, a, texts=None):
     """One notice line for a request whose policy stage needs a look, or ''. Only on a board whose board.json sets
     `policy_stage_check` ({"rule": "<where the rule is written>", "confirmed_words": [<extra words>]}); a board
@@ -888,6 +918,9 @@ def event_from(a, events):
     restricted=a.policy=='encrypted-metadata-only'
     if a.command=='request' or (a.command=='note' and not a.request):
         if not restricted and a.project != a.source.resolve().name.replace('_', '-'): raise ValueError('project must equal source checkout basename (underscores written as hyphens)')
+        if restricted and not a.thread:
+            # Said apart from the ordinary refusal, which reads as if the restricted policy waived both flags.
+            raise ValueError(f'restricted {a.command} needs --thread r-<12 hex> (an opaque id the requester picks; no --project)')
         if not a.thread or (not restricted and not a.project): raise ValueError(f'{a.command} needs --thread and --project (or restricted policy)')
         if a.command=='request':
             if not a.to or not a.to_session: raise ValueError('request needs --to and --to-session')
@@ -923,8 +956,11 @@ def event_from(a, events):
     if a.reply_to: ev['reply_to']=a.reply_to
     if restricted:
         ev['summary']={**view.RESTRICTED_SUMMARY,**COARSE}[kind]
-        if a.deliverable or a.reference or a.summary or a.acceptance or a.project or a.repo or getattr(a,'touch',None):
-            raise ValueError('restricted posts forbid descriptive metadata; use source-side records')
+        given=[f for f,v in (('--summary',a.summary),('--acceptance',a.acceptance),('--reference',a.reference),
+            ('--deliverable',a.deliverable),('--project',a.project),('--repo',a.repo),('--touch',getattr(a,'touch',None))) if v]
+        if given:
+            # Name the flags: the bare refusal did not say which one (CONTRACT.md, encrypted-metadata-only).
+            raise ValueError(f"restricted posts forbid descriptive metadata ({', '.join(given)}); leave them off and use source-side records")
     else:
         if not a.summary: raise ValueError('--summary required')
         if '``' in a.summary or '``' in (a.acceptance or ''):
@@ -968,7 +1004,8 @@ def safety_stop_handoff_text():
 
 def restricted_handoff_parts(policy, source, session_name):
     """The parts of the claim and submit steps that differ for a restricted request (encrypted-metadata-only): the board
-    refuses --summary, --session-name and --deliverable on its posts, and a restricted request names no project to find
+    refuses --summary and --deliverable on its posts and does not write --session-name (restricted_dropped_note), and a
+    restricted request names no project to find
     the source checkout from, so every post needs --source (measured: a worker given the ordinary steps was refused at
     claim, and once those were patched by hand, again at submit for --deliverable). Returns (source flag, claim tail,
     submit tail, restricted)."""
@@ -976,8 +1013,9 @@ def restricted_handoff_parts(policy, source, session_name):
         return ('',f" --session-name '{session_name}' --summary '<one line>'",
                 " plus `--reply-to <your claim's event id>` and `--deliverable <path>` for each deliverable.",False)
     src=f" --source {Path(source).resolve()}" if source else ' --source <the source checkout the requester named>'
-    return (src,'',(" plus `--reply-to <your claim's event id>` only: a restricted post refuses --summary, --session-name"
-                    " and --deliverable, so name the deliverables in the source's own record, not on the board."),True)
+    return (src,'',(" plus `--reply-to <your claim's event id>` only: a restricted post refuses --summary and"
+                    " --deliverable and does not write --session-name, so name the deliverables in the source's own"
+                    " record, not on the board."),True)
 
 
 def handoff_text(root, role, request_id, spec, model, effort, surface='background', project=None, policy=None, reason=None, worktree=False, source=None):
@@ -2282,6 +2320,8 @@ def main():
         try: pnote=policy_stage_note(cfg,a)
         except Exception: pnote=''   # a notice never stops a post
         if pnote: print(pnote,file=sys.stderr)
+    dnote=restricted_dropped_note(a)
+    if dnote: print(dnote,file=sys.stderr)
     claim_model_check(a)   # a worker on another model than its request was launched for does not take the work (measured: the app started one on the requester's model)
     if a.preview:
         from board_schema import errors

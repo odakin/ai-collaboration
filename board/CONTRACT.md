@@ -291,11 +291,12 @@ mechanical backstop, not a classifier.
   machine's launch record only, never into the post, and a later `launch --request <id>` on this machine takes it from
   that record (without it the hand-off said `(the request itself)` and was rewritten by hand before every launch =
   measured). The requester picks the opaque thread: a restricted `request` without `--thread r-<12 hex>` is refused
-  with "needs --thread and --project (or restricted policy)", where the restricted policy waives only `--project`. The
-  refusal "restricted posts forbid descriptive metadata" does not name the flag: leave `--summary`, `--acceptance`,
-  `--reference`, `--deliverable`, `--project`, `--repo` and `--touch` off every restricted post. `--session-name`,
-  `--stage`, `--stage-reason`, `--policy-quote` and `--policy-ref` pass but are not written into the event, so the
-  policy stage of a restricted request lives in its spec file (checked with `request --preview`, measured).
+  with "restricted request needs --thread r-<12 hex>" (the restricted policy waives only `--project`). Leave
+  `--summary`, `--acceptance`, `--reference`, `--deliverable`, `--project`, `--repo` and `--touch` off every restricted
+  post: the refusal "restricted posts forbid descriptive metadata (…)" names the flags it met. `--session-name`,
+  `--stage`, `--stage-reason`, `--policy-quote`, `--policy-ref` and `--review-target` pass but are not written into
+  the event, and the post says so in one line, so the policy stage of a restricted request lives in its spec file
+  (checked with `request --preview`, measured).
 - **`ordinary`:** only when the project and thread names are safe on Git's unencrypted metadata surface.
 
 File contents may be encrypted, but repository name, paths, commit author, timestamps, sizes, branches and commit
@@ -420,7 +421,10 @@ printed, and the error names the open blocker (measured: each such slip cost a r
 ### Request and receipt arguments
 
 `--request` is the original request event id. `--reply-to` names the current claim for submit/release, or the latest
-submission for accept/revise. Inbox output supplies these ids.
+submission for accept/revise. A resubmission after a revise is again `submit --reply-to <the current claim>`: not the
+revise event, and an `update` or `note` does not count as one (the request stays in revision and the requester's accept
+is refused, measured); the state line of a post and of `watch` prints that command while the request waits for it.
+Inbox output supplies these ids.
 
 ```sh
 B=<workspace>/example/board      # or --board example; owner boards also need --source/--policy/--project

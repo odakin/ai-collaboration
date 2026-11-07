@@ -726,6 +726,28 @@ class Touches(unittest.TestCase):
         with self.assertRaises(ValueError):
             board.event_from(argparse.Namespace(policy='encrypted-metadata-only',project=None,repo=None,**{**base,'summary':None}),[])
 
+class RestrictedArguments(unittest.TestCase):
+    """A restricted post says which flag it refuses, and names the flags it accepts but does not write."""
+    def test_refusals_name_the_flag(self):
+        import argparse
+        base=dict(command='request',source=Path('/nonexistent/example'),thread=None,request=None,summary=None,acceptance=None,
+            agent='claude',session='claude-session-001',session_name=None,instance=None,event_id=None,reply_to=None,lease_hours=12,
+            reference=[],deliverable=[],to='codex',to_session='role-example-work',role=None,touch=None,
+            policy='encrypted-metadata-only',project=None,repo=None)
+        with self.assertRaisesRegex(ValueError,r'restricted request needs --thread r-<12 hex>'):
+            board.event_from(argparse.Namespace(**base),[])
+        with self.assertRaisesRegex(ValueError,r'forbid descriptive metadata \(--summary, --deliverable\)'):
+            board.event_from(argparse.Namespace(**{**base,'thread':'r-0123456789ab','summary':'x','deliverable':['a.md']}),[])
+    def test_dropped_flags_are_named(self):
+        import argparse
+        def ns(**k): return argparse.Namespace(**{'policy':'encrypted-metadata-only','session_name':None,'stage':None,
+            'stage_reason':None,'policy_quote':None,'policy_ref':None,'review_target':[],**k})
+        line=board.restricted_dropped_note(ns(session_name='abcd1234 (opus)',stage='policy'))
+        self.assertIn('--session-name, --stage',line); self.assertIn('spec の file',line)
+        self.assertNotIn('spec の file',board.restricted_dropped_note(ns(session_name='abcd1234 (opus)')))
+        self.assertEqual(board.restricted_dropped_note(ns()),'')
+        self.assertEqual(board.restricted_dropped_note(ns(policy='ordinary',session_name='x',stage='policy')),'')
+
 class History(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix='board-history-test-')
@@ -1369,6 +1391,17 @@ class StateAndKindHints(unittest.TestCase):
         self.assertIn('blocker で出す',board.kind_hints(stop,self.w([r,c,b,a]),self.CLAIMANT)[0])
         progress=event('note',4); progress['summary']='Stage 1 running, 4 checks written'
         self.assertEqual(board.kind_hints(progress,self.w([r,c,b,a]),self.CLAIMANT),[])
+    def test_revision_names_the_resubmission_and_an_update_is_not_one(self):
+        r,c,sub=chain(); rv=event('revise',3,reply=sub); w=self.w([r,c,sub,rv])
+        line=board.request_state_line(w)
+        self.assertIn('修正待ち',line); self.assertIn(f"submit --request {r['event_id']} --reply-to {c['event_id']}",line)
+        up=event('update',4,reply=rv); h=board.kind_hints(up,w,self.CLAIMANT)
+        self.assertEqual(len(h),1); self.assertIn('提出にならない',h[0]); self.assertIn('--reply-to '+c['event_id'],h[0])
+        stop=event('note',4); stop['summary']='停止: 指摘の 2 が読めない'
+        self.assertEqual(len(board.kind_hints(stop,w,self.CLAIMANT)),2)   # not a resubmission, and a question is a blocker
+        self.assertEqual(board.kind_hints(up,w,self.REVIEWER),[])           # the reviewer's own update gets no worker hint
+        sub2=event('submit',5,reply=c)
+        self.assertNotIn('出し直し',board.request_state_line(self.w([r,c,sub,rv,sub2])))   # resubmitted: back to the plain line
     def test_update_to_an_answered_blocker_with_nothing_open_says_so(self):
         r,c,b,a=self.flow(); again=event('update',4,agent='claude',reply=b)
         self.assertIn('回答済み',board.kind_hints(again,self.w([r,c,b,a]),self.REVIEWER)[0])
@@ -1585,8 +1618,8 @@ class LaunchCommand(unittest.TestCase):
             self.assertIn('automatically retry on another model', text)
 
     def test_handoff_restricted_policy(self):
-        # A restricted post refuses --summary, --session-name and --deliverable and needs --source, so the steps the
-        # worker gets must leave the first three out and name the source (measured: refused at claim, then at submit).
+        # A restricted post refuses --summary and --deliverable, does not write --session-name, and needs --source, so
+        # the steps the worker gets must leave the three out and name the source (measured: refused at claim, then at submit).
         rid = '20990101T000000Z-claude-000001'
         texts = [board.codex_handoff_text(Path('/fixture/board'), 'role-fixture-worker', rid, None,
             {'model': 'fixture-model', 'effort': 'high'}, policy='encrypted-metadata-only', source=Path('/fixture/src'))]
@@ -1598,6 +1631,7 @@ class LaunchCommand(unittest.TestCase):
             for flag in ('--summary', '--session-name', '--deliverable <path>'):
                 self.assertNotIn(flag + ' ', steps[0] + ' ')
             self.assertNotIn('`--deliverable <path>`', steps[1])
+            self.assertIn('does not write --session-name', steps[1])
             self.assertIn('--source /fixture/src', steps[0]); self.assertIn('--source /fixture/src', steps[1])
             self.assertIn('--policy encrypted-metadata-only', steps[0])
         plain = board.handoff_text(Path('/fixture/board'), 'role-fixture-worker', rid, 'fixture/spec.md', 'fixture-model',
