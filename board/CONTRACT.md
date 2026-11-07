@@ -699,7 +699,10 @@ python3 board_items.py list    --root <board>
   an approval relayed from another session does not reach it = claude-config
   `conventions/claude-code-permissions.md#relayed-approval-does-not-reach`). Measured: a question put to the owner in two windows reached the owner twice, and a worker
   that asked the owner in its own window was sent back to the requester. **`--surface agent`** is for work the requester runs as its own subagent (Agent tool), which
-  the app does not list: it prints no launch line, only the record and the hand-off file for the Agent's prompt. A
+  the app does not list and which does not run its own closing sweep, so it suits only a small lookup, cross-check or
+  recomputation whose result the requester uses directly; work that leaves files or findings behind (a policy, an
+  implementation, a root-cause analysis, a rule change) goes to a window that closes itself (claude-config
+  `conventions/multi-session-coordination.md#self-closing-delegate`). It prints no launch line, only the record and the hand-off file for the Agent's prompt. A
   subagent claiming a request launched for a desktop window is refused (`--subagent-ok` when the requester or the
   owner chose a subagent): measured, a request for a worker the owner wanted to watch was taken by a subagent. A
   subagent shares its parent's session id and environment, so the claim check takes as the claimant the transcript

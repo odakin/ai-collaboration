@@ -1407,9 +1407,11 @@ def announce_launch(a, ev, audience):
         write_launch_record(a.root,ev['event_id'],role=a.to_session,spec=handoff_spec(a),model=model,effort=effort,surface='agent',requester=a.session,
                             **({'reason':a.reason} if a.reason else {}),**({'effort_quote':a.effort_quote} if a.effort_quote else {}),
                             **({'model_quote':a.model_quote} if a.model_quote else {}))
-        print(f'→ 受け手は依頼元の Agent tool (subagent) で起こす = app の一覧に出ない (本人が見ない手元の仕事だけ)。'
+        print(f'→ 受け手は依頼元の Agent tool (subagent) で起こす = app の一覧に出ず、 自分で締めを回さない'
+              ' (結果を依頼元がそのまま使う小さな調べもの・照合・検算だけ)。'
               f' model {model or "?"} / effort {effort or "?"} を Agent の引数に、 prompt は hand-off 文 = {hpath}。'
-              ' 本人が見る・話しかける worker なら --surface desktop で出し直す')
+              ' 本人が見る・話しかける worker と、 成果物と知見が残る仕事 (方針・実装・RCA・規則の追記) は --surface desktop で出し直す'
+              ' (claude-config conventions/multi-session-coordination.md#self-closing-delegate)')
         return None
     if surface=='desktop':
         # The worker the owner wants to watch: a desktop session is listed in the app (a background CLI session with
