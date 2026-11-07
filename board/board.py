@@ -57,6 +57,11 @@ def run(root, *args, check=True):
     return p
 
 
+def watch_thread_dir(key):
+    """The directory below the board that holds the events of thread `key` = (project, thread) (the path post writes)."""
+    return f'events/{key[0]}/{key[1]}'
+
+
 def watch_wake(thread, seen, me, quiet, pending):
     """watch: events to report now, or None to keep watching.
 
@@ -243,6 +248,11 @@ def snapshot(root, fresh=False, optimistic=False):
 def fetched(root, sha):
     """Record that the remote is known to be at `sha` (after this process pushed it)."""
     _FETCHED[str(Path(root).resolve())]=(sha,time.time())
+
+
+def fetched_sha(root):
+    """The commit the last default-transport snapshot() of `root` in this process read ('' before any)."""
+    return _FETCHED.get(str(Path(root).resolve()),('',0.0))[0]
 
 
 @contextlib.contextmanager
@@ -1963,7 +1973,7 @@ def main():
     ap.add_argument('--preview',action='store_true',help='validate and show the proposed event without posting')
     ap.add_argument('--json',action='store_true',help='inbox: waiting rows; show: one request object; boards: the list; warnings go to stderr')
     ap.add_argument('--include-closed',action='store_true',help='inbox: also show completed requests involving this exact session (not actionable)')
-    ap.add_argument('--interval',type=float,default=30,help='watch: seconds between remote checks (default transport: one ls-remote round trip, a read only when the branch moved; clone transport: a full read)')
+    ap.add_argument('--interval',type=float,default=30,help='watch: seconds between remote checks (default transport: one ls-remote round trip; when the branch moved, a fetch, and a full read only when the watched thread changed; clone transport: a full read)')
     ap.add_argument('--launch',action='store_true',help='request to a role: start the worker now with the printed CLI command (background session; the id is printed)')
     ap.add_argument('--no-launch',action='store_true',help=f'request to a role: only print the command even when {LAUNCH_DEFAULT_ENV}=1 (that default applies to owner boards only)')
     ap.add_argument('--surface',choices=['background','desktop','agent'],help=f'request to a role: desktop = print the desktop app\'s start_session arguments (the worker is listed in the app); background = the CLI line (default; env {LAUNCH_SURFACE_ENV}); agent = the requester runs it as its own subagent (Agent tool, not listed in the app: work the owner does not watch)')
@@ -2090,26 +2100,44 @@ def main():
         quiet=set(a.quiet_kind); pending=[]
         # Default transport: between reads, the remote's branch head is asked with `ls-remote` (one round trip, no
         # transfer) every --interval seconds, and the local `last-push` note of this machine's posters every
-        # NOTIFY_POLL_S; the thread is read again only when either moved. The clone transport reads every interval.
+        # NOTIFY_POLL_S. Either moving means a post somewhere on the board; the branch is then fetched and the board is
+        # read again only when this thread's directory changed (a full read of a board of ~5000 events took tens of
+        # CPU seconds, measured, and with many sessions posting the branch moves every minute). `moved` stays set until
+        # a fetch succeeds, so a failed sync is retried. The clone transport reads every interval.
         repo=bt.Repo(a.root) if bt.transport()!='clone' else None; last_remote=last_note=None; next_remote=0.0
+        last_tree=None; moved=False
         while True:
             try:
                 if repo is not None and key is not None:
                     # the remote is asked once per --interval (one SSH round trip); the local note every NOTIFY_POLL_S
                     note=repo.notified(); remote=last_remote
                     if time.time()>=next_remote: remote=repo.ls_remote(); next_remote=time.time()+a.interval
-                    if (remote,note)==(last_remote,last_note):
+                    if (remote,note)!=(last_remote,last_note): moved=True; last_remote,last_note=remote,note
+                    if moved:
+                        sha=repo.fetch(); fetched(a.root,sha)   # the snapshot below reuses this fetch
+                        # the commit compared becomes the remote baseline: a tracking ref another process moved back
+                        # under us makes the next ls-remote differ again, so the newer post is looked at
+                        last_remote=sha
+                        moved=repo.subtree(sha,watch_thread_dir(key))!=last_tree
+                    if not moved:
                         if time.time()+NOTIFY_POLL_S>deadline: print('watch: 新しい書き込みなし (時間切れ)'); sys.exit(3)
                         time.sleep(NOTIFY_POLL_S); continue
-                    last_remote,last_note=remote,note
-                with snapshot(a.root,fresh=True) as root:
+                note_before=repo.notified() if repo is not None else ''; read_t0=time.time()
+                with snapshot(a.root,fresh=key is None) as root:
+                    read_sha=fetched_sha(a.root) if repo is not None else ''
                     events=read(root)
                     if key is None:
                         found=[k for k,t in view.derive(events,view.now_utc()).items() if request_matches(k,t,a.request)]
                         if len(found)!=1: raise ValueError('request not found or ambiguous: '+a.request)
                         key=found[0]
-                        if repo is not None: last_remote,last_note=repo.remote_sha(),repo.notified(); next_remote=time.time()+a.interval
+                        # the baseline is what this read saw, taken before it: a post that lands during the read (which
+                        # takes tens of seconds on a large board) differs from it and is looked at, never taken as seen
+                        if repo is not None: last_remote,last_note=read_sha,note_before; next_remote=time.time()+a.interval
                     thread=[e for e in events if (e['project']['key'],e['thread_id'])==key]
+                if os.environ.get('AGENT_BOARD_WATCH_TRACE'):   # one line per full read (tests, measuring)
+                    print(f"watch: read {read_sha[:12] or '-'} {time.time()-read_t0:.1f}s {time.strftime('%H:%M:%S')}",file=sys.stderr)
+                # the commit just read, not the tracking branch (another process may have fetched past it meanwhile)
+                if repo is not None: last_tree=repo.subtree(read_sha,watch_thread_dir(key)) if read_sha else None; moved=False
             except Exception as ex:  # noqa: BLE001  only sync failures are retried, see transient_sync_error
                 if not transient_sync_error(ex): raise
                 print('watch: 同期に失敗 ('+(str(ex).splitlines() or [type(ex).__name__])[0][:200]+')、 '

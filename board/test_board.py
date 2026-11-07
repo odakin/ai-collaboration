@@ -1503,6 +1503,53 @@ class FetchTransport(Transport):
         time.sleep(2); board.post(self.root,c)
         out,err=w.communicate(timeout=60)
         self.assertEqual(w.returncode,0,err); self.assertIn('claim',out); self.assertIn(c['event_id'][:10],out)
+    def _other_thread_request(self):
+        o=event('request',0,thread='2026-09-06-other'); o['event_id']='20260906T010000Z-claude-aaaaaa'; o['request_id']=o['event_id']
+        return o
+    def test_thread_directory_tree_changes_only_with_its_own_posts(self):
+        # Measured: every post anywhere moved the branch, and each watch read the whole board again (a board of ~5000
+        # events: tens of CPU seconds per read). The watched thread's directory is unchanged by another thread's post.
+        if bt.transport()=='clone': self.skipTest('clone transport reads every interval')
+        r,c,_=chain(); board.post(self.root,r)
+        repo=bt.Repo(self.root); d=board.watch_thread_dir(('example',r['thread_id']))
+        before=repo.subtree(repo.fetch(),d); self.assertTrue(before)
+        board.post(self.root,self._other_thread_request())
+        self.assertEqual(repo.subtree(repo.fetch(),d),before)                              # another thread: same tree
+        self.assertEqual(repo.subtree(repo.fetch(),'events/example/2026-09-06-absent'),'')  # no such directory
+        board.post(self.root,c)
+        self.assertNotEqual(repo.subtree(repo.fetch(),d),before)                           # its own post: a new tree
+    def test_watch_does_not_read_again_for_another_thread_s_post(self):
+        import os, sys, time
+        if bt.transport()=='clone': self.skipTest('clone transport reads every interval')
+        r,c,_=chain(); other=self._other_thread_request(); board.post(self.root,r)
+        w=subprocess.Popen([sys.executable,str(board.ENGINE/'board.py'),'watch','--root',str(self.root),'--agent','claude',
+                            '--session','claude-session-001','--request',r['event_id'],'--interval','1','--max-minutes','1'],
+                           stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,env={**os.environ,'AGENT_BOARD_WATCH_TRACE':'1'})
+        time.sleep(2); board.post(self.root,other); time.sleep(4); board.post(self.root,c)
+        out,err=w.communicate(timeout=60)
+        self.assertEqual(w.returncode,0,err); self.assertIn(c['event_id'][:10],out); self.assertNotIn(other['event_id'][:10],out)
+        self.assertEqual(err.count('watch: read '),2,err)   # the first read and the one after its own thread's post
+    def test_watch_wakes_on_a_post_that_lands_during_its_first_read(self):
+        # Reproduced by an independent review: the baseline was taken after the first read (tens of seconds on a large
+        # board), so a reply that landed during that read counted as seen and the watch timed out.
+        import contextlib, io, sys
+        if bt.transport()=='clone': self.skipTest('clone transport reads every interval')
+        r,c,_=chain(); board.post(self.root,r)
+        cfile=self.base/'c.json'; cfile.write_text(json.dumps(c))
+        poster='import json,sys; sys.path.insert(0,sys.argv[1]); import board; board.post(sys.argv[2],json.load(open(sys.argv[3])))'
+        orig=board.read; calls=[0]
+        def read_then_another_process_posts(rt):
+            calls[0]+=1; out=orig(rt)
+            if calls[0]==1: subprocess.run([sys.executable,'-c',poster,str(board.ENGINE),str(self.root),str(cfile)],check=True)
+            return out
+        argv=sys.argv; buf=io.StringIO(); board.read=read_then_another_process_posts
+        sys.argv=['board.py','watch','--root',str(self.root),'--agent','claude','--session','claude-session-001',
+                  '--request',r['event_id'],'--interval','1','--max-minutes','2']   # returns as soon as it wakes; the margin is for a loaded machine
+        try:
+            with contextlib.redirect_stdout(buf): board.main()                    # returns when it wakes
+        except SystemExit as e: self.fail(f'watch did not wake (exit {e.code}): {buf.getvalue()}')
+        finally: board.read=orig; sys.argv=argv
+        self.assertIn(c['event_id'][:10],buf.getvalue())
     def test_watch_on_a_closed_request_ends_at_once(self):
         import sys
         r,c,sub=chain(); acc=event('accept',3,reply=sub)

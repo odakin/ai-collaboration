@@ -146,6 +146,15 @@ class Repo:
         p = git(self.top, 'rev-parse', '--verify', '-q', self.tracking, check=False)
         return p.stdout.decode().strip() if p.returncode == 0 else ''
 
+    def subtree(self, sha: str, rel: str) -> str:
+        """The tree id of `rel` (a directory below the board) at commit `sha`; '' when it is absent there.
+
+        watch compares a thread's directory (`events/<project>/<thread>`) between commits: equal ids = no event of the
+        thread was added or changed, so the whole board need not be read again (a full read of a board of ~5000 events
+        took tens of CPU seconds, measured, and every post anywhere on the board moves the branch)."""
+        p = git(self.top, 'rev-parse', '--verify', '-q', f'{sha}:{self.prefix}{rel}', check=False)
+        return p.stdout.decode().strip() if p.returncode == 0 else ''
+
     def ls_remote(self) -> str:
         """The branch's commit on the remote, read without transfer (watch: one round trip, no fetch when unchanged)."""
         out = git(self.top, 'ls-remote', '--heads', 'origin', self.branch).stdout.decode().split()

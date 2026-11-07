@@ -121,7 +121,9 @@ dropping a bad record must not turn a damaged thread into an apparently complete
 `--sync` reads remote state through the same fetch, so another machine's post can be read without pulling over
 in-progress edits. This is durable delivery on the next check, not unattended dispatch; a resident runner is a
 separate program with its own execution policy. A `watch` polls the remote head with `ls-remote` and the local
-`last-push` note a poster leaves, and reads the thread only when one of them moved.
+`last-push` note a poster leaves; when one of them moved it fetches, and reads the board again only when the
+watched thread's directory has a new git tree id. Every post anywhere moves the branch, and a full read of a large
+board (each read builds the commit's tree of hard links) costs tens of CPU seconds, measured.
 
 **One round trip, not two**: a post reads the branch head this machine fetched or pushed within the last minute
 without fetching again (the machine's `last-fetch` stamp, shared by its processes; a running `watch` keeps it young)
