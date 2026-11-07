@@ -800,15 +800,15 @@ def check_review_target(a):
 POLICY_STAGES=('policy','implement','exempt')
 POLICY_STAGE_RULE='claude-config conventions/policy-before-implementation.md'
 NO_POLICY_STAGE_ITEMS=range(1,9)   # the numbered list at policy-before-implementation.md#no-policy-stage
-# The reply-version net: words that ask for a draft of text sent in the owner's name ...
-# (calibrated on an owner board's past requests, measured: bare 下書き / 起草 / draft in a spec's body fired mostly on other
-#  uses of the words; these reply-specific forms fired on few, most of them asking for a draft to be sent = CONTRACT.md
-#  #policy-stage-check)
-DRAFT_INTENT=re.compile(r'(?:返信|返事|返答|回答|メール|便)の?(?:案|下書き|草稿|文案|起草)|返信文|英文の(?:答え|返答)|返答書の?(?:草稿|案|起草|記入例|下書き|第 ?\d+ ?版)'
-                      r'|(?i:\b(?:reply|response|rebuttal) (?:draft|letter draft)\b)')
+# The reply-version net: the words the owner kept as decided (返信案・返答の案・英文の答え・draft), unchanged. Calibrated
+# on an owner board's past requests (measured): in a spec's body the bare `draft` also fires on other uses (a
+# manuscript draft, a `draft_*` tool); a narrower reply-specific word set fires on fewer, and whether to change the
+# words is the owner's call (CONTRACT.md#policy-stage-check). The notice is one line either way: an unmarked request
+# gets the plain notice when these words are absent.
+DRAFT_INTENT=re.compile(r'返信案|返答の案|英文の答え|(?i:\bdraft\b)')
 # ... and words that say the request is the policy stage, or quotes a confirmed policy (then nothing is said).
 POLICY_ONLY=re.compile(r'方針だけ|方針のみ|方針の段|(?i:\bpolicy (?:only|stage)\b)')
-POLICY_CONFIRMED=re.compile(r'確認済みの方針|確認した方針|確定した方針|確定済みの方針|方針の確認|本人の確認|(?i:\bconfirmed policy\b)')
+POLICY_CONFIRMED=re.compile(r'確認済みの方針|確認した方針|確定した方針|確定済みの方針|(?i:\bconfirmed policy\b)')
 POLICY_SPEC_READ_BYTES=200_000
 # The worker's own stop (policy-before-implementation.md#delegating): read first by every worker, so it reaches the
 # work without a detector (nothing to misfire). Step 3 of both hand-off texts starts with it.

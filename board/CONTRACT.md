@@ -448,10 +448,11 @@ A board whose `board.json` sets `policy_stage_check` (`{"rule": "<where the rule
 refusal) for: an unmarked request; `implement` with neither a quote nor a file, or with a file that does not exist;
 `exempt` without an item number. An unmarked request whose summary, acceptance or named spec asks for a draft of text
 to be sent (a reply, a response letter, a mail) and says neither that it is the policy stage nor that its policy was
-confirmed gets the notice in that form (the reply-drafting net). Calibrated on an owner board's past requests
-(measured): the bare words for a draft (下書き, 起草, draft) anywhere in a spec fired mostly on other uses of the words;
-the reply-specific forms the engine uses fired on few requests, most of which asked for a draft of text to be sent.
-Refusing is the owner's call after the records show how the marks are used. A board without
+confirmed gets the notice in that form (the reply-drafting net, words as decided: 返信案, 返答の案, 英文の答え,
+`draft`). Calibrated on an owner board's past requests (measured): in a spec's body the bare `draft` also fires on
+other uses (a manuscript draft, a `draft_*` tool), and a narrower reply-specific set (a reply, an answer or a mail
+with 案 / 下書き / 草稿) fires on fewer requests, most of which ask for a draft of text to be sent; changing the words
+is the owner's call. Refusing is the owner's call after the records show how the marks are used. A board without
 the field (the engine's default, and a collaborators board unless it sets one) says nothing, and a restricted request
 carries no marks.
 
