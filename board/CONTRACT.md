@@ -555,6 +555,40 @@ python3 board_items.py list    --root <board>
   when the session ends. General rule: layer-1
   [`multi-session-coordination.md#pending-item-claims`](../../claude-config/conventions/multi-session-coordination.md#pending-item-claims).
 
+## <a id="owner-asks"></a>Questions to the owner and the owner's answers (asks)
+
+An agent that needs its owner's decision asks through the board's ask ledger, not with labels it invents in its reply.
+Labels an agent invents restart in every reply, so an answer by position ("1 and 2 OK") or to an earlier reply is
+bound to the wrong item, and the agent acts on it in the same turn (measured). A context compaction also folds
+answered questions into a one-line "done" (measured).
+
+```sh
+python3 board_asks.py ask    --root <board> --text '<question>' --recommend '<answer>' --ground <why the owner> [--key todo:<repo>:<id>] [--evidence <repo>@<rev>:<path>]
+python3 board_asks.py answer --root <board> --label H12 --quote '<owner words>' --binding label|order|confirmed|guess [--reading '<one line>']
+python3 board_asks.py list   --root <board> [--open] [--session S]
+python3 board_asks.py digest --root <board> --session S
+```
+
+- **Labels are the board's**: a letter fixed per machine plus that machine's running number (`H12`), never reused, so
+  the same question keeps one label in every window and on every day. `ask` prints the block to paste into the reply
+  (`〔問 H12〕 <question>` and the recommended answer); an open ask with the same key is reused rather than asked twice.
+- **A gate before asking**: every ask names its ground (a protected part of the owner's document, a rule change that
+  needs a ruling, an outbound message, the owner's own choice, a policy check before implementation, a fact only the
+  owner knows). A ground a machine can judge is judged by a validator (`BOARD_ASKS_VALIDATOR`): a change that needs no
+  ruling is refused with "apply it and report", including asks to ratify such a change after the fact (measured).
+- **Binding an answer**: the owner may answer by label, or by position when the latest reply shows only the ask block
+  and the reply before shows no open ask. Anything else (another numbered list in the reply, open asks in two replies,
+  a position outside the block) is a `guess`: the answer is recorded with its candidates, and the session's effective
+  actions (sending, recording a decision, messaging another session, closing a session) stop until the owner's next
+  words settle it. Reading, searching and drafting are not stopped. The first line of the reply names the label it
+  bound.
+- **After a compaction and at a session's start** the session's open and answered asks (the owner's words verbatim)
+  are printed; before a compaction the summarizer is told to keep them as question → answer → what was done.
+- **Store**: an append-only ledger local to the board checkout (`.local/asks.jsonl`, the same location rule as item
+  claims), shared at once by every session on the machine; readers need no network. Mirroring to other machines is a
+  later step. The hooks that bind, stop and print live with the harness wiring; the engine is `board_asks.py`
+  (`--selftest`).
+
 ## <a id="session-directory-and-roles"></a>Session directory, names and role identities
 
 - **Who is out there**: `board.py sessions --sync` prints every (agent, session_id) seen in history with its name,

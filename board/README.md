@@ -23,6 +23,7 @@ board/
   board_config.py    # board.json, board selection, discovery, reader gate, scaffold
   board_transport.py # one fetch, one push: read and write through the object store, decrypt each event once per machine
   board_items.py     # item claims among parallel sessions on one machine (checkout-local ledger, not posted)
+  board_asks.py      # questions to the owner and the owner's answers: board labels, the gate before asking, binding (CONTRACT.md#owner-asks)
   board-post-reach-check.py  # Stop hook: a post whose next actor is reachable was followed by a direct message
   schema/event.schema.json
   test_board.py      # behaviour, encrypted transport, races, collaborator boards
