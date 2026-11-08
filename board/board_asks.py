@@ -584,6 +584,19 @@ def hook_pretool(root, data, path=None):
             ' 先に 1 行で「〜と読みました。よいですか」 と本人に確かめる。 本人が印か「はい」 で答えると解ける')
 
 
+def prose_only(text):
+    """The reply without fenced code and quoted lines: drafts for third parties (mail, posts) sit there (measured:
+    a question inside a mail draft was read as a question to the owner)."""
+    out, in_code = [], False
+    for line in (text or '').splitlines():
+        if line.strip().startswith('```'):
+            in_code = not in_code
+            continue
+        if not in_code and not line.lstrip().startswith('>'):
+            out.append(line)
+    return '\n'.join(out)
+
+
 def hook_stop(root, data, path=None):
     """Stop: record the ask labels the reply printed; send back once a reply that asks the owner without labels."""
     session = data.get('session_id') or _me(None)
@@ -591,7 +604,7 @@ def hook_stop(root, data, path=None):
     labels = labels_in(w0)
     if labels:
         mark_shown(root, labels, session=session, path=path)
-    if data.get('stop_hook_active') or labels or not ASK_RE.search(w0):
+    if data.get('stop_hook_active') or labels or not ASK_RE.search(prose_only(w0)):
         return None
     sf = _state_file(session)
     key = hashlib.sha256(w0[-4000:].encode('utf-8')).hexdigest()[:16]
@@ -851,6 +864,9 @@ def selftest():
             msg = hook_prompt(None, {'session_id': 's9', 'transcript_path': str(tr), 'prompt': 'H3 のこと'}, path=led)
             check(msg and '確かめた読み' in msg, f'印で答え直すと確定 {msg}')
             check(hook_pretool(None, {'session_id': 's9', 'tool_name': 'SendMessage', 'tool_input': {}}, path=led) is None, '解ける')
+            write_tr('下書きです。\n```\n担当者様\nこの形で進めてよいですか。\n```\n> 引用: よいですか\n')
+            check(hook_stop(None, {'session_id': 's6', 'transcript_path': str(tr)}, path=led) is None,
+                  '下書き (code block) と引用の中の問いは本人への問いに数えない')
             write_tr('これで進めてよいですか')
             stop = hook_stop(None, {'session_id': 's8', 'transcript_path': str(tr)}, path=led)
             check(stop and '印' in stop, '印の無い問いは差し戻す')
