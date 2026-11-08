@@ -196,7 +196,7 @@ machine that starts the worker; a directory missing there, `/`, the home directo
 anything starts; a repository's `.git` stays read-only unless its git dir is named too, layer-1
 `claude-config/conventions/codex-desktop-triage.md#sandbox-git-dir-readonly`; a Claude role's request refuses the
 option, since its worker has no such sandbox); the thread's name in the app = `--title`, else the
-summary's first clause, then the model. The thread runs unattended (approval `never`), asks the requester's questions as
+summary's first clause (a restricted request: the role, since its summary is the engine's fixed text), then the model. The thread runs unattended (approval `never`), asks the requester's questions as
 a `blocker`, and starts with step 0 = `codex-app-launch.py check-self` (its own model and effort in Codex's local
 record). Being in Codex's local store, the thread is reachable by `codex queue` ([#codex-reach](#codex-reach)): the app
 takes a queued message as the thread's next turn (measured). On an owner board with the launch default the request
@@ -290,7 +290,9 @@ mechanical backstop, not a classifier.
   role names its spec with `request --spec-local <file>`: the path goes into the worker's hand-off text and this
   machine's launch record only, never into the post, and a later `launch --request <id>` on this machine takes it from
   that record (without it the hand-off said `(the request itself)` and was rewritten by hand before every launch =
-  measured). The requester picks the opaque thread: a restricted `request` without `--thread r-<12 hex>` is refused
+  measured). The requester picks the opaque thread (`r-` and 12 lowercase hex digits, e.g. `python3 -c 'import secrets;
+  print("r-" + secrets.token_hex(6))'`; the engine accepts 10 or more, since a thread was once made with 10 and its later
+  posts must still land): a restricted `request` without `--thread r-<12 hex>` is refused
   with "restricted request needs --thread r-<12 hex>" (the restricted policy waives only `--project`). Leave
   `--summary`, `--acceptance`, `--reference`, `--deliverable`, `--project`, `--repo` and `--touch` off every restricted
   post: the refusal "restricted posts forbid descriptive metadata (…)" names the flags it met. `--session-name`,
@@ -692,7 +694,10 @@ python3 board_asks.py digest --root <board> --session S
   **`--surface desktop`** (the default on an owner board when the requester is a desktop session,
   `CLAUDE_CODE_ENTRYPOINT=claude-desktop`, whatever path called the engine; `AGENT_BOARD_LAUNCH_SURFACE` overrides;
   other requesters default to the shell line) prints, instead of the shell line, the desktop app's `start_session` arguments (also written as `<request id>.start_session.json`): the same model
-  and effort, a title with the task first and the model last (the app's list cuts titles from the left, measured), and
+  and effort, a title with the task first and the model last (the app's list cuts titles from the left, measured; the
+  task = `--title`, else the summary's first clause, and for a restricted request the role, whose summary is the
+  engine's fixed text = one title for every restricted window, and the duplicate-spawn guard stopped the second worker
+  sent to another role, measured), and
   the hand-off text with a step 0 = compare the app's record of this window with the asked model and effort
   (`session-model.py self --expect-model … --expect-effort …`) and, when they differ, send the line it prints to the
   session that started the window (the app's record names it, for a card the owner clicked too), then stop in one

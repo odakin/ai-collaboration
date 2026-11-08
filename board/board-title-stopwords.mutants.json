@@ -1,0 +1,24 @@
+{
+ "_comment": "board.py の restricted の窓の題 (要約の固定文でなく宛先の役割から作る) と、 停止の語の網が打ち消しの形に当たらない直しを、 直した箇所を 1 つずつ外した版で試験がそれぞれ落とすか (unittest の FAIL 行で読む)",
+ "target": "board.py",
+ "run": "python3 test_board.py -v StateAndKindHints.test_stop_posted_as_a_note_by_the_claimant_gets_a_hint LaunchCommand.test_worker_tree_default_main",
+ "fail_marker": "FAIL: ",
+ "pass_marker": "test_",
+ "mutants": [
+  {"name": "restricted でも要約の固定文を題に使う",
+   "pairs": [["    if policy=='encrypted-metadata-only': return ''\n    return re.split", "    return re.split"]],
+   "expect_fail": ["test_worker_tree_default_main"]},
+  {"name": "desktop の題が summary_title を通らない (前の式に戻す)",
+   "pairs": [["    head=(title or summary_title(summary,policy) or name).strip()", "    head=(title or re.split(r'[。:：(（]',summary or '')[0] or name).strip()"]],
+   "expect_fail": ["test_worker_tree_default_main"]},
+  {"name": "止め の打ち消しを外す",
+   "pairs": [["止め(?!な|ず)", "止め"]],
+   "expect_fail": ["test_stop_posted_as_a_note_by_the_claimant_gets_a_hint"]},
+  {"name": "止ま の打ち消しを外す",
+   "pairs": [["止ま(?!らな|らず|ない)", "止ま"]],
+   "expect_fail": ["test_stop_posted_as_a_note_by_the_claimant_gets_a_hint"]},
+  {"name": "中断 の打ち消しを外す",
+   "pairs": [["中断(?!せず|しな)", "中断"]],
+   "expect_fail": ["test_stop_posted_as_a_note_by_the_claimant_gets_a_hint"]}
+ ]
+}

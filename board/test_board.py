@@ -1404,6 +1404,13 @@ class StateAndKindHints(unittest.TestCase):
         self.assertIn('blocker で出す',board.kind_hints(stop,self.w([r,c,b,a]),self.CLAIMANT)[0])
         progress=event('note',4); progress['summary']='Stage 1 running, 4 checks written'
         self.assertEqual(board.kind_hints(progress,self.w([r,c,b,a]),self.CLAIMANT),[])
+        # a negated stop word is progress, not a stop (measured: 「guard は止めなかった」 drew the blocker hint)
+        for said in ('guard は止めなかった、 続ける','途中で止まらずに通った','中断せずに 2 段目へ','hook は止めない形にした'):
+            neg=event('note',4); neg['summary']=said
+            self.assertEqual(board.kind_hints(neg,self.w([r,c,b,a]),self.CLAIMANT),[],said)
+        for said in ('ここで止まった','止めて判断を待つ','中断した'):
+            hit=event('note',4); hit['summary']=said
+            self.assertIn('blocker で出す',board.kind_hints(hit,self.w([r,c,b,a]),self.CLAIMANT)[0],said)
     def test_revision_names_the_resubmission_and_an_update_is_not_one(self):
         r,c,sub=chain(); rv=event('revise',3,reply=sub); w=self.w([r,c,sub,rv])
         line=board.request_state_line(w)
@@ -1718,6 +1725,23 @@ class LaunchCommand(unittest.TestCase):
             self.assertIn('unless you already work in one',args['prompt'])
             args,_=board.desktop_plan(root,'role-p-f','20260101T000000Z-claude-000015',None,None,'claude-session-001',source=src)
             self.assertNotIn('cwd',args)   # no worktree asked = the session shares the requester's folder as before
+            # a restricted request's summary is the engine's fixed text, so the title comes from the role (measured: every
+            # restricted window was titled "Work requested." and the duplicate guard stopped the second worker)
+            coarse=board.COARSE['request']
+            t1,_=board.desktop_plan(root,'role-restricted-alpha','20260101T000000Z-claude-000016',None,None,'claude-session-001',
+                                    summary=coarse,policy='encrypted-metadata-only')
+            t2,_=board.desktop_plan(root,'role-restricted-beta','20260101T000000Z-claude-000017',None,None,'claude-session-001',
+                                    summary=coarse,policy='encrypted-metadata-only')
+            self.assertNotEqual(t1['title'],t2['title']); self.assertTrue(t1['title'].startswith('restricted-alpha'))
+            self.assertNotIn('Work requested',t1['title']+t2['title'])
+            t3,_=board.desktop_plan(root,'role-restricted-alpha','20260101T000000Z-claude-000018',None,None,'claude-session-001',
+                                    title='given title',summary=coarse,policy='encrypted-metadata-only')
+            self.assertTrue(t3['title'].startswith('given title'))   # --title still wins
+            t4,_=board.desktop_plan(root,'role-p-f','20260101T000000Z-claude-000019',None,None,'claude-session-001',
+                                    summary='ordinary task: details',policy='ordinary')
+            self.assertTrue(t4['title'].startswith('ordinary task'))   # an ordinary request keeps its summary's first clause
+            self.assertEqual(board.summary_title(coarse,'encrypted-metadata-only'),'')
+            self.assertEqual(board.summary_title('作業の題。 続き','ordinary'),'作業の題')
             self.assertIn(' --worktree --launch',board.remote_control_fallback(root,'20260101T000000Z-claude-000013','s',None,None,True))
         finally:
             for k,v in saved.items():

@@ -100,7 +100,7 @@ def transient_sync_error(ex):
 
 
 # A stop or a question reported in a note (heuristic for a hint only; it never decides anything).
-STOP_WORDS=re.compile(r'(?i)停止|止ま|止め|中断|blocker|ブロッカー|判断を|返してほしい|返して欲しい|教えてほしい|確認してほしい|指示を'
+STOP_WORDS=re.compile(r'(?i)停止|止ま(?!らな|らず|ない)|止め(?!な|ず)|中断(?!せず|しな)|blocker|ブロッカー|判断を|返してほしい|返して欲しい|教えてほしい|確認してほしい|指示を'
                       r'|please\s+(?:advise|confirm)|\bstopped\b|\bblocked\b|\bwaiting\s+for\s+(?:your|the\s+requester)')
 
 
@@ -402,7 +402,7 @@ def post(root, event, *, before_push=None, landed=None):
     if errs: raise ValueError('; '.join(errs))
     if event['source_policy']=='encrypted-metadata-only':
         if not re.fullmatch(r'r-[a-f0-9]{10,}',event['thread_id']):
-            raise ValueError('restricted thread requires opaque r-<10+ hex> identifier')
+            raise ValueError('restricted thread requires an opaque r-<12 hex> identifier (10 or more lowercase hex digits are accepted)')
     rel=Path('events')/event['project']['key']/event['thread_id']/(view.compact(view.parse_ts(event['created_at']))+'--'+event['event_id']+'.json')
     if bt.transport()=='clone': return _post_clone(root,event,rel,before_push=before_push,landed=landed)
     return _post_fetch(root,event,rel,before_push=before_push,landed=landed)
@@ -1265,6 +1265,15 @@ def remote_control_fallback(root, request_id, session, model, effort, worktree=F
             ' 依頼元と同じ account に載る = 依頼元が Remote Control に載っているときだけ使う):\n  '+line)
 
 
+def summary_title(summary, policy):
+    """The worker window's title taken from the request's summary (its first clause), or '' for a restricted request:
+    there the engine writes one fixed summary for every request ("Work requested."), so every window got the same title
+    and the duplicate-spawn guard stopped the second worker sent to another role (measured). The caller then falls back
+    to the role, which the event already carries (assignee), so the title shows nothing the board does not."""
+    if policy=='encrypted-metadata-only': return ''
+    return re.split(r'[。:：(（]',summary or '')[0].strip()
+
+
 def desktop_plan(root, role, request_id, spec, expect, session, title=None, project=None, summary=None, detach=False, policy=None, effort=None, reason=None, worktree=False, source=None, effort_quote=None, model_quote=None):
     """The desktop app's start_session arguments for a role's worker (the worker is listed in the app, unlike a
     background CLI session). The board cannot call the app: the requesting Claude session calls start_session with
@@ -1280,7 +1289,7 @@ def desktop_plan(root, role, request_id, spec, expect, session, title=None, proj
     name=role[len('role-'):] if role.startswith('role-') else role
     if project and name.startswith(project+'-'): name=name[len(project)+1:]
     name=re.sub(r'[^a-z0-9-]+','-',name.lower()).strip('-')[:24].strip('-') or 'worker'
-    head=(title or re.split(r'[。:：(（]',summary or '')[0] or name).strip()
+    head=(title or summary_title(summary,policy) or name).strip()
     head=head if len(head)<=40 else head[:39]+'…'
     label=model_label(model,effort)
     args={'initiation':'user_asked','context':'fresh','title':head+(' · '+label if label else ''),'name':name,'use_worktree':bool(worktree),
@@ -1642,7 +1651,7 @@ def codex_announce(a, ev, audience):
               ' 依頼元の shell でそのまま (理由は CODEX_EXEC_REASON で起動の検査に渡る):\n  '+codex_headless_line(a.root,rid,f,hpath))
         return None
     argv,line,hpath=codex_plan(a.root,a.to_session,rid,spec,f,project=a.project,policy=a.policy,source=a.source,
-                               title=f.get('title') or re.split(r'[。:：(（]',ev.get('summary') or '')[0].strip() or None)
+                               title=f.get('title') or summary_title(ev.get('summary'),a.policy) or None)
     extra=f' / 作業 dir の外に書く dir {", ".join(f["writable-root"])}' if f.get('writable-root') else ''
     print('→ 受け手を Codex アプリに出る形で起こす (thread を作って起動文を予約し、 アプリに開かせる = アプリが走らせる。'
           f' model {f.get("model") or "既定"} / effort {f.get("effort") or "既定"} / cwd {f["cwd"]}{extra} / 機械 {f["host"]} を固定):\n  {line}')
@@ -1741,7 +1750,7 @@ def cmd_launch(a):
     a.policy=req['source_policy']; a.project=req['project']['key']
     spec=handoff_spec(a,req,launch_record(a.root,a.request))
     argv,line,_=codex_plan(a.root,asg['session_id'],a.request,spec,f,project=a.project,policy=a.policy,source=getattr(a,'source',None),
-                           title=f.get('title') or re.split(r'[。:：(（]',req.get('summary') or '')[0].strip() or None)
+                           title=f.get('title') or summary_title(req.get('summary'),a.policy) or None)
     print('→ 起こす: '+line)
     run_codex_launch(a,a.request,argv,dict(os.environ))
 
