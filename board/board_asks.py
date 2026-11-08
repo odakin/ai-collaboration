@@ -45,7 +45,7 @@ CLI:
                                    (Claude Code hook JSON on stdin, hook JSON or text on stdout; the hook entry files call these)
     python3 board_asks.py --selftest
 Grounds: protected | rule | outbound | choice | policy | fact (meanings in GROUNDS). Exit of `ask`: 0 = at least one
-ask made or reused, 3 = every item refused by the gate. The session is `--session`, else CLAUDE_CODE_SESSION_ID /
+ask made or reused, 3 = none (refused by the gate, or already answered: the earlier answer is printed instead). The session is `--session`, else CLAUDE_CODE_SESSION_ID /
 CODEX_THREAD_ID. The label letter is `BOARD_ASKS_PREFIX` (one capital letter per machine), else the host name's first
 letter. Effective actions are configurable (BOARD_ASKS_EFFECT_TOOLS / _BASH / _PATHS, newline-separated regexes).
 """
@@ -251,8 +251,30 @@ def _me(session):
     return session or os.environ.get('CLAUDE_CODE_SESSION_ID') or os.environ.get('CODEX_THREAD_ID') or 'unknown'
 
 
+def _request_author(root, request_id):
+    """The session that posted this request, read from the board checkout's events (None when it cannot be read here)."""
+    if not root or not request_id:
+        return None
+    for f in Path(root).expanduser().glob(f'events/*/*/*--{request_id}.json'):
+        with contextlib.suppress(OSError, ValueError):
+            ev = json.loads(f.read_text(encoding='utf-8'))
+            if ev.get('kind') == 'request':
+                return (ev.get('actor') or {}).get('session_id') or None
+    return None
+
+
+def _same_session(a, b):
+    a, b = a or '', b or ''
+    return bool(a) and bool(b) and (a == b or a[:8] == b[:8])
+
+
+def _last_settled(a):
+    return next((x for x in reversed(a.get('answers') or []) if x.get('binding') in SETTLED and a['label'] in (x.get('labels') or [])), {})
+
+
 def ask(root, items, *, session=None, agent='claude', project='', path=None, validator=None):
-    """items = [{text, recommend, ground, keys, evidence, applied}] -> [{status: made|reused|refused, label?, message}]."""
+    """items = [{text, recommend, ground, keys, evidence, applied, reask}]
+    -> [{status: made|reused|answered-before|refused, label?, message}]."""
     p = Path(path) if path else ledger_path(root)
     me = _me(session)
     out = []
@@ -263,6 +285,29 @@ def ask(root, items, *, session=None, agent='claude', project='', path=None, val
         for it in items:
             text = (it.get('text') or '').strip()[:MAX_TEXT]
             keys = [k for k in (it.get('keys') or []) if k]
+            # an earlier decision first: the owner already answered this work's question (measured: the same two
+            # questions were asked again in another window two days after the owner had answered them)
+            prior = [a for a in st.values() if a['status'] == 'answered' and keys and set(keys) & set(a.get('keys') or [])]
+            if prior and not it.get('reask'):
+                a = max(prior, key=lambda a: _last_settled(a).get('created_at', ''))
+                ans = _last_settled(a)
+                out.append({'status': 'answered-before', 'label': a['label'], 'text': a['text'], 'quote': ans.get('quote', ''),
+                            'message': ('同じ仕事に本人の答えが既にある = 問わずにその答えで進める。'
+                                        ' 状況が変わって問い直すなら --reask \'<何が変わったか>\'')})
+                continue
+            if it.get('ground') == 'policy':
+                # one policy check per request, put by the requester: choices inside a worker's policy file are settled
+                # at the requester's review, not asked of the owner one by one
+                rids = [k.split(':', 1)[1] for k in keys if k.startswith('request:')]
+                if not rids:
+                    out.append({'status': 'refused', 'text': text, 'message': '方針の確認の問いには --key request:<依頼の id> が要る (1 つの依頼に 1 回だけ)'})
+                    continue
+                author = _request_author(root, rids[0])
+                if author and not _same_session(author, me):
+                    out.append({'status': 'refused', 'text': text, 'message': (
+                        f'方針の確認の問いは依頼元 ({author[:8]}) が 1 つの依頼に 1 回だけ立てる。'
+                        ' worker の方針の中の個々の選択は依頼元の検収で決める (本人に立てない)')})
+                    continue
             same = next((a for a in st.values() if a['status'] == 'open' and keys and set(keys) & set(a.get('keys') or [])), None)
             if same:
                 new.append({'type': 'shown', 'labels': [same['label']], 'session': me, 'created_at': now_iso()})
@@ -276,10 +321,13 @@ def ask(root, items, *, session=None, agent='claude', project='', path=None, val
             if not ok:
                 out.append({'status': 'refused', 'text': text, 'message': msg})
                 continue
+            if it.get('ground') == 'policy' and not _request_author(root, rids[0]):
+                msg = (msg + ' ' if msg else '') + '⚠️ 依頼の作者を手元の掲示板で確かめられない (依頼元が立てているかは確かめていない)'
             label = _next_label(recs + new, prefix())
             rec = {'type': 'ask', 'label': label, 'text': text, 'recommend': (it.get('recommend') or '').strip()[:MAX_TEXT],
                    'ground': it['ground'], 'keys': keys, 'evidence': it.get('evidence') or '', 'applied': bool(it.get('applied')),
-                   'gate': msg, 'session': me, 'agent': agent, 'project': project, 'created_at': now_iso()}
+                   'reask': it.get('reask') or '', 'gate': msg, 'session': me, 'agent': agent, 'project': project,
+                   'created_at': now_iso()}
             new.append(rec)
             out.append({'status': 'made', 'label': label, 'text': text, 'recommend': rec['recommend'], 'message': msg})
         _append(p, new)
@@ -293,8 +341,10 @@ def format_block(results):
             lines.append(f"〔問 {r['label']}〕 {r['text']}")
             if r.get('recommend'):
                 lines.append(f"　おすすめ: {r['recommend']}")
-            if r.get('message', '').startswith('⚠️'):
+            if '⚠️' in r.get('message', ''):
                 lines.append(f"　({r['message']})")
+        elif r['status'] == 'answered-before':
+            lines.append(f"(問わない) 〔問 {r['label']}〕 {r['text'][:80]} は本人が答え済み: 「{r.get('quote', '')[:200]}」 — {r['message']}")
         else:
             lines.append(f"(立てない) {r.get('text', '')[:80]} — {r['message']}")
     return '\n'.join(lines)
@@ -677,6 +727,7 @@ def main(argv=None):
     ap.add_argument('--key', action='append', default=[], help='with several --text, a key applies to all of them')
     ap.add_argument('--evidence', action='append', default=[])
     ap.add_argument('--applied', action='store_true')
+    ap.add_argument('--reask', default='', help='同じ仕事に本人の答えが既にあっても問い直す理由 (何が変わったか)')
     ap.add_argument('--label', action='append', default=[])
     ap.add_argument('--quote', default='')
     ap.add_argument('--binding', default='label')
@@ -701,12 +752,12 @@ def main(argv=None):
             items = [{'text': t, 'recommend': a.recommend[i] if a.recommend else '',
                       'ground': a.ground[i] if len(a.ground) == n else a.ground[0], 'keys': a.key,
                       'evidence': (a.evidence[i] if len(a.evidence) == n else (a.evidence[0] if a.evidence else '')),
-                      'applied': a.applied} for i, t in enumerate(a.text)]
+                      'applied': a.applied, 'reask': a.reask} for i, t in enumerate(a.text)]
             if n > 1 and a.key:
                 raise ValueError('key は問い 1 つずつに付ける (--text を 1 つにして呼び分ける)')
             res = ask(a.root, items, session=a.session, agent=a.agent, project=a.project)
             _print(res) if a.json else print(format_block(res))
-            return 0 if any(r['status'] != 'refused' for r in res) else 3
+            return 0 if any(r['status'] in ('made', 'reused') for r in res) else 3
         if a.cmd == 'answer':
             _print(answer(a.root, a.label, a.quote, a.binding, reading=a.reading, recorded=a.recorded, session=a.session))
             return 0
@@ -842,6 +893,29 @@ def selftest():
             check(st['H1']['status'] == 'answered' and st['H2']['status'] == 'open', '答えの状態')
             withdraw(None, 'H2', '他で決まった', session='s1', path=led)
             check(state(load(led))['H2']['status'] == 'withdrawn', '取り下げ')
+            # an earlier decision: the same work's question already answered is not asked again
+            rb = ask(None, [{'text': '問い一 (二日後の別の窓)', 'ground': 'choice', 'keys': ['todo:x:1']}], session='s5', path=led)
+            check(rb[0]['status'] == 'answered-before' and rb[0]['label'] == 'H1' and rb[0]['quote'] == 'H1 です',
+                  f'同じ key に本人の答えがあれば問わずにその答えを返す {rb}')
+            check('(問わない) 〔問 H1〕' in format_block(rb), '答え済みの印と本人の語を出す')
+            rr = ask(None, [{'text': '問い一 (前提が変わった)', 'ground': 'choice', 'keys': ['todo:x:1'], 'reask': '期日が変わった'}],
+                     session='s5', path=led)
+            check(rr[0]['status'] == 'made', '理由つきなら問い直せる')
+            # one policy check per request, put by the requester
+            board = Path(td) / 'board'
+            (board / 'events' / 'proj' / 'th').mkdir(parents=True)
+            (board / 'events' / 'proj' / 'th' / 'R1--20260101T000000Z-claude-abc123.json').write_text(json.dumps(
+                {'kind': 'request', 'event_id': '20260101T000000Z-claude-abc123', 'actor': {'agent': 'claude', 'session_id': 'requester-1'}}),
+                encoding='utf-8')
+            pk = ['request:20260101T000000Z-claude-abc123']
+            check(ask(board, [{'text': '方針でよいか', 'ground': 'policy'}], session='requester-1', path=led)[0]['status'] == 'refused',
+                  '方針の確認には依頼の key が要る')
+            check(ask(board, [{'text': '方針の中の選択', 'ground': 'policy', 'keys': pk}], session='worker-9', path=led)[0]['status'] == 'refused',
+                  '依頼元でない session は方針の確認を立てない')
+            rp = ask(board, [{'text': '方針でよいか', 'ground': 'policy', 'keys': pk}], session='requester-1', path=led)
+            check(rp[0]['status'] == 'made', f'依頼元は立てられる {rp}')
+            check(ask(board, [{'text': '方針でよいか (2 回目)', 'ground': 'policy', 'keys': pk}], session='requester-1', path=led)[0]['status'] == 'reused',
+                  '同じ依頼の方針の確認は 1 回だけ (2 回目は同じ印)')
             d = digest(None, 's1', path=led)
             check('✅ H1' in d and 'H1 です' in d and '❓ H3' in d, f'開始・圧縮の後の出力 {d[:160]}')
             check(digest(None, 'nobody', path=led) == '', '問いの無い session には何も出さない')

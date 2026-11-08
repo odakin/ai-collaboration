@@ -578,6 +578,12 @@ python3 board_asks.py digest --root <board> --session S
   needs a ruling, an outbound message, the owner's own choice, a policy check before implementation, a fact only the
   owner knows). A ground a machine can judge is judged by a validator (`BOARD_ASKS_VALIDATOR`): a change that needs no
   ruling is refused with "apply it and report", including asks to ratify such a change after the fact (measured).
+- **An earlier answer comes first**: an ask whose key matches a question the owner already answered is not made; the
+  earlier answer (the owner's words) is printed instead (measured: the same questions were asked again in another
+  window after the owner had answered them). `--reask '<what changed>'` asks again and records why.
+- **One policy check per request, by the requester**: an ask on the ground "policy check before implementation" needs
+  the key `request:<id>` and is made only by the session that posted that request, once; choices inside a worker's
+  policy file are settled at the requester's review, not asked of the owner one by one.
 - **Binding an answer**: the owner may answer by label, or by position when the latest reply shows only the ask block
   and the reply before shows no open ask. Anything else (another numbered list in the reply, open asks in two replies,
   a position outside the block) is a `guess`: the answer is recorded with its candidates, and the session's effective
