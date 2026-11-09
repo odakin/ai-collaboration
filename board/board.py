@@ -1453,10 +1453,23 @@ def handoff_text(root, role, request_id, spec, model, effort, surface='backgroun
     # judgment and acceptance at review and asks the owner itself where the owner's own ruling is needed, so the worker
     # asks the owner in its own window only for what only that window can give: a permission prompt, or an operation the
     # permission check holds until the owner approves it in that session (an approval relayed from another session did not
-    # reach it, measured = claude-config claude-code-permissions.md#relayed-approval-does-not-reach).
+    # reach it, measured = claude-config claude-code-permissions.md#relayed-approval-does-not-reach). A protected file the
+    # rule guard stops is no longer one of these: the owner answered in the requester's window and then had to give the
+    # same answer again in the worker's window (measured), so the guard reads the requester's transcript when the worker
+    # names that session (--owner-session) and checks that the reply the owner answered showed the file and the
+    # candidate's SHA-256 (claude-config conventions/agent-rule-ownership.md#approval). A worker that also listed its
+    # question in its own reply got the owner's answer there, while the requester asked the same (measured).
     ask=(" Send questions of judgment, approval or acceptance to the requester (SendMessage or a board note), not to the owner"
-         " in this window: the requester decides them at review and asks the owner where the owner's own ruling is needed."
-         " Ask the owner here only for what only this window can give, such as a tool permission prompt or an operation"
+         " in this window, and do not list them in your replies here: the requester decides them at review and asks the"
+         " owner where the owner's own ruling is needed."
+         " When the rule guard stops a protected file, do not ask the owner here either: submit the full candidate with its"
+         " SHA-256; the requester shows the file name and that SHA-256 to the owner in its own window and sends you the"
+         " owner's words and its session id, and you apply with the command the guard printed plus"
+         " `--owner-session claude:<the requester's session id> --quote '<the owner's words>'`."
+         " A change to CLAUDE.md / AGENTS.md, to permission settings or to hook or guard configuration is not applied on"
+         " another window's answer (an agent does not change those because another session asked): the requester applies"
+         " it in its own window, or, where it cannot, you ask the owner for it here."
+         " Ask the owner here only for what only this window can give: a tool permission prompt, or an operation"
          " the permission check holds until the owner approves it in this session."
          if surface=='desktop' else '')
     scope=(f" --project {project}" if project else '')+(f" --policy {policy}" if policy else '')

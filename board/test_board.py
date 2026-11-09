@@ -2060,6 +2060,11 @@ class LaunchCommandCLI(Transport):
             self.assertIn('Send questions of judgment, approval or acceptance to the requester',args['prompt'])   # the requester decides them at review
             self.assertIn('not to the owner in this window',args['prompt']); self.assertNotIn('Ask the owner for any approval',args['prompt'])
             self.assertIn('the permission check holds until the owner approves it in this session',args['prompt'])   # a relayed approval does not reach the worker's session
+            # a protected file the rule guard stops: the owner answers in the requester's window, the worker applies with that answer
+            self.assertIn("--owner-session claude:<the requester's session id> --quote '<the owner's words>'",args['prompt'])
+            self.assertIn('do not list them in your replies here',args['prompt'])   # one question in one window
+            self.assertIn("is not applied on another window's answer",args['prompt'])   # CLAUDE.md, permissions, config stay where the owner speaks
+            self.assertNotIn('guard.py',args['prompt'])   # the hand-off names no guard file (naming one in board.py would lock the whole file)
             os.environ['AGENT_BOARD_LAUNCH_SURFACE']='desktop'   # the owner's default chooses the surface as well
             out2=cli('request',*base,'--thread','2026-01-01-screen-b','--to','claude','--to-session','role-qproj-other')
             self.assertIn('desktop app の session として起こす',out2); self.assertNotIn('起動した',out2)

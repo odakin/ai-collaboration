@@ -909,8 +909,20 @@ python3 board_asks.py digest --root <board> --session S
   (a tool permission prompt, or an operation the permission check holds until the owner approves it in that session:
   an approval relayed from another session does not reach it = claude-config
   `conventions/claude-code-permissions.md#relayed-approval-does-not-reach`). Measured: a question put to the owner in two windows reached the owner twice, and a worker
-  that asked the owner in its own window was sent back to the requester. Approvals of protected files that the owner
+  that asked the owner in its own window was sent back to the requester. The worker also keeps its questions out of its
+  own replies (measured: the owner answered a question a worker listed in its window while the requester asked the same).
+  Approvals of protected files that the owner
   delegated to the reviewer role are not asked there either: the reviewer writes them ([#edit-approval](#edit-approval)).
+  The owner's own approval of a protected file is not asked in the worker's window: the worker submits the full candidate
+  with its SHA-256, the requester shows the file name and that SHA-256 to the owner in its own window and sends the
+  worker the owner's words and its session id, and the worker applies with the rule guard's `--owner-session` and
+  `--quote` (the guard reads the requester's transcript and checks that the reply the owner answered showed the file and
+  that SHA-256 = claude-config `conventions/agent-rule-ownership.md#approval`). Measured: the owner answered in the
+  requester's window and then had to give the same answer again in the worker's window. A change to CLAUDE.md /
+  AGENTS.md, to permission settings or to hook or guard configuration is not applied on another window's answer: an
+  agent does not change those because another session asked (measured: a worker declined on that ground), so the guard
+  refuses that route for them, and the requester applies them in its own window, or the worker asks the owner for them
+  in its window where the requester cannot.
   **`--surface agent`** is for work the requester runs as its own subagent (Agent tool), which
   the app does not list and which does not run its own closing sweep, so it suits only a small lookup, cross-check or
   recomputation whose result the requester uses directly; work that leaves files or findings behind (a policy, an
