@@ -582,7 +582,9 @@ python3 board_asks.py digest --root <board> --session S
   needs a ruling, an outbound message, the owner's own choice, a policy check before implementation, a fact only the
   owner knows). A change named by `--evidence` is judged by a validator (`BOARD_ASKS_VALIDATOR`) whatever the ground:
   a change that needs no ruling is refused with "apply it and report", including asks to ratify such a change after
-  the fact (measured). The validator runs outside the ledger's lock.
+  the fact (measured). The validator runs outside the ledger's lock and is given the asking session (the write-time
+  guard's net for rules the agent declined in that conversation reads it). When the write-time guard stops a change
+  the validator called free, `--denied '<the guard's reason>'` makes the ask and keeps the reason on it.
 - **An earlier answer comes first**: an ask whose key and text match a question the owner already answered is not
   made; the earlier answer (the owner's words) is printed instead (measured: the same questions were asked again in
   another window after the owner had answered them). The same key with another text is refused with the earlier

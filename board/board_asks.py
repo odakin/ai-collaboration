@@ -40,7 +40,8 @@ without either, Q.
 
 CLI:
     python3 board_asks.py ask      --root <board> --text '<question>' --recommend '<answer>' --ground <g> [--key K]...
-                                   [--evidence <repo>@<rev>:<path>] [--applied] [--reask '<what changed>'] [--project P] [--json]
+                                   [--evidence <repo>@<rev>:<path>] [--applied] [--denied '<guard's reason>']
+                                   [--reask '<what changed>'] [--project P] [--json]
     python3 board_asks.py answer   --root <board> --label H12 [--label …] --quote '<owner words>' --binding label|order|confirmed|guess
                                    [--reading '<one line>'] [--recorded <path or repo@commit>]
     python3 board_asks.py withdraw --root <board> --label H12 --reason '<why>'
@@ -253,9 +254,12 @@ def _validator():
     return HERE.parent.parent / 'claude-config' / 'scripts' / 'owner-ask-validate.py'
 
 
-def gate(ground, evidence=None, *, applied=False, validator=None):
+def gate(ground, evidence=None, *, applied=False, validator=None, session=None, denied=''):
     """(ok, message). ok=False = do not ask; the message says why and what to do instead. A change named by evidence is
-    judged whatever the ground (a rule change asked under another ground passes the same validator)."""
+    judged whatever the ground (a rule change asked under another ground passes the same validator). The asking session
+    goes to the validator (the write-time guard's refusal net reads that session). `denied` = the reason the write-time
+    guard gave when it stopped this very change: the validator's "no ruling needed" then does not refuse the ask (the two
+    disagree only where the validator cannot see what the guard saw), and the reason is kept on the ask."""
     if ground not in GROUNDS:
         return False, f'裁定が要る理由が無い・一覧に無い ({ground!r})。 理由 = {", ".join(GROUNDS)}。 どれでもなければ問わずに決めて報告する'
     if not evidence:
@@ -267,7 +271,8 @@ def gate(ground, evidence=None, *, applied=False, validator=None):
     v = Path(validator) if validator else _validator()
     if not v.exists():
         return True, f'⚠️ 判定の道具が無い ({v}) = 裁定の要否を確かめずに立てた'
-    args = [sys.executable, str(v), '--ground', kind, '--evidence', evidence] + (['--applied'] if applied else [])
+    args = ([sys.executable, str(v), '--ground', kind, '--evidence', evidence] + (['--applied'] if applied else [])
+            + (['--session', session] if session and session != 'unknown' else []))
     try:
         p = subprocess.run(args, capture_output=True, text=True, timeout=VALIDATOR_TIMEOUT)
         res = json.loads((p.stdout or '').strip().splitlines()[-1] if (p.stdout or '').strip() else '{}')
@@ -277,7 +282,12 @@ def gate(ground, evidence=None, *, applied=False, validator=None):
         return False, f'変更の在りかを判定できない: {res["error"]} (在りかを直して立て直す)'
     if 'ok' not in res:
         return True, f'⚠️ 判定の道具の出力が読めない = 裁定の要否を確かめずに立てた ({(p.stderr or "")[:200]})'
-    return bool(res['ok']), str(res.get('message') or '')
+    ok, msg = bool(res['ok']), str(res.get('message') or '')
+    if not ok and denied:
+        return True, f'書く時の守りが止めた: {denied[:300]} (判定の道具は「要らない」: {msg[:160]})'
+    if not ok:
+        msg += ' (当てた時に書く時の守りが止めたら、 止めた理由を --denied \'<理由>\' に写して立て直す)'
+    return ok, msg
 
 
 def _request_authors(root, request_id):
@@ -375,7 +385,8 @@ def ask(root, items, *, session=None, agent='claude', project='', path=None, val
     for it in items:
         kind, payload = _decide(root, st0, it, me)
         if kind == 'ask':
-            ok, msg = gate(payload.get('ground'), payload.get('evidence'), applied=bool(payload.get('applied')), validator=validator)
+            ok, msg = gate(payload.get('ground'), payload.get('evidence'), applied=bool(payload.get('applied')),
+                           validator=validator, session=me, denied=payload.get('denied') or '')
             note = payload.get('_note')
             msg = ' '.join(x for x in (msg, note) if x)
             pre.append(('ask', payload, ok, msg))
@@ -406,6 +417,7 @@ def ask(root, items, *, session=None, agent='claude', project='', path=None, val
             rec = {'type': 'ask', 'label': label, 'text': payload['text'], 'recommend': (payload.get('recommend') or '').strip()[:MAX_TEXT],
                    'ground': payload['ground'], 'keys': payload['keys'], 'evidence': payload.get('evidence') or '',
                    'applied': bool(payload.get('applied')), 'reask': payload.get('reask') or '', 'gate': msg,
+                   'denied': (payload.get('denied') or '')[:MAX_TEXT],
                    'session': me, 'agent': agent, 'project': project, 'created_at': now_iso()}
             new.append(rec)
             out.append({'status': 'made', 'label': label, 'text': rec['text'], 'recommend': rec['recommend'], 'message': msg})
@@ -944,6 +956,7 @@ def main(argv=None):
     ap.add_argument('--evidence', action='append', default=[])
     ap.add_argument('--applied', action='store_true')
     ap.add_argument('--reask', default='', help='同じ問いに本人の答えが既にあっても問い直す理由 (何が変わったか)')
+    ap.add_argument('--denied', default='', help='その変更を書く時の守りが止めた理由 (判定の道具が「要らない」 と言っても立てる)')
     ap.add_argument('--label', action='append', default=[])
     ap.add_argument('--quote', default='')
     ap.add_argument('--binding', default='label')
@@ -970,7 +983,7 @@ def main(argv=None):
             items = [{'text': t, 'recommend': a.recommend[i] if a.recommend else '',
                       'ground': a.ground[i] if len(a.ground) == n else a.ground[0], 'keys': a.key,
                       'evidence': (a.evidence[i] if len(a.evidence) == n else (a.evidence[0] if a.evidence else '')),
-                      'applied': a.applied, 'reask': a.reask} for i, t in enumerate(a.text)]
+                      'applied': a.applied, 'reask': a.reask, 'denied': a.denied} for i, t in enumerate(a.text)]
             res = ask(a.root, items, session=a.session, agent=a.agent, project=a.project)
             _print(res) if a.json else print(format_block(res))
             return 0 if any(r['status'] in ('made', 'reused') for r in res) else 3
@@ -1073,6 +1086,11 @@ def selftest():
             check(r5b[0]['status'] == 'refused', '変更の在りかがあれば理由に依らず判定の道具を通す')
             r5c = ask(None, [{'text': '在りかの誤り', 'ground': 'rule', 'evidence': 'r@HEAD:bad'}], session='s1', path=led, validator=stub)
             check(r5c[0]['status'] == 'refused' and '読めない' in r5c[0]['message'], '判定の道具の誤りを理由として返す')
+            r5d = ask(None, [{'text': '守りが止めた規則', 'ground': 'rule', 'evidence': 'r@HEAD:free', 'denied': '断った件の網'}],
+                      session='s1', path=led, validator=stub)
+            check(r5d[0]['status'] == 'made' and '書く時の守りが止めた' in r5d[0]['message'],
+                  '書く時の守りが止めた変更は、 判定の道具が要らないと言っても立てる')
+            check('--denied' in r5[0]['message'], '要らないと断る時は、 守りが止めた時の立て直し方を添える')
             r7 = ask(None, [{'text': '道具なし', 'ground': 'rule', 'evidence': 'r@HEAD:x'}], session='s1', path=led,
                      validator=Path(td) / 'missing.py')
             check(r7[0]['status'] == 'made' and r7[0]['message'].startswith('⚠️'), '判定の道具が無ければ立てて、 確かめていないと言う')
