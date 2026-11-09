@@ -36,6 +36,11 @@ board.json (format 1):
   (`--decided` / `--owner-ruling <ground>: …` / `--no-questions`); the engine adds the posts elsewhere that build on
   the request, and the reviewing window's count and compactions. A missing part is refused in one message naming
   `rule`. Absent = an accept needs one `--reference` only (the engine's default).
+
+Adding a field: `validate` refuses a field it does not know, and every command reads board.json from the remote, so a
+board.json that names a field newer than a machine's engine stops every board command on that machine until its
+engine is pulled (measured). Push the engine first, let the other machines pull it (their session start does), then
+add the field to board.json.
 """
 from __future__ import annotations
 
