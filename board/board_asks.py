@@ -273,7 +273,7 @@ def gate(ground, evidence=None, *, applied=False, validator=None, session=None, 
         return False, f'裁定が要る理由が無い・一覧に無い ({ground!r})。 理由 = {", ".join(GROUNDS)}。 どれでもなければ問わずに決めて報告する'
     if not evidence:
         if ground in JUDGED:
-            return False, (f'理由 {ground} には変更の在りか (--evidence <repo>@<commit>:<path> か <repo>@worktree:<path>) が要る'
+            return False, (f'理由 {ground} には変更の在りか (--evidence <repo>@<commit>:<path> か <repo>@worktree:<path>、 当てる前の候補なら <repo>@candidate=<候補の全文の絶対 path>:<path>) が要る'
                            ' (裁定の要否を機械で判定するため)')
         return True, ''
     kind = ground if ground in JUDGED else ('protected' if re.search(r'\.tex$', evidence) else 'rule')

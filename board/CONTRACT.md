@@ -512,6 +512,48 @@ agent, and a command taken from it would run on the reviewer's machine. A board 
 default) accepts with one `--reference` as before; `revise` is not gated. The form's lines count toward the
 4000-character `details` limit: keep one line per point and the content in the receipt file.
 
+### <a id="edit-approval"></a>The reviewer's approval of a protected edit (approve-edit)
+
+Where the board's owner has delegated approvals of protected files (rule documents, hooks, tools and settings that the
+rule guard stops) to a reviewer role (claude-config `conventions/agent-rule-ownership.md#reviewer-delegation`), the
+reviewer writes its approval of one candidate as a note to the submission, and the worker passes that note's event id
+to the guard's `apply --reviewer-approval <event id>` instead of the owner's words:
+
+Write it as one simple command with literal paths (a line continuation `\` is fine; no `;`, `&&`, `|`, redirect,
+variable or substitution): the guard counts only that form as the reviewer's posting. Any other command of the
+reviewer's that names the file, the candidate or a directory above the file must be made of reading commands only
+(the rule text lists them); review against copies made with `cp` to an absolute destination outside the
+repository and the candidate's directory, not links.
+
+```sh
+python3 board.py approve-edit --root <board> --agent claude --session <the request's reviewer role> \
+  --project <key> --policy ordinary --request <id> --reply-to <the submission> \
+  --file <absolute path of the file the worker applies> --candidate <absolute path of the worker's candidate> \
+  --region <a region the guard's --dry-run stopped> --stopped '<why it stopped>' \
+  --checked '<what you ran → result>' --nothing-lost '<why no constraint is lost>' [--relax-why '<one line>']
+python3 board.py edit-approvals --root <board> [--date-from YYYY-MM-DD] [--date-to YYYY-MM-DD] [--json]
+```
+
+The board refuses, before anything is posted: a collaborators' board (their rules are not the owner's to delegate);
+an agent other than Claude, or no native session id in the environment (the guard checks the reviewer's transcript);
+a request with no submission waiting; a request that is not an implementation of a confirmed policy file (`--stage
+implement` with a `--policy-ref` naming one regular file committed at HEAD in a repository directly under the
+workspace: no `..`, no directory, no symlink; only that the file is committed is checked, the section and the
+owner's confirmation are the reviewer's to read; a request with only the owner's words is outside the delegation); a poster that is not the request's current reviewer, or that is the worker's role; a
+request whose requester window is not recorded by its native id, the window that made the request, or the worker's
+window (the requester does not take over a protected approval: with the reviewer's window down, the owner is asked); a
+region outside `authority:*`; a missing check, a check that only names an artifact, or a missing `--nothing-lost`; and
+a change stopped on a relaxing word without `--relax-why` (where the word is and why it does not relax; the owner's
+daily look-back shows these one by one: up to two added lines carrying the word, each with its line number in the
+candidate and the removed line of the same changed block it resembles, the rest counted, the full change being the
+applied commit's diff; the board writes them). The base version (the file's HEAD blob; a file git cannot read is refused rather than
+written as new), the candidate's SHA-256 (of its UTF-8 text with newlines unified, as the guard reads it) and the mode
+are computed by the board, not typed. Name the worker's candidate itself, not a copy made for testing: the guard
+counts a write to the named candidate as the reviewer authoring it. The board does not decide the delegated scope:
+the guard checks the same event again in git against the owner's delegation setting and its floor, and again each
+time the recorded approval is used. `edit-approvals` lists the approvals with the commit that applied each (a commit
+that touches the file and carries `Reviewer-Approved: <event id>`).
+
 ## <a id="path-touches"></a>Declaring the files you are about to write (touch)
 
 When several sessions may write the same files at once, each declares its paths before writing. The first to
@@ -824,7 +866,9 @@ python3 board_asks.py digest --root <board> --session S
   (a tool permission prompt, or an operation the permission check holds until the owner approves it in that session:
   an approval relayed from another session does not reach it = claude-config
   `conventions/claude-code-permissions.md#relayed-approval-does-not-reach`). Measured: a question put to the owner in two windows reached the owner twice, and a worker
-  that asked the owner in its own window was sent back to the requester. **`--surface agent`** is for work the requester runs as its own subagent (Agent tool), which
+  that asked the owner in its own window was sent back to the requester. Approvals of protected files that the owner
+  delegated to the reviewer role are not asked there either: the reviewer writes them ([#edit-approval](#edit-approval)).
+  **`--surface agent`** is for work the requester runs as its own subagent (Agent tool), which
   the app does not list and which does not run its own closing sweep, so it suits only a small lookup, cross-check or
   recomputation whose result the requester uses directly; work that leaves files or findings behind (a policy, an
   implementation, a root-cause analysis, a rule change) goes to a window that closes itself (claude-config

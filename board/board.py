@@ -1066,6 +1066,216 @@ def review_form(a, events, cfg, ev):
     return text
 
 
+EDIT_APPROVAL_HEAD='edit-approval: 1'
+EDIT_APPROVAL_DOC='CONTRACT.md#edit-approval'
+_NATIVE_FULL=re.compile(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}')
+
+
+def _native8(actor):
+    """The 8-character native prefix behind an actor: its session id when native, else the head of its session name."""
+    sid=str((actor or {}).get('session_id') or '')
+    if _NATIVE_FULL.fullmatch(sid): return sid[:8]
+    head=str((actor or {}).get('task') or '').split(' ')[0]
+    return head[:8] if re.fullmatch(r'[0-9a-f]{8}[0-9a-f-]*',head) else ''
+
+
+def _git_out(cwd, *args):
+    r=subprocess.run(['git',*args],cwd=cwd,capture_output=True,timeout=30)
+    return r.returncode,r.stdout
+
+
+def _excerpt(old, new, term='', limit=200):
+    """Before → after for the owner's look-back: the added lines that carry the relaxing word `term` (the guard's stop
+    reason names it), each with its line number in the candidate and the removed line of the same changed block it most
+    resembles; without the word in any added line, the first changed blocks. At most two are shown; the rest are
+    counted and the full change is the applied commit's diff. Lines come from the line matching itself, not from diff
+    text (measured, blind review: a source line starting with `+++` was dropped as a diff header). A cut shows '…'."""
+    import difflib
+    a,b=old.splitlines(),new.splitlines()
+    rows=[]   # (line number in the candidate, added line or '', removed lines of the same block)
+    for tag,i1,i2,j1,j2 in difflib.SequenceMatcher(None,a,b).get_opcodes():
+        if tag=='equal': continue
+        rms=[x.strip() for x in a[i1:i2] if x.strip()]
+        adds=[(j+1,b[j].strip()) for j in range(j1,j2) if b[j].strip()]
+        rows+=[(no,x,rms) for no,x in adds] or [(j1+1,'',rms)]
+    hits=[r for r in rows if term and r[1] and term in r[1]]
+    chosen=hits or rows
+    extra=f' (ほか {len(chosen)-2} か所 = 全体は当てた commit の diff)' if len(chosen)>2 else ''
+    chosen=chosen[:2]
+    before=[((difflib.get_close_matches(x,rms,n=1,cutoff=0.3) or rms[:1]) if x else rms[:1])[0]
+            if rms else '(新しい行)' for _,x,rms in chosen]
+    room=max(40,limit//max(1,len(chosen)))
+    def clip(s):
+        # 1 行ずつ切る (行の番号は切る窓の外に置く = 盲検の実測: 全体をつないでから切ると、 行の番号が落ちた)
+        if len(s)<=room: return s
+        at=s.find(term) if term else -1
+        start=max(0,min(at-room//3,len(s)-room)) if at>=0 else 0   # 長い行でも緩めの語が見える窓で切る
+        return ('…' if start else '')+s[start:start+room]+('…' if start+room<len(s) else '')
+    after=[f'L{no} '+(clip(x) if x else '(消しただけ)') for no,x,_ in chosen]
+    return ' / '.join(clip(x) for x in before) or '(なし)',(' / '.join(after) or '(なし)')+extra
+
+
+def _policy_problem(base, ref):
+    """The request's policy file must be one regular file committed at HEAD in a repository directly under the work
+    root: the same reading as the rule guard (measured, blind review: `../plans/x.md` named a repository outside the
+    work root, and `plans/` was read as the first file under the directory). Only that the file is committed is
+    checked; its section and the owner's confirmation are the reviewer's to read. '' when it is."""
+    ref=ref.split('#',1)[0]; rn,_,rest=ref.partition('/')
+    repo=Path(base)/rn
+    if (not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]*',rn) or not rest or any(p in ('','.','..') for p in rest.split('/'))
+            or repo.resolve().parent!=Path(base).resolve() or not (repo/'.git').exists()):
+        return f'方針の在りか {ref} が作業ルートの直下の repo の file の path でない'
+    rc,out=_git_out(repo,'ls-tree','-z','HEAD','--',rest)
+    if rc: return f'方針の在りか {ref} を git で読めない'
+    entries=[e for e in out.decode('utf-8','replace').split('\0') if e]
+    if not entries:
+        return f'方針の file {ref} が作業ルートの repo の HEAD に無い (無い方針の file は確認済みの方針にならない)'
+    meta,_,path=entries[0].partition('\t')
+    if len(entries)!=1 or path!=rest or meta.split()[:2] not in (['100644','blob'],['100755','blob']):
+        return f'方針の在りか {ref} が普通の file でない (dir・symlink は確認済みの方針にならない)'
+    return ''
+
+
+def edit_approval_details(a, events, cfg, ev):
+    """approve-edit (CONTRACT.md#edit-approval): the reviewer's approval of one protected file's candidate, written as a
+    note to the submission, for the worker to pass to the rule guard instead of the owner's words. Refused unless the
+    board is the owner's board, the request is an implementation of a confirmed policy, the poster is the request's
+    reviewer (not its worker) in a native Claude session other than the requester's and the worker's, and every field
+    is there: the file, its base version (HEAD blob) and the candidate's SHA-256 and mode are computed here, not typed.
+    The guard checks the same event again (in git) against the owner's delegation; the board does not decide the scope.
+    Returns the details text."""
+    problems=[]
+    if cfg.get('audience')!='owner' or a.policy!='ordinary':
+        raise ValueError('approve-edit は owner の掲示板の ordinary の投稿だけ (共同研究の掲示板の規則は委任の外)')
+    if a.agent!='claude':
+        problems.append('承認を書くのは Claude の検収係の窓 (守りの道具が会話記録で書いた session を確かめる)')
+    native=(os.environ.get('CLAUDE_CODE_SESSION_ID') or '').strip()
+    if not _NATIVE_FULL.fullmatch(native):
+        problems.append('CLAUDE_CODE_SESSION_ID (この窓の native session id) が無い = 書いた窓を記録できない')
+    req=next((e for e in events if e['event_id']==a.request and e['kind']=='request'),None)
+    same=[e for e in events if req and e['project']['key']==req['project']['key'] and e['thread_id']==req['thread_id']]
+    st=reduce_workflow(same,view.now_utc())
+    me={'agent':a.agent,'session_id':a.session}
+    if st['status']!='submitted' or not st['submission']:
+        raise ValueError('approve-edit は提出 (submit) が検収を待っている依頼にだけ書く (受け取りの前に、 当ててよい候補を承認する)')
+    sub=st['submission']
+    if a.reply_to and a.reply_to!=sub['event_id']:
+        problems.append(f"--reply-to は検収を待っている提出 {sub['event_id']}")
+    if not same_session(me,st['reviewer']):
+        problems.append(f"承認を書けるのはその依頼の検収役 (--session {st['reviewer']['session_id']})")
+    if same_session(me,st['assigned_to']):
+        problems.append('worker の役では承認を書かない (書いた者と確かめる者を別にする)')
+    req8=_native8(req['actor'])
+    if not req8:
+        problems.append('依頼を出した窓の native session が依頼に無い = 承認を書く窓と別だと確かめられない (本人に聞く)')
+    elif native and native[:8]==req8:
+        problems.append('依頼を出した窓 (指揮役) は守られた file の承認を代わらない = 検収係の窓が落ちていれば本人に聞く')
+    claim=st.get('claim') or {}
+    if native and native[:8]==_native8(claim.get('actor') or {}):
+        problems.append('依頼を引き受けた worker の窓では承認を書かない')
+    rd=req.get('details') or ''
+    pref=re.search(r'^policy-ref: (.+)$',rd,re.M); pq=re.search(r'^policy-quote: (.+)$',rd,re.M)
+    if not re.search(r'^policy-stage: implement$',rd,re.M) or not pref:
+        problems.append('依頼が実装の段 (--stage implement) で、 確認済みの方針の file (--policy-ref) を持たない = 本人に聞く'
+                        ' (本人の発言だけの依頼は委任の外)')
+    else:
+        why=_policy_problem(touch_base(getattr(a,'root',None)),pref.group(1).strip())
+        if why: problems.append(why)
+    f=Path(os.path.expanduser(a.file or '')) if a.file else None
+    cp=Path(os.path.expanduser(a.candidate or '')) if a.candidate else None
+    if not f or not f.is_absolute(): problems.append('--file <当てる file の絶対 path> が無い')
+    if not cp or not cp.is_absolute() or not cp.is_file(): problems.append('--candidate <候補の全文の絶対 path> が無い')
+    regions=[r.strip() for r in (a.region or []) if r and r.strip()]
+    if not regions or not all(re.fullmatch(r'authority:[A-Za-z0-9._~-]+',r) for r in regions):
+        problems.append('--region <守りの道具の --dry-run が出した領域 (authority:…)> が無い (原稿の領域は委任の外)')
+    stopped=(a.stopped or '').strip()
+    if not stopped: problems.append('--stopped <守りの道具が止めた理由 (--dry-run の出力の要点)> が無い')
+    checked=[c.strip() for c in (a.checked or []) if c and c.strip()]
+    if not checked: problems.append("--checked '<回した確かめ → 結果>' が 1 つも無い (止めた例を候補に当て直す・止める文を前後で並べる・設定の差分が足すだけかを見る)")
+    problems+=[f"--checked「{c[:60]}」 は commit・file・link を指すだけ = 何を回したかと結果を書く" for c in checked if _REF_ONLY_RE.fullmatch(c)]
+    lost=(a.nothing_lost or '').strip()
+    if not lost: problems.append("--nothing-lost '<失う制約が無い理由 1 行>' が無い")
+    relax_why=(a.relax_why or '').strip()
+    if '緩和の語' in stopped and not relax_why:
+        problems.append("緩めの語で止まった変更 = --relax-why '<その語の位置と、 なぜ緩めでないか 1 行>' が要る (本人の見返しに 1 件ずつ出る)")
+    if problems:
+        raise ValueError(f'approve-edit の欄が足りない (規則 = {EDIT_APPROVAL_DOC}):\n  - '+'\n  - '.join(problems))
+    if f.parent.is_dir(): f=f.parent.resolve()/f.name   # the same spelling git prints (/var → /private/var); the file itself is not followed
+    rc,top=_git_out(f.parent if f.parent.is_dir() else Path.home(),'rev-parse','--show-toplevel')
+    if rc or not top.strip(): raise ValueError(f'--file {f} が git repo の中に無い')
+    top=Path(top.decode().strip()); rel=os.path.relpath(f,top).replace(os.sep,'/')
+    # HEAD に無い (新しい file) と git で読めないを分ける (読めないのに 'none' と書くと、 守りの道具の側の読めないと一致して通る)
+    rc,lt=_git_out(top,'ls-tree','HEAD','--',rel)
+    parts=lt.decode().split('\n',1)[0].split('\t',1)[0].split()
+    if rc: raise ValueError(f'{top.name}/{rel} の基準の版 (HEAD) を git で読めない')
+    blob=parts[2] if len(parts)==3 else 'none'
+    # 守りの道具が当てる時と同じ読み方 (UTF-8 の text、 改行を揃える) の hash = CRLF の候補でも同じ値になる (盲検の実測)
+    data=cp.read_text(encoding='utf-8').encode('utf-8')
+    sha=hashlib.sha256(data).hexdigest()
+    mode=a.target_mode or ('100755' if os.access(f if f.exists() else cp,os.X_OK) else '100644')
+    lines=[EDIT_APPROVAL_HEAD,f"request: {req['event_id']}",f"submit: {sub['event_id']}",f'reviewer-native: {native}',
+           f"worker-role: {st['assigned_to']['session_id']}",f'repo: {top.name}',f'file: {rel}',f'candidate: {cp}',
+           f'base-blob: {blob}',f'candidate-sha256: {sha}',f'mode: {mode}',f"regions: {' '.join(regions)}",
+           f'stopped: {stopped}',*(f'check: {c}' for c in checked),f'nothing-lost: {lost}',
+           f"policy: {pref.group(1).strip()}"+(f" (本人の発言: {pq.group(1).strip()[:80]})" if pq else '')]
+    if relax_why:
+        rc,old=_git_out(top,'cat-file','--filters',f'HEAD:{rel}')
+        m=re.search(r'緩和の語「([^」]+)」',stopped)
+        before,after=_excerpt(old.decode('utf-8','replace') if rc==0 else '',data.decode('utf-8','replace'),
+                              m.group(1) if m else '')
+        lines+=[f'relax-why: {relax_why}',f'before: {before}',f'after: {after}']
+    text='\n'.join(lines)
+    if len(text)>4000:
+        raise ValueError(f'approve-edit の欄が長すぎる ({len(text)} 字 > 4000): 確かめの中身は結果の file に書き、 ここは 1 行ずつの要点に')
+    print(f"✅ worker に 1 行: この event を守りの道具の apply に --reviewer-approval で渡して当てる (file = {top.name}/{rel})",
+          file=sys.stderr)
+    return text
+
+
+def edit_approvals(events, since=None, until=None):
+    """The reviewer's edit approvals (newest last) as rows, from the board's notes."""
+    rows=[]
+    for e in events:
+        d=e.get('details') or ''
+        if e.get('kind')!='note' or not d.startswith(EDIT_APPROVAL_HEAD+'\n'): continue
+        day=str(e.get('created_at') or '')[:10]
+        if (since and day<since) or (until and day>until): continue
+        f={}
+        for ln in d.splitlines()[1:]:
+            k,sep,v=ln.partition(': ')
+            if sep: f.setdefault(k,[]).append(v)
+        one=lambda k:(f.get(k) or [''])[0]
+        rows.append({'event_id':e['event_id'],'created_at':e.get('created_at'),'reviewer':(e.get('actor') or {}).get('session_id'),
+                     'repo':one('repo'),'file':one('file'),'checks':f.get('check') or [],'relax_why':one('relax-why'),
+                     'before':one('before'),'after':one('after'),'request':one('request')})
+    return sorted(rows,key=lambda r:str(r['created_at']))
+
+
+def cmd_edit_approvals(a):
+    """edit-approvals: the reviewer's approvals of protected files, one line each (file, the change's checks, the
+    reviewer, the commit that applied it = a commit message with `Reviewer-Approved: <event id>`)."""
+    root=bc.resolve(a.root,a.board)
+    events=read(root)
+    rows=edit_approvals(events,since=a.date_from,until=a.date_to)
+    ws=touch_base(root)
+    for r in rows:
+        repo=Path(ws)/r['repo']
+        # その file に触れた commit のうち、 trailer がこの承認を名指すもの (file で絞らないと別の commit の文を拾う)
+        rc,out=_git_out(repo,'log','--all','-n','1','--format=%h','--grep',f"^Reviewer-Approved: {r['event_id']}$",
+                        '--',r['file']) if repo.is_dir() and r['file'] else (1,b'')
+        r['commit']=out.decode().strip() if rc==0 else ''
+    if a.json:
+        print(json.dumps(rows,ensure_ascii=False,indent=2)); return
+    if not rows:
+        print('検収係が承認した保護された file の変更はありません'+(f' ({a.date_from} から)' if a.date_from else '')); return
+    for r in rows:
+        mark=' ⚠️ 緩めの語' if r['relax_why'] else ''
+        print(f"{str(r['created_at'])[:16]}Z {r['repo']}/{r['file']} — 検収係 {r['reviewer']} · 確かめ {len(r['checks'])}"
+              f" · {'当てた ' + r['commit'] if r['commit'] else 'まだ当てていない'}{mark} ({r['event_id']})")
+        if r['relax_why']:
+            print(f"    前「{r['before']}」 → 後「{r['after']}」 (検収係の理由: {r['relax_why']})")
+
+
 def event_from(a, events):
     restricted=a.policy=='encrypted-metadata-only'
     if a.command=='request' or (a.command=='note' and not a.request):
@@ -2120,7 +2330,7 @@ def inbox_show(a, root, *, board_name=None, collect=None):
 
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('command',choices=sorted(KINDS|{'inbox','show','retry','sessions','watch','touch','untouch','touching','boards','init','launch','pickup'}))
+    ap.add_argument('command',choices=sorted(KINDS|{'inbox','show','retry','sessions','watch','touch','untouch','touching','boards','init','launch','pickup','approve-edit','edit-approvals'}))
     ap.add_argument('--root',type=Path,help='the board directory (holds board.json and events/)')
     ap.add_argument('--board',help='a board in the workspace by name (`boards` lists them)')
     ap.add_argument('--all-boards',action='store_true',help='inbox / show: every unlocked board in the workspace')
@@ -2209,10 +2419,26 @@ def main():
                     help='watch: event kind that does not end the watch (repeatable, e.g. note); shown with the next waking event')
     ap.add_argument('--path',action='append',default=[],help='touch / untouch / touching: a file or directory below the workspace (repeatable; relative = from the workspace)')
     ap.add_argument('--hours',type=float,default=12,help='touching: declarations older than this no longer hold a path (a session that died)')
+    # approve-edit (CONTRACT.md#edit-approval) / edit-approvals
+    ap.add_argument('--file',help='approve-edit: the protected file the worker applies (absolute path)')
+    ap.add_argument('--candidate',help='approve-edit: the full text the worker applies (absolute path); its SHA-256 is written')
+    ap.add_argument('--region',action='append',default=[],help='approve-edit: a region the rule guard\'s --dry-run stopped (authority:…; repeatable)')
+    ap.add_argument('--stopped',help='approve-edit: why the guard stopped the change (the gist of its --dry-run output)')
+    ap.add_argument('--nothing-lost',help='approve-edit: one line on why no constraint is lost')
+    ap.add_argument('--relax-why',help='approve-edit: for a change stopped on a relaxing word, where the word is and why it does not relax')
+    ap.add_argument('--target-mode',choices=['100644','100755'],help='approve-edit: the mode the worker applies (default: the file\'s, or the candidate\'s for a new file)')
+    ap.add_argument('--date-from',help='edit-approvals: first day (YYYY-MM-DD, UTC)')
+    ap.add_argument('--date-to',help='edit-approvals: last day (YYYY-MM-DD, UTC)')
     ap.add_argument('--wait',action='store_true',help='touching --path: return only when no earlier session holds the paths (background)')
     a=ap.parse_args()
     if a.command=='boards': return cmd_boards(a)
     if a.command=='init': return cmd_init(a,ap)
+    if a.command=='edit-approvals': return cmd_edit_approvals(a)
+    edit_cmd=a.command=='approve-edit'   # CONTRACT.md#edit-approval: a note to the submission, built and gated below
+    if edit_cmd:
+        if not a.request: ap.error('approve-edit needs --request (the request whose submission you reviewed)')
+        a.command='note'
+        a.summary=a.summary or f"保護された file の承認 (検収係): {Path(a.file or '?').name}"
     if not a.agent: ap.error('--agent is required')
     if not a.session and a.agent=='codex': a.session=os.environ.get('CODEX_THREAD_ID')
     if not a.session and a.agent=='claude': a.session=os.environ.get('CLAUDE_CODE_SESSION_ID')  # native UUID the harness exports (desktop + CLI)
@@ -2466,6 +2692,9 @@ def main():
             a.touch=new or [NONE_TOUCH]; a.command='note'
         try:
             ev=event_from(a,events)
+            if edit_cmd:
+                ev['details']=edit_approval_details(a,events,cfg,ev)
+                ev['reply_to']=ev.get('reply_to') or re.search(r'^submit: (\S+)$',ev['details'],re.M).group(1)
             if ev['kind']=='accept' and a.policy=='ordinary' and cfg.get('accept_review_form'):
                 ev['details']=review_form(a,events,cfg,ev)
             view.assert_writable(events, ev['project']['key'], ev['thread_id'], ev['event_id'])

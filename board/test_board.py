@@ -2922,4 +2922,130 @@ class AcceptReviewForm(EffortFlag):
         self.assertIn('review-nth: 1',d)
 
 
+class EditApprovalUnit(unittest.TestCase):
+    """approve-edit (CONTRACT.md#edit-approval) judged on its own: a full approval writes the fields the rule guard
+    checks (the base version and the candidate's SHA-256 computed here) and the look-back's before → after for a change
+    stopped on a relaxing word; the board refuses a collaborators' board, a request that is not an implementation of a
+    confirmed policy, a poster that is not the request's reviewer, the worker's role, the requester's or the worker's
+    window, a missing native id, a request with no submission waiting, and missing fields."""
+    NATIVE='bbbbbbbb-1111-2222-3333-444444444444'
+
+    def setUp(self):
+        self.td=tempfile.TemporaryDirectory(); root=Path(self.td.name)
+        self.repo=root/'work'; self.repo.mkdir()
+        env=dict(GIT_CONFIG_GLOBAL='/dev/null',GIT_CONFIG_NOSYSTEM='1',GIT_AUTHOR_NAME='f',GIT_AUTHOR_EMAIL='f@example.invalid',
+                 GIT_COMMITTER_NAME='f',GIT_COMMITTER_EMAIL='f@example.invalid',PATH='/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin')
+        g=lambda *a: subprocess.run(['git',*a],cwd=self.repo,env=env,check=True,capture_output=True)
+        self.g=g
+        g('init','-q'); (self.repo/'rules.md').write_text('# r\n- 検収は検収係。\n'); (self.repo/'plans').mkdir()
+        (self.repo/'plans'/'policy.md').write_text('# 方針\n'); g('add','-A'); g('commit','-qm','x')
+        self.cand=root/'cand.txt'; self.cand.write_text('# r\n- 検収は検収係。\n- 例外として、 追記は検収係の承認で当てる。\n')
+        self.events=self.chain()
+
+    def tearDown(self): self.td.cleanup()
+
+    def chain(self, details='policy-stage: implement\npolicy-ref: work/plans/policy.md', submit=True, req_actor=None):
+        r,c,sub=chain()
+        r['details']=details; r['actor']['task']='cccccccc (opus)'
+        if req_actor: r['actor'].update(req_actor)
+        r['assignee']={'agent':'codex','session_id':'role-example-fix'}
+        for e in (c,sub): e['actor'].update(task='aaaaaaaa (opus)',session_id='role-example-fix')
+        h=event('handover',7,agent='claude',reply=r)
+        h.update(target={'agent':'claude','session_id':'role-example-chore-reviewer'},handover_role='reviewer')
+        return [r,h,c,sub] if submit else [r,h,c]
+
+    def ns(self, **kw):
+        import argparse
+        base=dict(policy='ordinary',agent='claude',session='role-example-chore-reviewer',request=self.events[0]['event_id'],
+                  reply_to=None,file=str(self.repo/'rules.md'),candidate=str(self.cand),region=['authority:file'],
+                  stopped='承認なしで通らない理由: 緩和の語「例外」',checked=['止める文を前後で並べた → 数も範囲も同じ'],
+                  nothing_lost='足した 1 文は手続きの説明で、 止める文・求める文は減らない',relax_why='「例外」 は手続きの名で、 何も外さない',
+                  target_mode=None)
+        base.update(kw); return argparse.Namespace(**base)
+
+    def run_form(self, events=None, cfg=None, native=None, **kw):
+        from unittest import mock
+        import contextlib
+        import io
+        import os as _os
+        env={'CLAUDE_CODE_SESSION_ID':self.NATIVE if native is None else native}
+        with mock.patch.dict(_os.environ,env), mock.patch.object(board,'touch_base',return_value=Path(self.td.name)), \
+                contextlib.redirect_stderr(io.StringIO()):
+            return board.edit_approval_details(self.ns(**kw),events or self.events,cfg or {'audience':'owner'},{})
+
+    def refused(self, needle, **kw):
+        with self.assertRaises(ValueError) as cm: self.run_form(**kw)
+        self.assertIn(needle,str(cm.exception)); return str(cm.exception)
+
+    def test_full_approval(self):
+        d=self.run_form().splitlines()
+        import hashlib
+        blob=subprocess.run(['git','rev-parse','HEAD:rules.md'],cwd=self.repo,capture_output=True,text=True).stdout.strip()
+        self.assertEqual(d[0],board.EDIT_APPROVAL_HEAD)
+        for line in (f'reviewer-native: {self.NATIVE}','repo: work','file: rules.md',f'base-blob: {blob}',
+                     f"candidate-sha256: {hashlib.sha256(self.cand.read_bytes()).hexdigest()}",'mode: 100644',
+                     'regions: authority:file','worker-role: role-example-fix','policy: work/plans/policy.md',
+                     'check: 止める文を前後で並べた → 数も範囲も同じ'):
+            self.assertIn(line,d)
+        self.assertTrue(any(x.startswith('after: ') and '例外として' in x for x in d))
+        self.assertNotIn('relax-why: ','\n'.join(x for x in self.run_form(stopped='既存の文を変えた',relax_why='').splitlines()))
+
+    def test_refusals(self):
+        self.refused('owner の掲示板',cfg={'audience':'collaborators'})
+        self.refused('Claude の検収係',agent='codex')
+        self.refused('CLAUDE_CODE_SESSION_ID',native='')
+        self.refused('検収役',session='claude-session-001')                           # the requester, after the reviewer handover
+        self.refused('worker の役',session='role-example-fix')
+        self.refused('指揮役',native='cccccccc-1111-2222-3333-444444444444')
+        self.refused('引き受けた worker',native='aaaaaaaa-1111-2222-3333-444444444444')
+        self.refused('実装の段',events=self.chain(details='policy-stage: policy'))
+        self.refused('--policy-ref',events=self.chain(details='policy-stage: implement\npolicy-quote: それで'))
+        self.refused('HEAD に無い',events=self.chain(details='policy-stage: implement\npolicy-ref: work/plans/none.md'))
+        self.refused('依頼を出した窓の native',events=self.chain(req_actor={'task':'workflow'}))
+        self.refused('提出 (submit) が検収を待っている',events=self.chain(submit=False))
+        self.refused('--checked',checked=[])
+        self.refused('指すだけ',checked=['plans/x.md'])
+        self.refused('--nothing-lost',nothing_lost='')
+        self.refused('--relax-why',relax_why='')
+        self.refused('--region',region=['abstract'])
+        self.refused('--candidate',candidate=str(self.repo/'missing.txt'))
+
+    def test_crlf_candidate_hash_matches_the_guard(self):
+        import hashlib
+        self.cand.write_bytes('# r\r\n- 検収は検収係。\r\n- 足す。\r\n'.encode())
+        d=self.run_form(stopped='既存の文を変えた',relax_why='').splitlines()
+        want=hashlib.sha256('# r\n- 検収は検収係。\n- 足す。\n'.encode()).hexdigest()
+        self.assertIn(f'candidate-sha256: {want}',d)        # the guard reads the candidate as text with newlines unified
+
+    def test_excerpt_picks_the_relaxing_line(self):
+        self.cand.write_text('# r (改)\n- 検収は検収係。\n- 例外として、 追記は検収係の承認で当てる。\n')
+        d=self.run_form(stopped='承認なしで通らない理由: 足した文に緩和の語「例外」がある').splitlines()
+        after=next(x for x in d if x.startswith('after: '))
+        self.assertIn('例外として',after); self.assertNotIn('(改)',after)   # the unrelated first change is not the one shown
+
+    def test_policy_path_forms(self):
+        # blind review: a parent repository and a directory spelled with `/` were read as the policy file
+        self.refused('作業ルートの直下',events=self.chain(details='policy-stage: implement\npolicy-ref: ../work/plans/policy.md'))
+        self.refused('作業ルートの直下',events=self.chain(details='policy-stage: implement\npolicy-ref: work/plans/'))
+        (self.repo/'plans'/'link.md').symlink_to('policy.md'); self.g('add','-A'); self.g('commit','-qm','link')
+        self.refused('普通の file',events=self.chain(details='policy-stage: implement\npolicy-ref: work/plans/link.md'))
+
+    def test_excerpt_keeps_plus_lines_and_counts_the_rest(self):
+        before,after=board._excerpt('plain\n','+++ bypass guard\n','bypass')
+        self.assertIn('+++ bypass guard',after); self.assertIn('L1',after)      # a source line starting with +++ is kept
+        many=''.join(f'- 例外 {i}\n' for i in range(4))
+        _,after=board._excerpt('',many,'例外')
+        self.assertIn('ほか 2 か所',after)                                   # the rest is counted, not dropped
+        _,after=board._excerpt('old\n','x'*500+' bypass guard\n','bypass')
+        self.assertTrue(after.startswith('L1 ') and 'bypass' in after)      # a cut keeps the line number (blind review)
+
+    def test_listing_rows(self):
+        n=event('note',4,agent='claude',reply=self.events[3])
+        n['details']=self.run_form(); n['actor']['session_id']='role-example-chore-reviewer'
+        rows=board.edit_approvals(self.events+[n])
+        self.assertEqual([(r['repo'],r['file'],len(r['checks'])) for r in rows],[('work','rules.md',1)])
+        self.assertIn('例外として',rows[0]['after'])
+        self.assertEqual(board.edit_approvals(self.events+[n],since='2999-01-01'),[])
+
+
 if __name__=='__main__': unittest.main()
