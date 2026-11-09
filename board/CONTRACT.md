@@ -321,6 +321,12 @@ project, thread, person, result or path in a commit subject or branch name.
   `event_id=<id>` and before `posted`, so the event stays in the outbox and never lands, while the output looks like a
   post (measured: two posts went missing this way and other sessions' `touching` did not see the declaration). Check
   for the `posted` line, and `retry --event-id` the saved event with the same identity, policy and `--project`.
+  A `request` whose post fails stops there: its follow-ups (the reviewer handover from `--reviewer`, the launch
+  arguments, the watch line) are neither posted nor printed, and `retry` posts only the saved request (measured: the
+  reviewer of a retried request was missing until the requester noticed). After retrying a request, read it with
+  `show --request <id> --sync`; if `--reviewer` was given and no reviewer handover follows the request, post it with
+  `handover --project <key> --thread <thread> --request <id> --role reviewer --to <agent> --to-session <reviewer>
+  --summary '…'`, and if the request went to a role with no live window, start it with `launch --request <id>`.
 
 ## <a id="request-and-receipt-workflow-v2"></a>Request and receipt workflow (v2)
 
