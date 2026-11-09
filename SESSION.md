@@ -74,7 +74,7 @@ owner 専用の掲示板から engine を移し、 共同研究の repo に層2 
 
 ## 現在地：封じた sandbox の回収
 
-`make-review-sandbox.py collect` は規則の外に書かれた file も `outside-rules/` に写し、 sandbox の外の台帳に回収を残す。 未回収と回収の後に書き足された sandbox は `status`、 回収しない sandbox は `close --reason` ([規約](conventions/cold-eyes-isolation.md#collect-everything-written))。 未確認 = 雛形の規則 4 (一時 file も scratch に) に Claude の reviewer が従うか: 締めの headless の行が worker の記録の scratchpad への書き込みを数えるので、 次の盲検の受領の締めで出る。
+`make-review-sandbox.py collect` は規則の外に書かれた file も `outside-rules/` に写し、 sandbox の外の台帳に回収を残す。 未回収と回収の後に書き足された sandbox は `status`、 回収しない sandbox は `close --reason` ([規約](conventions/cold-eyes-isolation.md#collect-everything-written))。 受け取りの `inspect-review-sandbox.py receipt` は Codex アプリの rollout も読む (`--codex-rollout` / `--codex-launch`、 [規約](conventions/cold-eyes-isolation.md#codex-rollout-receipt))。 未確認 = 雛形の規則 4 (一時 file も scratch に) に Claude の reviewer が従うか: 締めの headless の行が worker の記録の scratchpad への書き込みを数えるので、 次の盲検の受領の締めで出る。
 
 ## 現在地：Codex の worker に作業 dir の外の書き込み dir を渡す
 
