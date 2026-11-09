@@ -8,6 +8,12 @@ Codex の書き込みは SendMessage で届かないので、 Claude 側の Stop
 `GET /due` の `waiting_event` で、 拾わない行も番の session に 1 行知らせられる ([契約](board/CONTRACT.md#viewer-handoff-queue))。
 次 = 既存の送り忘れの検査 (observe のまま) を block に上げるかを、 observe の記録で決める。
 
+## 現在地：request の完了条件の頁数・overfull の注意
+
+`request` の `--acceptance` に値の無い頁数か overfull があると、 書いた側に 1 行の注意を出す (止めない、 どの掲示板でも。
+[契約](board/CONTRACT.md#acceptance-value-check)、 規則 = [組版の関門](conventions/edit-intent-record.md#page-count-not-a-gate))。
+次 = 規則そのものを語る request (この注意の話をする依頼) にも出る誤検出が、 実際の依頼で邪魔になるかを見る。 邪魔なら判定 (`board/board_acceptance.py`) を絞る。
+
 ## 現在地：掲示板の viewer と引き受けの印
 
 viewer は状態別の一覧 + 詳細の 2 画面 ([考え方](board/DESIGN.md#viewer))。 番が役割に回った依頼を受付へ渡すボタンと `GET /due` は
