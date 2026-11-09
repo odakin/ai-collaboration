@@ -234,8 +234,9 @@ def snapshot(root, fresh=False, optimistic=False):
     """The board as the remote holds it now, as a read-only board directory (board.json + events/) that `read` reads.
 
     Default transport (board_transport): one `git fetch`, then the fetched commit's tree as a persistent directory
-    built once per machine from the blob cache (each event decrypted once, hard-linked) — seconds, independent of the
-    board's size. `fresh=True` forces a new fetch (a rejected push); otherwise a fetch younger than FRESH_S in this
+    built once per machine from the blob cache (each event decrypted once, hard-linked; one process builds a commit
+    while the others wait for it) — seconds, growing with the number of events (about 4 CPU seconds for ~5,700,
+    measured). `fresh=True` forces a new fetch (a rejected push); otherwise a fetch younger than FRESH_S in this
     process is reused, and with `optimistic=True` so is a branch head this machine fetched or pushed within
     OPTIMISTIC_S (posts: the push rejects a stale base, and the caller then reads fresh — one round trip saved on
     every post while a watch or a recent post keeps the machine current). Synchronized reads (`--sync`) never pass

@@ -129,7 +129,11 @@ board (each read builds the commit's tree of hard links) costs tens of CPU secon
 without fetching again (the machine's `last-fetch` stamp, shared by its processes; a running `watch` keeps it young)
 and pushes; a rejected push proves the base stale, and only then does it fetch and revalidate. Reads asked for
 explicitly (`--sync`) always fetch. The materialised board of a commit is kept under the cache and hard-linked from
-the blob cache, so the second reader of a commit pays nothing. After a push the poster also touches the `last-push`
+the blob cache, so a later reader of a commit pays only the read. One process builds it at a time (one lock per
+board cache), and a reader that arrives during the build waits for that build: measured, readers that met a new
+commit at once (claims, posts, every session's Stop hook) each built it, five at a time, and three builds at once
+cost each about twice one alone. The wait has a limit (`AGENT_BOARD_BUILD_WAIT_S`, default the git timeout), after
+which the reader builds alone, so a stuck holder blocks nobody. After a push the poster also touches the `last-push`
 note on the machines named in `AGENT_BOARD_NOTIFY_HOSTS` over ssh (background, fail-silent), so their watches wake
 within seconds rather than at the next remote check. What remains is the SSH handshake itself; an ssh
 `ControlMaster` for the host is the owner's wiring, not the engine's.

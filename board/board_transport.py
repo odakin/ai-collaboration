@@ -31,7 +31,10 @@ Codex: inside its sandbox there is no network, so fetch and push fail there exac
 """
 from __future__ import annotations
 
+import contextlib
+import errno
 import hashlib
+import math
 import os
 import shutil
 import subprocess
@@ -53,6 +56,8 @@ LAST_FETCH_FILE = 'last-fetch'   # when this machine last fetched or pushed the 
 TREE_DIR = 'tree'                # <cache>/tree/<commit>/ = the board at that commit, built once from hard links to the blob cache
 TREE_KEEP = 5                    # materialised commits kept per board (older ones are removed after TREE_TTL_S)
 TREE_TTL_S = 600
+BUILD_LOCK = '.build.lock'       # <cache>/tree/.build.lock: one process builds a tree at a time; one arriving meanwhile waits and reuses it
+BUILD_WAIT_ENV = 'AGENT_BOARD_BUILD_WAIT_S'   # how long a reader waits for that lock before building alone (default GIT_TIMEOUT)
 NOTIFY_HOSTS_ENV = 'AGENT_BOARD_NOTIFY_HOSTS'   # comma-separated ssh hosts whose watch is woken after a push (owner wiring)
 NOTIFY_SSH_ENV = 'AGENT_BOARD_NOTIFY_SSH'       # the ssh executable (tests point it at a stub)
 FETCH_RETRIES = 4       # two sessions fetching one repository at once: one loses the ref lock (layer-1 #concurrent-fetch-ref-lock)
@@ -87,6 +92,63 @@ def parse_log(text: str, prefix: str):
         if rel in seen or not rel.startswith('events/'): continue
         seen.add(rel); out.append((rel, *(cur or ('', '', ''))))
     return out
+
+
+@contextlib.contextmanager
+def _build_lock(tree: Path):
+    """Hold `<tree>/.build.lock` while one tree is built; yields whether the lock is held.
+
+    Measured: readers that met one new commit at once (claims, posts, every session's Stop hook) each built the same
+    tree, five at a time, and building at once cost each about twice what one build costs alone. The lock is an
+    flock, so the system releases it when its holder dies. A holder that keeps it past BUILD_WAIT_ENV seconds does
+    not block the others: they stop waiting and build alone (yield False). Only "held by another process" is waited
+    for; a lock the filesystem refuses (another error) is given up at once, so such a filesystem does not cost the
+    whole wait on every build (found by an independent review). No fcntl (Windows) = no lock, as before."""
+    if not fcntl:
+        yield False; return
+    try: fh = open(tree / BUILD_LOCK, 'a')
+    except OSError:
+        yield False; return
+    with fh:
+        try: wait = float(os.environ.get(BUILD_WAIT_ENV) or GIT_TIMEOUT)
+        except ValueError: wait = float(GIT_TIMEOUT)
+        if not math.isfinite(wait) or wait < 0: wait = float(GIT_TIMEOUT)   # nan / inf would wait forever
+        deadline = time.monotonic() + wait
+        held = False
+        while True:
+            try: fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB); held = True; break
+            except OSError as e:
+                if e.errno not in (errno.EWOULDBLOCK, errno.EAGAIN): break
+                if time.monotonic() >= deadline: break
+                time.sleep(0.2)
+        try: yield held
+        finally:
+            if held: fcntl.flock(fh, fcntl.LOCK_UN)
+
+
+def _alive(pid: int) -> bool:
+    """Whether a process with this id exists (POSIX only: on Windows os.kill would end it, and this is never called
+    there = _build_lock does not hold a lock without fcntl)."""
+    try: os.kill(pid, 0)
+    except ProcessLookupError: return False
+    except OSError: return True          # exists but is not ours (PermissionError), or cannot tell: keep its directory
+    return True
+
+
+def _remove_leftovers(tree: Path) -> None:
+    """Under the build lock: remove the `.tmp-<pid>-<commit>` build directories whose process is gone. Measured: a
+    build stopped half-way (killed, timed out) left its directory forever = sixteen of them on one board, up to about
+    4,600 files each; the pruning skipped them. A live pid's directory stays, however old: a build that does not hold
+    the lock (a process of the previous version, a reader whose wait ran out) may still be writing it, and a build
+    whose directory is removed under it finishes anyway and puts a tree with missing events in place (reproduced by
+    an independent review with an age rule). When the pid has been reused, the leftover goes once that process ends."""
+    try: entries = list(tree.iterdir())
+    except OSError: return
+    for d in entries:
+        if not d.name.startswith('.tmp-'): continue
+        try: pid = int(d.name.split('-', 2)[1])
+        except (IndexError, ValueError): continue          # not a name this module makes
+        if pid > 0 and not _alive(pid): shutil.rmtree(d, ignore_errors=True)
 
 
 class Repo:
@@ -203,35 +265,47 @@ class Repo:
             seen.add(rel); lines.append(f'{c10}|{date}|{author}|{rel}')
         for rel in sorted(rows):
             if rel.startswith('events/') and rel not in seen: lines.append(f'|||{rel}')
+        blobs = self.cache_dir() / 'blobs'          # once: cache_dir() also creates and chmods the directories
         for rel, blob in rows.items():
             if not rel.startswith('events/'): continue
             p = dest / rel; p.parent.mkdir(parents=True, exist_ok=True)
-            data = self.blob(sha, rel, blob)
-            try: os.link(self.cache_dir() / 'blobs' / blob, p)       # no copy: the blob cache already holds the plaintext
-            except OSError: p.write_bytes(data)
+            cached = blobs / blob
+            if not os.access(cached, os.R_OK): self.blob(sha, rel, blob)   # decrypt into the cache when absent or unreadable (blob() replaces it); a readable cached blob is not read (the link needs no content)
+            try: os.link(cached, p)                              # no copy: the blob cache already holds the plaintext
+            except OSError: p.write_bytes(self.blob(sha, rel, blob))
         (dest / ORDER_FILE).write_text('\n'.join(lines) + ('\n' if lines else ''))
         (dest / BASE_FILE).write_text(sha + '\n')
         return dest
 
     def materialized(self, sha: str) -> Path:
         """The board at commit `sha` as a persistent read-only directory under the cache, built once per machine
-        (hard links to the blob cache, so a thousand events cost a few milliseconds) and shared by every process:
-        a commit's tree never changes, so the directory is immutable once its `.base` exists. Built into a private
-        temporary name and renamed into place; older commits are pruned after TREE_TTL_S, keeping TREE_KEEP."""
+        from hard links to the blob cache and shared by every process: a commit's tree never changes, so the directory
+        is immutable once its `.base` exists. One process builds at a time (`<cache>/tree/.build.lock`); a process
+        that arrives while the commit is being built waits and reuses it instead of building it again (measured: a
+        build of ~5,700 events is about 4 CPU seconds, mostly the links, and three at once took about 8 each). The wait
+        ends after BUILD_WAIT_ENV seconds (default GIT_TIMEOUT); the process then builds alone, as before the lock.
+        Built into a private temporary name and renamed into place. A process holding the lock first removes the
+        leftovers of builds whose process is gone; after every build, older commits are pruned after TREE_TTL_S,
+        keeping TREE_KEEP."""
         tree = self.cache_dir() / TREE_DIR; final = tree / sha; board = final / 'board'   # `board/` like a checkout's board dir
         if (board / BASE_FILE).is_file(): return board
         tree.mkdir(parents=True, exist_ok=True)
-        tmp = tree / f'.tmp-{os.getpid()}-{sha}'
-        if tmp.exists(): shutil.rmtree(tmp, ignore_errors=True)
-        self.materialize(sha, tmp / 'board')
-        try: os.rename(tmp, final)
-        except OSError:
-            shutil.rmtree(tmp, ignore_errors=True)        # another process won the race; its copy is identical
-        try:
-            dirs = sorted((d for d in tree.iterdir() if d.is_dir() and not d.name.startswith('.tmp-')), key=lambda d: d.stat().st_mtime, reverse=True)
-            for d in dirs[TREE_KEEP:]:
-                if d != final and time.time() - d.stat().st_mtime > TREE_TTL_S: shutil.rmtree(d, ignore_errors=True)
-        except OSError: pass
+        with _build_lock(tree) as held:
+            if (board / BASE_FILE).is_file(): return board       # built by the process this one waited for
+            if held: _remove_leftovers(tree)
+            tmp = tree / f'.tmp-{os.getpid()}-{sha}'
+            if tmp.exists(): shutil.rmtree(tmp, ignore_errors=True)
+            try: self.materialize(sha, tmp / 'board')
+            except BaseException:
+                shutil.rmtree(tmp, ignore_errors=True); raise   # a kill cannot be caught: those leftovers go in _remove_leftovers
+            try: os.rename(tmp, final)
+            except OSError:
+                shutil.rmtree(tmp, ignore_errors=True)        # a process that did not wait (no lock, or its wait ran out) won the race; its copy is identical
+            try:
+                dirs = sorted((d for d in tree.iterdir() if d.is_dir() and not d.name.startswith('.tmp-')), key=lambda d: d.stat().st_mtime, reverse=True)
+                for d in dirs[TREE_KEEP:]:
+                    if d != final and time.time() - d.stat().st_mtime > TREE_TTL_S: shutil.rmtree(d, ignore_errors=True)
+            except OSError: pass
         return board
 
     # ---------------------------------------------------------------- write

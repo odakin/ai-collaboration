@@ -1623,6 +1623,134 @@ class FetchTransport(Transport):
         self.assertNotIn('新しい書き込みなし',p.stdout); self.assertIn('確かめていない',p.stdout); self.assertIn(r['event_id'],p.stdout)
 
 
+class TreeBuild(unittest.TestCase):
+    """One process builds a commit's tree; the others wait for it (board_transport._build_lock). Measured: readers
+    that met a new commit at once each built the same tree, five at a time, and three builds at once cost each about
+    twice one alone; builds stopped half-way left their directories forever. The wait, the leftover rule and the
+    cached-blob path below were checked by an independent review. Borrows the Transport fixture only (subclassing would
+    run Transport's tests a second time)."""
+    setUp=Transport.setUp; tearDown=Transport.tearDown
+    SLOW_BUILD=('import sys, time\n'
+                'sys.path.insert(0, sys.argv[1]); import board_transport as bt\n'
+                'orig = bt.Repo.materialize\n'
+                'def slow(self, sha, dest):\n'
+                '    print("built", flush=True); time.sleep(2); return orig(self, sha, dest)\n'
+                'bt.Repo.materialize = slow\n'
+                'print("dir", bt.Repo(sys.argv[2]).materialized(sys.argv[3]), flush=True)\n')
+    TIMED_READ=('import sys, time; sys.path.insert(0, sys.argv[1]); import board_transport as bt\n'
+                't = time.time(); d = bt.Repo(sys.argv[2]).materialized(sys.argv[3])\n'
+                'print(f"{time.time() - t:.1f}", (d / bt.BASE_FILE).is_file(), flush=True)\n')
+    def _commit(self):
+        import shutil
+        r,_,_=chain(); board.post(self.root,r)
+        repo=bt.Repo(self.root); sha=repo.fetch(); tree=repo.cache_dir()/bt.TREE_DIR
+        tree.mkdir(parents=True,exist_ok=True); shutil.rmtree(tree/sha,ignore_errors=True)   # not built yet
+        return repo,sha,tree
+    def _timed_read(self, sha, **env):
+        import os, sys
+        try: p=subprocess.run([sys.executable,'-c',self.TIMED_READ,str(board.ENGINE),str(self.root),sha],capture_output=True,
+                              text=True,timeout=30,env={**os.environ,**env})
+        except subprocess.TimeoutExpired: self.fail(f'the reader kept waiting for a held build lock ({env})')
+        self.assertEqual(p.returncode,0,p.stderr)
+        waited,built=p.stdout.split()
+        return float(waited),built=='True'
+    def test_readers_of_one_new_commit_build_its_tree_once(self):
+        import os, sys
+        if bt.fcntl is None: self.skipTest('no fcntl: no build lock')
+        repo,sha,tree=self._commit()
+        env={**os.environ,bt.BUILD_WAIT_ENV:'120'}     # the wait is longer than the build, whatever the environment sets
+        ps=[subprocess.Popen([sys.executable,'-c',self.SLOW_BUILD,str(board.ENGINE),str(self.root),sha],
+                             stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,env=env) for _ in range(3)]
+        outs=[p.communicate(timeout=120) for p in ps]
+        for p,(_,err) in zip(ps,outs): self.assertEqual(p.returncode,0,err)
+        lines=[l for out,_ in outs for l in out.splitlines()]
+        self.assertEqual(sum(l=='built' for l in lines),1,lines)          # one build; the other two waited for it
+        dirs={l[4:] for l in lines if l.startswith('dir ')}
+        self.assertEqual(len(dirs),1,lines); self.assertTrue((Path(dirs.pop())/bt.BASE_FILE).is_file())
+    def test_a_build_removes_the_leftovers_of_builds_whose_process_is_gone(self):
+        import os, sys, time
+        if bt.fcntl is None: self.skipTest('no fcntl: leftovers are removed under the build lock')
+        repo,sha,tree=self._commit()
+        gone=subprocess.Popen([sys.executable,'-c','pass']); gone.wait()
+        alive=subprocess.Popen([sys.executable,'-c','import time; time.sleep(120)'])
+        try:
+            dead=tree/f'.tmp-{gone.pid}-{"a"*40}'; live=tree/f'.tmp-{alive.pid}-{"b"*40}'; old=tree/f'.tmp-{alive.pid}-{"c"*40}'
+            for d in (dead,live,old): (d/'board').mkdir(parents=True); (d/'board'/'x.json').write_text('{}')
+            t=time.time()-86400; os.utime(old,(t,t))
+            self.assertTrue((repo.materialized(sha)/bt.BASE_FILE).is_file())
+            self.assertFalse(dead.exists())     # its process is gone
+            self.assertTrue(live.exists())      # a build without the lock may still be writing it
+            self.assertTrue(old.exists())       # however old: removing a live build's directory puts a tree with missing events in place
+        finally: alive.kill(); alive.wait()
+    def test_a_reader_stops_waiting_for_a_held_build_lock_and_builds_alone(self):
+        import fcntl, sys
+        if bt.fcntl is None: self.skipTest('no fcntl: no build lock')
+        repo,sha,tree=self._commit()
+        gone=subprocess.Popen([sys.executable,'-c','pass']); gone.wait()
+        dead=tree/f'.tmp-{gone.pid}-{"a"*40}'; (dead/'board').mkdir(parents=True)
+        with open(tree/bt.BUILD_LOCK,'a') as fh:
+            fcntl.flock(fh,fcntl.LOCK_EX)      # a holder that never lets go (stuck, or slower than the wait)
+            waited,built=self._timed_read(sha,**{bt.BUILD_WAIT_ENV:'1'})
+        self.assertTrue(built); self.assertGreaterEqual(waited,1.0)   # it waited, then built
+        self.assertTrue(dead.exists())          # leftovers are removed only by the holder of the lock
+    def test_a_wait_that_is_not_a_finite_number_falls_back_to_the_git_timeout(self):
+        import fcntl, shutil
+        if bt.fcntl is None: self.skipTest('no fcntl: no build lock')
+        repo,sha,tree=self._commit()
+        with open(tree/bt.BUILD_LOCK,'a') as fh:
+            fcntl.flock(fh,fcntl.LOCK_EX)
+            for v in ('nan','inf'):
+                waited,built=self._timed_read(sha,**{bt.BUILD_WAIT_ENV:v,'AGENT_BOARD_GIT_TIMEOUT':'3'})
+                self.assertTrue(built,v); self.assertGreaterEqual(waited,3.0,v)
+                shutil.rmtree(tree/sha,ignore_errors=True)   # build again for the next value
+    def test_a_lock_the_filesystem_refuses_is_not_waited_for(self):
+        import errno, os, time
+        if bt.fcntl is None: self.skipTest('no fcntl: no build lock')
+        repo,sha,tree=self._commit(); real=bt.fcntl
+        class Refusing:
+            LOCK_EX=real.LOCK_EX; LOCK_NB=real.LOCK_NB; LOCK_UN=real.LOCK_UN
+            @staticmethod
+            def flock(fh, op): raise OSError(errno.ENOTSUP,'Operation not supported')
+        saved=os.environ.get(bt.BUILD_WAIT_ENV); os.environ[bt.BUILD_WAIT_ENV]='10'; bt.fcntl=Refusing
+        try:
+            t=time.monotonic(); d=repo.materialized(sha); took=time.monotonic()-t
+        finally:
+            bt.fcntl=real
+            if saved is None: os.environ.pop(bt.BUILD_WAIT_ENV,None)
+            else: os.environ[bt.BUILD_WAIT_ENV]=saved
+        self.assertTrue((d/bt.BASE_FILE).is_file()); self.assertLess(took,6.0)   # built at once, not after the 10 s wait
+    def test_a_failed_build_leaves_no_temporary_directory(self):
+        repo,sha,tree=self._commit(); orig=bt.Repo.materialize
+        def stops(self_, s, dest):
+            dest.mkdir(parents=True); (dest/'part.json').write_text('{}'); raise RuntimeError('stopped half-way')
+        bt.Repo.materialize=stops
+        try:
+            with self.assertRaisesRegex(RuntimeError,'half-way'): repo.materialized(sha)
+        finally: bt.Repo.materialize=orig
+        self.assertEqual([d.name for d in tree.iterdir() if d.name.startswith('.tmp-')],[])
+        self.assertFalse((tree/sha).exists())
+    def test_a_first_build_links_each_event_to_the_blob_cache(self):
+        import os, shutil
+        repo,sha,tree=self._commit()
+        blobs=repo.cache_dir()/'blobs'; shutil.rmtree(blobs); blobs.mkdir()     # nothing decrypted yet
+        d=repo.materialized(sha); rows={k:v for k,v in repo.tree(sha).items() if k.startswith('events/')}
+        self.assertTrue(rows)
+        for rel,blob in rows.items(): self.assertEqual(os.stat(d/rel).st_ino,os.stat(blobs/blob).st_ino,rel)   # a link, not a copy
+    def test_an_unreadable_cached_blob_is_decrypted_again(self):
+        import json, os
+        if os.name!='posix' or os.geteuid()==0: self.skipTest('needs file modes that bind the user')
+        repo,sha,tree=self._commit()
+        rel,blob=next((k,v) for k,v in repo.tree(sha).items() if k.startswith('events/'))
+        cached=repo.cache_dir()/'blobs'/blob; repo.blob(sha,rel,blob); os.chmod(cached,0)   # cached, then damaged
+        try:
+            p=repo.materialized(sha)/rel
+            try: text=p.read_text()
+            except PermissionError: self.fail('the tree links the unreadable cached blob as it is')
+            self.assertIsInstance(json.loads(text),dict)   # the reader can open it
+        finally:
+            if cached.exists(): os.chmod(cached,0o600)
+
+
 class LaunchCommand(unittest.TestCase):
     """A request to a role prints the CLI command that opens the worker with model, effort and config dir pinned, writes
     the hand-off text to the outbox, and --launch runs it (a stub CLI records what it got)."""
