@@ -12,11 +12,13 @@ What it is:
   machine plus that machine's running number (`H12`), never reused, so the same question keeps one label in every
   window and on every day. The ask carries the question, the recommended answer, why it needs the owner (the
   **ground**), and keys naming the question (`todo:<repo>:<id>` = the one question a TODO carries, `plan:<path>#<item>`,
-  `request:<id>`). **A key names one question**: an open ask with the same key is shown again under its label, and a
-  question already answered under that key is not asked again (the earlier answer is printed; `--reask` with a reason
-  asks anew).
+  `request:<id>`, `session:<id>`). **A key names one question**: an open ask with the same key is shown again under its
+  label (`--reword` with what changed keeps the label for the same question in other words), and a question already
+  answered under that key is not asked again (the earlier answer is printed; `--reask` with a reason asks anew).
+  The ask block puts the question first and the label after it; the owner is never asked to type a label.
 - Before an ask is made it passes a **gate**: the ground must be one the owner alone can decide (GROUNDS); a policy
-  check before implementation is asked once per request, by the session that posted the request; and a change named
+  check before implementation is asked once per piece of work (`request:<id>`, or `session:<own id>` for a window
+  without a board request) and is refused from a worker of that request (its assignee or claimant); and a change named
   by `--evidence` is judged by a validator whatever the ground — a change that needs no ruling is refused ("apply it
   and report"), including asks to ratify such a change (measured). The validator is a separate program
   (`BOARD_ASKS_VALIDATOR`, default = `owner-ask-validate.py` in a sibling `claude-config/scripts/`) so this engine does
@@ -41,7 +43,7 @@ without either, Q.
 CLI:
     python3 board_asks.py ask      --root <board> --text '<question>' --recommend '<answer>' --ground <g> [--key K]...
                                    [--evidence <repo>@<rev>:<path>] [--applied] [--denied '<guard's reason>']
-                                   [--reask '<what changed>'] [--project P] [--json]
+                                   [--reask '<what changed>'] [--reword '<what changed>'] [--project P] [--json]
     python3 board_asks.py answer   --root <board> --label H12 [--label …] --quote '<owner words>' --binding label|order|confirmed|guess
                                    [--reading '<one line>'] [--recorded <path or repo@commit>]
     python3 board_asks.py withdraw --root <board> --label H12 --reason '<why>'
@@ -83,7 +85,7 @@ GROUNDS = {
     'rule': '規則の文書の変更で事前の裁定が要るもの・設定・hook',
     'outbound': '外への発信 (送信・投稿・公開) の承認',
     'choice': '本人が選ぶもの (共同研究者の提案を採るか・案の間の好み・お金・家庭・人に連絡する・常駐させる)',
-    'policy': '実装の前の方針の確認 (1 つの依頼に 1 回、 依頼元が立てる)',
+    'policy': '実装の前の方針の確認 (1 つの作業に 1 回。 その依頼の worker からは立てない)',
     'fact': '本人しか知らない事実',
 }
 JUDGED = ('rule', 'protected')
@@ -205,6 +207,13 @@ def state(recs):
             a = asks.get(r.get('label'))
             if a is not None and a['status'] == 'open':
                 a['status'] = 'withdrawn'
+        elif t == 'reword':
+            a = asks.get(r.get('label'))
+            if a is not None and a['status'] == 'open':
+                a.setdefault('rewords', []).append({'from': a['text'], 'reason': r.get('reason', ''), 'created_at': r.get('created_at', '')})
+                a['text'] = r.get('text') or a['text']
+                if r.get('recommend'):
+                    a['recommend'] = r['recommend']
     return asks
 
 
@@ -290,27 +299,50 @@ def gate(ground, evidence=None, *, applied=False, validator=None, session=None, 
     return ok, msg
 
 
-def _request_authors(root, request_id):
-    """Ids that stand for the session that posted this request: actor.session_id and any 8-hex id in actor.task
-    (a request posted under a role id keeps the native id there). [] when it cannot be read here."""
+def _ids_of(addr, task=''):
+    """A board address's session id and the 8-hex native ids kept in its task field (a post made under a role id)."""
+    ids = [(addr or {}).get('session_id') or '']
+    ids += re.findall(r'(?<![0-9a-f])[0-9a-f]{8}(?![0-9a-f])', str(task or ''))
+    return [i for i in ids if i]
+
+
+def _request_parties(root, request_id):
+    """(authors, workers) of a request on this board or a board beside it, or None when its event cannot be found.
+    authors = the session that posted it; workers = its assignee, sessions it was handed over to as assignee, and the
+    sessions that claimed it (each with the native ids in the task field)."""
     if not root or not request_id:
-        return []
+        return None
     root = Path(root).expanduser()
     roots = [root]
     with contextlib.suppress(Exception):
         sys.path.insert(0, str(HERE))
         import board_config as bc
         roots += [b['root'] for b in bc.discover(root.parent) if Path(b['root']).resolve() != root.resolve()]
-    files = [f for r in roots for f in Path(r).glob(f'events/*/*/*--{request_id}.json')]
-    for f in files:
+    for f in [f for r in roots for f in Path(r).glob(f'events/*/*/*--{request_id}.json')]:
         with contextlib.suppress(OSError, ValueError):
             ev = json.loads(f.read_text(encoding='utf-8'))
-            if ev.get('kind') == 'request':
-                actor = ev.get('actor') or {}
-                ids = [actor.get('session_id') or '']
-                ids += re.findall(r'(?<![0-9a-f])[0-9a-f]{8}(?![0-9a-f])', str(actor.get('task') or ''))
-                return [i for i in ids if i]
-    return []
+            if ev.get('kind') != 'request':
+                continue
+            actor = ev.get('actor') or {}
+            authors = _ids_of(actor, actor.get('task'))
+            workers = _ids_of(ev.get('assignee'))
+            for g in f.parent.glob('*.json'):
+                with contextlib.suppress(OSError, ValueError):
+                    e = json.loads(g.read_text(encoding='utf-8'))
+                    if e.get('request_id') != request_id:
+                        continue
+                    if e.get('kind') == 'claim':
+                        workers += _ids_of(e.get('actor'), (e.get('actor') or {}).get('task'))
+                    elif e.get('kind') == 'handover' and e.get('handover_role') == 'assignee':
+                        workers += _ids_of(e.get('target'))
+            return authors, workers
+    return None
+
+
+def _request_authors(root, request_id):
+    """Ids that stand for the session that posted this request ([] when it cannot be read here)."""
+    parties = _request_parties(root, request_id)
+    return parties[0] if parties else []
 
 
 def _same_session(a, b):
@@ -345,32 +377,50 @@ def _decide(root, st, it, me):
             ' その答えで足りるなら問わずに進める。 別の問いなら key を問いごとに分ける (例: <key>#2)。'
             ' 前提が変わった問い直しなら --reask \'<何が変わったか>\'')}
     if it.get('ground') == 'policy':
+        # One policy check per piece of work. It is refused only from a worker of that request: a worker's choices are
+        # settled at the requester's review. The requester, a conductor that took over the requester's work, and the
+        # reviewer may put it (measured: requiring the posting session refused a conductor's successor). A window
+        # without a board request names its own work with session:<its id>.
         rids = [k.split(':', 1)[1] for k in keys if k.startswith('request:')]
-        if not rids:
-            return 'refused', {'status': 'refused', 'text': text, 'message': '方針の確認の問いには --key request:<依頼の id> が要る (1 つの依頼に 1 回だけ)'}
-        authors = _request_authors(root, rids[0])
-        if not authors:
+        sids = [k.split(':', 1)[1] for k in keys if k.startswith('session:')]
+        if not rids and not sids:
             return 'refused', {'status': 'refused', 'text': text, 'message': (
-                f'依頼 {rids[0]} の event を手元の掲示板 (--root と、 その隣の掲示板) で見つけられない ='
-                ' 依頼元が立てているかを確かめられない。 依頼の掲示板を最新にしてから立て直す')}
-        if not any(_same_session(x, me) for x in authors):
+                '方針の確認の問いには、 掲示板の依頼の作業なら --key request:<依頼の id>、 掲示板の依頼の無い窓の作業なら'
+                ' --key session:<この窓の session id> が要る (1 つの作業に 1 回だけ)')}
+        if sids and not _same_session(sids[0], me):
             return 'refused', {'status': 'refused', 'text': text, 'message': (
-                f'方針の確認の問いは依頼元 ({authors[0][:24]}) が 1 つの依頼に 1 回だけ立てる。'
-                ' worker の方針の中の個々の選択は依頼元の検収で決める (本人に立てない)')}
+                f'session:{sids[0][:24]} はこの窓の id でない。 方針の確認は、 その作業をしている窓が自分の id で立てる')}
+        if rids:
+            parties = _request_parties(root, rids[0])
+            if not parties:
+                return 'refused', {'status': 'refused', 'text': text, 'message': (
+                    f'依頼 {rids[0]} の event を手元の掲示板 (--root と、 その隣の掲示板) で見つけられない ='
+                    ' その依頼の worker かを確かめられない。 依頼の掲示板を最新にしてから立て直す')}
+            authors, workers = parties
+            if any(_same_session(x, me) for x in workers) and not any(_same_session(x, me) for x in authors):
+                return 'refused', {'status': 'refused', 'text': text, 'message': (
+                    '方針の確認の問いは、 その依頼の worker (宛先・claim した session) からは立てない。'
+                    ' 方針の中の選択は依頼元に submit して検収で決める (本人に立てない)')}
     same = next((a for a in st.values() if a['status'] == 'open' and keys and set(keys) & set(a.get('keys') or [])), None)
     if same:
         if _norm(same['text']) == _norm(text):
             return 'reused', {'status': 'reused', 'label': same['label'], 'text': same['text'], 'recommend': same.get('recommend', ''),
                               'message': '同じ問い (同じ key・同じ文) が開いている = 新しく立てずにその印で問う'}
+        if it.get('reword'):
+            # the same question in other words keeps its label (measured: re-asking under a new label changed the
+            # owner's handle for the same matter twice in one morning)
+            return 'reworded', {'status': 'reworded', 'label': same['label'], 'text': text,
+                                'recommend': (it.get('recommend') or same.get('recommend') or '').strip()[:MAX_TEXT],
+                                'reason': it['reword'], 'message': f'言い直した (同じ印のまま。 変えたこと: {it["reword"][:120]})'}
         return 'refused', {'status': 'refused', 'text': text, 'label': same['label'], 'message': (
-            f'同じ key の問い 〔問 {same["label"]}〕 「{same["text"][:80]}」 が開いている。'
-            ' 同じ問いならその文のまま立て直す (同じ印で出る)。 別の問いなら key を問いごとに分ける (例: <key>#2)。'
-            ' 問いを書き換えるなら先に withdraw')}
+            f'同じ key の問い 「{same["text"][:80]}」 〔問 {same["label"]}〕 が開いている。'
+            ' 同じ問いの言い直しなら --reword \'<何を変えたか>\' (同じ印のまま文を変える)。'
+            ' 別の問いなら key を問いごとに分ける (例: <key>#2)')}
     if not text:
         return 'refused', {'status': 'refused', 'text': '', 'message': '問いの文が空'}
     note = it.get('_note') or ''
     if it.get('ground') != 'policy' and re.search(r'方針|\bpolicy\b', text, re.I) and '--ground policy' not in note:
-        note = ' '.join(x for x in (note, '⚠️ 方針の確認なら --ground policy (依頼元だけが 1 つの依頼に 1 回)') if x)
+        note = ' '.join(x for x in (note, '⚠️ 方針の確認なら --ground policy (1 つの作業に 1 回、 依頼の worker からは立てない)') if x)
     return 'ask', dict(it, text=text, keys=keys, _note=note)
 
 
@@ -407,6 +457,12 @@ def ask(root, items, *, session=None, agent='claude', project='', path=None, val
                 new.append({'type': 'shown', 'labels': [payload['label']], 'session': me, 'created_at': now_iso()})
                 out.append(payload)
                 continue
+            if kind == 'reworded':
+                new.append({'type': 'reword', 'label': payload['label'], 'text': payload['text'], 'recommend': payload['recommend'],
+                            'reason': payload['reason'][:MAX_TEXT], 'session': me, 'created_at': now_iso()})
+                new.append({'type': 'shown', 'labels': [payload['label']], 'session': me, 'created_at': now_iso()})
+                out.append(payload)
+                continue
             if kind in ('answered-before', 'refused'):
                 out.append(payload)
                 continue
@@ -428,14 +484,16 @@ def ask(root, items, *, session=None, agent='claude', project='', path=None, val
 def format_block(results):
     lines = []
     for r in results:
-        if r['status'] in ('made', 'reused'):
-            lines.append(f"〔問 {r['label']}〕 {r['text']}")
+        if r['status'] in ('made', 'reused', 'reworded'):
+            # the content first and the label after it: the owner reads the question, the label is only a handle
+            # (measured: a label at the head of the line was then used like a number, "H3・H12・H13 は…")
+            lines.append(f"{r['text']} 〔問 {r['label']}〕")
             if r.get('recommend'):
                 lines.append(f"　おすすめ: {r['recommend']}")
-            if '⚠️' in r.get('message', '') or '別の問い' in r.get('message', ''):
+            if '⚠️' in r.get('message', '') or '別の問い' in r.get('message', '') or r['status'] == 'reworded':
                 lines.append(f"　({r['message']})")
         elif r['status'] == 'answered-before':
-            lines.append(f"(問わない) 〔問 {r['label']}〕 {r['text'][:80]} は本人が答え済み: 「{r.get('quote', '')[:200]}」 — {r['message']}")
+            lines.append(f"(問わない) {r['text'][:80]} 〔問 {r['label']}〕 は本人が答え済み: 「{r.get('quote', '')[:200]}」 — {r['message']}")
         else:
             lines.append(f"(立てない) {r.get('text', '')[:80]} — {r['message']}")
     return '\n'.join(lines)
@@ -646,8 +704,10 @@ def windows(transcript, tail_bytes=4 << 20):
     hum = [i for i, (r, _) in enumerate(rows) if r == 'user']
     last = hum[-1] if hum else -1
     prev = hum[-2] if len(hum) > 1 else -1
-    w0 = '\n'.join(tx for r, tx in rows[last + 1:] if r == 'assistant')
-    w1 = '\n'.join(tx for r, tx in rows[prev + 1:last] if r == 'assistant') if last >= 0 else ''
+    # separate reply blocks are separate paragraphs (a single line break would merge an earlier turn's last paragraph
+    # with the next turn's first one, and the Stop check would read the pair as a new paragraph)
+    w0 = '\n\n'.join(tx for r, tx in rows[last + 1:] if r == 'assistant')
+    w1 = '\n\n'.join(tx for r, tx in rows[prev + 1:last] if r == 'assistant') if last >= 0 else ''
     return w0, w1
 
 
@@ -735,6 +795,27 @@ def effect(tool, inp):
 
 
 ASK_RE = re.compile(r'決めてほしい|決めてください|答えてください|教えてください|してよいですか|でよいですか|よいですか|いいですか|どうしますか|はい\s*[/／]\s*直す|ご判断')
+# An asking phrase that does not ask the owner here (each measured in a send-back of the Stop check):
+# reported words ("worker が決めてほしいと言った細かい 4 つは、 検収で決まり…"),
+REPORTED_AFTER = re.compile(r'^\s*(?:と(?:言|い[っうわ]|書|頼|求|伝|聞|尋|問|申|返|あ|の)|という|との|って)')
+# the owner sent to another window ("その worker の窓から確認が出るので、 そこで答えてください"; "この窓で" still asks),
+ROUTED_RE = re.compile(r'(?<!こ)の\s*(?:窓|ウィンドウ|セッション|session|画面)\s*(?:で|から|を開いて|に出)', re.I)
+# an instruction on how to answer, with no question in the sentence ("本人は普段の言葉で答えてください"),
+MANNER_ASKS = ('答えてください', '教えてください')
+QUESTION_CONTENT = re.compile(r'か[、。\s」]|かを|かどうか|？|\?|どちら|どっち|どれ|どう|いつ|何|誰|おすすめ|推す|よいか|いいか')
+# and a heading line ("**本人に決めてほしいもの**"), which is read together with the paragraph after it.
+HEADING_PARA = re.compile(r'^\s*(?:#{1,6}\s\S.*|(?:[-*]\s*)?\*\*[^*\n]+\*\*\s*[:：]?|[^\n]{1,60}[:：])\s*$')
+# Labels used as numbers for the owner (rule: a label is only appended to the content = claude-config
+# conventions/concise-output.md#decision-questions, "作業側の符号だけで聞かない"; measured: the owner was told to
+# answer "「H14 送って」" and "番号で", labels were listed without content ("H3・H12・H13 は…"), and put at line heads).
+TYPE_VERB = r'(?:返して|返事して|答えて|お答え|言って|教えて|送って|打って|書いて|伝えて|選んで|どうぞ)'
+QUOTE_TYPE_RE = re.compile(rf'「([^「」\n]*)」\s*(?:と|で|か)\s*(?:「([^「」\n]*)」\s*(?:と|で)\s*)?{TYPE_VERB}')
+# only a request form ("番号で教えてください"), not the name of a matter ("番号で答えが返ってくる件") or a line number (行番号)
+BY_NUMBER_RE = re.compile(r'(?<!行)(?:番号|印|記号|符号|ラベル)\s*で\s*(?:答えて|教えて|返して|お答え|お返事|どうぞ|選んで|指定して|伝えて|書いて|打って)')
+NEGATED_AFTER = re.compile(r'^.{0,12}?(?:やめ|ない|不要|要ら|しな|なくて|ません|ず[、。])')
+ORDINAL_TOKEN = re.compile(r'\d{1,2}\s*(?:つ目|番目|番)')
+OWN_MARK = 'board-asks:'   # the start of this hook's Stop reasons (the app records them as "Stop hook feedback: board-asks: …")
+SEEN_MAX = 400
 
 
 def _state_dir():
@@ -760,13 +841,17 @@ def _bound_file(session):
     return _state_dir() / f'{_safe(session)}.bound'
 
 
-QUOTED_RE = re.compile(r'「[^」\n]*」|『[^』\n]*』|`[^`\n]*`|"[^"\n]*"')
+QUOTED_RE = re.compile(r'「[^「」\n]*」|『[^『』\n]*』|`[^`\n]*`|"[^"\n]*"')
 
 
 def unquoted(text):
     """The text without phrases in Japanese brackets, inline code and double quotes: prose that explains a rule quotes
-    the asking phrase without asking anyone (measured)."""
-    return QUOTED_RE.sub('', text or '')
+    the asking phrase without asking anyone (measured). Nested brackets are removed from the inside out (measured: an
+    RCA citing 「「H14 送って」 と返して」 left the outer remainder in the prose)."""
+    t, prev = text or '', None
+    while prev != t:
+        prev, t = t, QUOTED_RE.sub('', t)
+    return t
 
 
 def prose_only(text):
@@ -779,6 +864,136 @@ def prose_only(text):
         if not in_code and not line.lstrip().startswith('>'):
             out.append(line)
     return '\n'.join(out)
+
+
+def _sentence_at(text, i):
+    """The sentence (between 。！？ or line breaks) that holds position i."""
+    start = max(text.rfind(c, 0, i) for c in '。！？!?\n') + 1
+    ends = [j for j in (text.find(c, i) for c in '。！？!?\n') if j >= 0]
+    return text[start:(min(ends) + 1 if ends else len(text))]
+
+
+def owner_ask_in(para):
+    """The asking phrase by which this paragraph asks the owner here, or None. Not counted: phrases in quotes, reported
+    words, an owner sent to answer in another window, and an instruction on how to answer with no question in it."""
+    u = unquoted(para)
+    for m in ASK_RE.finditer(u):
+        if REPORTED_AFTER.match(u[m.end():]):
+            continue
+        sent = _sentence_at(u, m.start())
+        if ROUTED_RE.search(sent):
+            continue
+        if m.group(0) in MANNER_ASKS and not QUESTION_CONTENT.search(sent):
+            continue
+        return m.group(0)
+    return None
+
+
+def paragraphs(text):
+    """Paragraphs split at blank lines; a one-line heading is joined to the paragraph after it (the heading may carry the
+    asking phrase and the list under it the questions, or the list may carry the labels)."""
+    raw = [p for p in re.split(r'\n\s*\n', text or '') if p.strip()]
+    out, i = [], 0
+    while i < len(raw):
+        p = raw[i]
+        if '\n' not in p.strip() and HEADING_PARA.match(p.strip()) and i + 1 < len(raw):
+            out.append(p + '\n' + raw[i + 1])
+            i += 2
+            continue
+        out.append(p)
+        i += 1
+    return out
+
+
+def _key(kind, text):
+    return kind + ':' + hashlib.sha256(_norm(text).encode('utf-8')).hexdigest()[:16]
+
+
+def turn_window(transcript, tail_bytes=4 << 20):
+    """(assistant text written since the previous Stop, whether the previous Stop was this hook's send-back).
+    The desktop app writes a `system` / `stop_hook_summary` record after every Stop's hooks have finished, so at Stop
+    time the last such record belongs to the previous Stop. (None, None) when the tail holds none (first Stop of a
+    session, or a harness that does not write it): the caller then reads the text since the owner's last words."""
+    rows = []
+    try:
+        with open(transcript, 'rb') as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - tail_bytes))
+            data = f.read().decode('utf-8', 'replace').splitlines()
+    except OSError:
+        return None, None
+    for line in data:
+        with contextlib.suppress(ValueError):
+            rec = json.loads(line)
+            if not isinstance(rec, dict) or rec.get('isSidechain'):
+                continue
+            if rec.get('type') == 'system' and rec.get('subtype') == 'stop_hook_summary':
+                rows.append(('stop', ''))
+                continue
+            role, texts = _texts(rec)
+            for tx in texts:
+                if role == 'assistant':
+                    rows.append(('reply', tx))
+                elif role == 'user' and tx.lstrip().startswith('Stop hook feedback'):
+                    rows.append(('feedback', tx))
+    stops = [i for i, (k, _) in enumerate(rows) if k == 'stop']
+    if not stops:
+        return None, None
+    last = stops[-1]
+    prev = stops[-2] if len(stops) > 1 else -1
+    text = '\n\n'.join(tx for k, tx in rows[last + 1:] if k == 'reply')
+    own = any(k == 'feedback' and OWN_MARK in tx for k, tx in rows[prev + 1:last])
+    return text, own
+
+
+def _content_words(text):
+    """Words that name an ask's content (runs of kanji / katakana of 2+, latin words of 3+, dates) from its first 60 chars."""
+    t = unicodedata.normalize('NFKC', text or '')[:60]
+    return {w for w in re.findall(r'[一-龥々ァ-ヶー]{2,}|[A-Za-z]{3,}|\d{1,2}/\d{1,2}', t)}
+
+
+def label_usage(text, labels, heads):
+    """Places where the reply uses ask labels as numbers for the owner: [(kind, snippet)]. kind = type (the owner is told
+    to answer by a label, a number or an ordinal), bare (two or more labels in a sentence without their content), head
+    (a label at the head of a line). labels = labels this session may name; heads = label -> the ask's text."""
+    t = unicodedata.normalize('NFKC', prose_only(text))
+    u = unquoted(t)   # labels and phrases inside quotes are cited, not used (measured: an RCA quoting "H3・H12・H13 は")
+    known = sorted({lb for lb in labels if lb in heads}, key=len, reverse=True)
+    kl = '(?<![A-Za-z0-9])(?:' + '|'.join(map(re.escape, known)) + ')(?![0-9])' if known else None
+    out = []
+    for m in QUOTE_TYPE_RE.finditer(t):
+        inner = ' '.join(x for x in m.groups() if x)
+        before = t[t.rfind('\n', 0, m.start()) + 1:m.start()]
+        if before.count('「') > before.count('」'):
+            continue   # inside an outer quote = a cited example (measured: an RCA quoting 「「H14 送って」 と返してください」)
+        if ORDINAL_TOKEN.search(inner) or (kl and re.search(kl, inner)):
+            out.append(('type', m.group(0)))
+    for m in BY_NUMBER_RE.finditer(u):
+        if not NEGATED_AFTER.match(u[m.end():]):
+            out.append(('type', _sentence_at(u, m.start()).strip()))
+    if kl:
+        flat = re.sub(r'〔問\s*([A-Z]\d{1,5})〕', r' \1 ', u)
+        run = re.compile(rf'{kl}(?:\s*(?:[・、,，〜~]|と|\s)\s*{kl})+')
+        for m in run.finditer(flat):
+            sent = _sentence_at(flat, m.start())
+            named = re.findall(kl, m.group(0))
+            # a label whose ask has no content word to look for is not judged (nothing to compare)
+            if any(_content_words(heads[lb]) and not any(w in sent for w in _content_words(heads[lb])) for lb in named):
+                out.append(('bare', sent.strip()))
+        head_re = re.compile(rf'^[ \t]*(?:[-*・][ \t]*)?(?:\*\*)?[ \t]*(?:〔問[ \t]*)?{kl}[ \t]*(?:〕)?[ \t]*(?:\*\*)?(?=[\s:：、.)）]|$)', re.M)
+        src, prev = t, None
+        while prev != src:   # blank quotes from the inside out, keeping positions (line starts stay where they are)
+            prev, src = src, QUOTED_RE.sub(lambda x: ' ' * len(x.group(0)), src)
+        for m in head_re.finditer(src):
+            end = src.find('\n', m.start())
+            out.append(('head', t[m.start():end if end >= 0 else len(t)].strip()))
+    seen, uniq = set(), []
+    for kind, snip in out:
+        if (kind, snip) not in seen:
+            seen.add((kind, snip))
+            uniq.append((kind, snip))
+    return uniq
 
 
 def hook_prompt(root, data, path=None):
@@ -813,19 +1028,21 @@ def hook_prompt(root, data, path=None):
     answer(root, res['labels'], prompt, res['binding'], session=session, candidates=res['candidates'], path=p,
            from_hook=True, defer=res.get('defer', False))
     if res['binding'] == 'guess':
-        heads = '; '.join(f"{lb} ({st[lb]['text'][:40]})" for lb in res['candidates'][:6])
+        heads = '; '.join(f"{st[lb]['text'][:40]} ({lb})" for lb in res['candidates'][:6])
         extra = ' 返事の中に問いの段のほかにも番号つきの見出し・一覧がある。' if numbered_outside_blocks(w0) else ''
         return (f'🔒 board-asks: 本人の答えの結び先が決まらない (候補: {heads}).{extra}'
                 ' 送る・決定を記録する・別の session に頼む・session を起こす・畳む操作は止まる。'
-                ' 返事の 1 行目で、 候補の印を 1 つだけ名指して「H12 (問いの頭) と読みました。よいですか」 と確かめる'
-                ' (本人が「はい」 か印で答えると解ける)。 読む・調べる・下書きは止めない')
-    heads = '; '.join(f"{lb} ({st[lb]['text'][:40]})" for lb in res['labels'])
+                ' 返事の 1 行目で、 候補を 1 つだけ問いの中身で名指し、 印は後ろに添えて「〈問いの中身〉 (H12) と読みました。よいですか」'
+                ' と確かめる (本人が「はい」 か中身か印で答えると解ける。 本人に印を打つよう頼まない)。 読む・調べる・下書きは止めない')
+    heads = '; '.join(f"{st[lb]['text'][:40]} ({lb})" for lb in res['labels'])
     with contextlib.suppress(OSError):
         _bound_file(session).write_text(json.dumps(res['labels']))
     if res.get('defer'):
-        return f'board-asks: 本人の答えは {heads} の先送り (問いは開いたまま)。 返事の 1 行目に印と問いの頭を書く'
+        return (f'board-asks: 本人の答えは {heads} の先送り (問いは開いたまま)。'
+                ' 返事の 1 行目に問いの中身を書き、 印は後ろに添える')
     how = {'label': '印で', 'order': '直前の返事の問いの並びで', 'confirmed': '確かめた読みで'}[res['binding']]
-    return (f'board-asks: 本人の答えを {heads} に結んだ ({how})。 返事の 1 行目に印と問いの頭を書く。'
+    return (f'board-asks: 本人の答えを {heads} に結んだ ({how})。 返事の 1 行目に結んだ問いの中身を書き、 印は後ろに添える'
+            ' (例: 「〈問いの中身〉 (H12) への答えと読みました」)。'
             ' 本人の裁定なら、 その問いの key の記録 (TODO の decided など) に本人の語のまま書く')
 
 
@@ -843,19 +1060,36 @@ def hook_pretool(root, data, path=None):
         return None
     c = ', '.join(g.get('candidates') or [])
     return (f'🔒 board-asks: 本人の答え「{(g.get("quote") or "")[:60]}」 の結び先が決まっていない (候補 {c}) ので、 {eff} は止めた。'
-            ' 先に 1 行で、 候補の印を 1 つだけ名指して「〜と読みました。よいですか」 と本人に確かめる。 本人が「はい」 か印で答えると解ける')
+            ' 先に 1 行で、 候補を 1 つだけ問いの中身で名指し (印は後ろに添える)、 「〜と読みました。よいですか」 と本人に確かめる。'
+            ' 本人が「はい」 か中身か印で答えると解ける')
 
 
 def _first_line(text):
     return next((ln for ln in (text or '').splitlines() if ln.strip()), '')
 
 
+def _seen(sf):
+    try:
+        return list(json.loads(sf.read_text()).get('seen') or [])
+    except (OSError, ValueError, AttributeError):
+        return []
+
+
 def hook_stop(root, data, path=None):
     """Stop: record the ask labels the reply printed; send back once (a) a reply that asks the owner in a paragraph
-    without an ask label, (b) a reply after a bound answer whose first line does not name the bound label."""
+    without an ask label, (b) a reply after a bound answer whose first line does not name the bound label, (c) a reply
+    that uses labels as numbers for the owner (tells the owner to answer by a label or a number, lists labels without
+    their content, or puts a label at the head of a line).
+    It reads only the text written since the previous Stop (turn_window), and never sends back the same paragraph or
+    sentence twice (its key is kept in the session's state file): the first version read everything since the
+    owner's last words and keyed the send-back on the tail of that text, so each later turn started by a task
+    notice or another session's message sent the same earlier paragraph back again (measured, many times in one window).
+    A continuation after another hook's send-back is judged (its addendum is new text); one after this hook's own
+    send-back, or of an unknown shape, is not (hook-authoring.md#stop-hook-active-other-hooks)."""
     session = data.get('session_id') or _me(None)
     p = Path(path) if path else ledger_path(root)
-    w0, _ = windows(data.get('transcript_path') or '')
+    tp = data.get('transcript_path') or ''
+    w0, _ = windows(tp)
     labels = labels_in(w0)
     if labels:
         mark_shown(root, labels, session=session, path=p)
@@ -865,36 +1099,60 @@ def hook_stop(root, data, path=None):
         bound = json.loads(bf.read_text())
     with contextlib.suppress(FileNotFoundError):
         bf.unlink()
-    if data.get('stop_hook_active'):
+    turn, own = turn_window(tp)
+    if data.get('stop_hook_active') and (own is None or own):
         return None
+    text = w0 if turn is None else turn
     sf = _state_file(session)
-    key = hashlib.sha256(w0[-4000:].encode('utf-8')).hexdigest()[:16]
-    try:
-        if json.loads(sf.read_text()).get('sent_back') == key:
-            return None
-    except (OSError, ValueError):
-        pass
+    seen = _seen(sf)
+    new = []
     msgs = []
-    if bound and not bare_labels(_first_line(w0), bound):
-        msgs.append(f'返事の 1 行目に、 本人の答えを結んだ印 ({", ".join(bound)}) と問いの頭を書いていない')
+    if bound and not data.get('stop_hook_active') and not bare_labels(_first_line(w0), bound):
+        k = _key('bound', ','.join(bound) + _first_line(w0))
+        if k not in seen:
+            new.append(k)
+            msgs.append(f'返事の 1 行目に、 本人の答えを結んだ問いの中身と、 その後ろに印 ({", ".join(bound)}) を書いていない'
+                        ' (例: 「〈問いの中身〉 (H12) への答えと読みました」)')
     recs = load(p)
     st = state(recs)
     known = [lb for lb in shown_by(recs, session) if lb in st] + [lb for lb in labels if lb in st]
     g = pending_guess(recs, session, st)
     allowed = set(known) | set((g or {}).get('candidates') or [])
     loose = []
-    for para in re.split(r'\n\s*\n', prose_only(w0)):
-        if ASK_RE.search(unquoted(para)) and not BLOCK_RE.search(para) and not bare_labels(para, sorted(allowed)):
-            loose.append(para.strip().splitlines()[0][:60])
+    for para in paragraphs(prose_only(text)):
+        if owner_ask_in(para) and not BLOCK_RE.search(para) and not bare_labels(para, sorted(allowed)):
+            k = _key('loose', para)
+            if k not in seen and k not in new:
+                new.append(k)
+                loose.append(para.strip().splitlines()[0][:60])
     if loose:
         here = Path(__file__).resolve()
         msgs.append('本人に答えを求める段に、 掲示板の問いの印 (〔問 H12〕 の形) が付いていない'
                     f' (「{loose[0]}」 ほか)。 問いを立ててから (python3 {here} ask --root <掲示板> --text … --recommend … --ground <理由>)、'
-                    ' 道具が出した問いの段を短い追記に貼る。 本人の裁定が要らない問いなら、 問わずに決めて報告する追記にする')
+                    ' 短い追記に「上の問いを台帳に立てた (上の番号は使わない)」 の 1 行と、 道具が出した問いの段 (中身が先、 印は後ろ) を貼る。'
+                    ' 本人の裁定が要らない問いなら、 問わずに決めて報告する追記にする')
+    heads = {lb: a.get('text', '') for lb, a in st.items()}
+    uses = []
+    for kind, snip in label_usage(text, sorted(allowed), heads):
+        k = _key('use', kind + snip)
+        if k not in seen and k not in new:
+            new.append(k)
+            uses.append((kind, snip))
+    if uses:
+        what = {'type': '本人に印・番号で答えさせる文', 'bare': '中身の無い印の並び', 'head': '行の頭に置いた印'}
+        kinds = []
+        for kind, _ in uses:
+            if what[kind] not in kinds:
+                kinds.append(what[kind])
+        msgs.append(f'問いの印を番号のように使っている ({"・".join(kinds)}: 「{uses[0][1][:60]}」 ほか)。 印は問いの中身の後ろに添えるだけにし、'
+                    ' 本人に印や番号を打たせない (答え方を示すなら「送って」「推しで」 のような中身を知らなくても言える語で)。'
+                    ' 該当の文だけを、 問いの中身で言い直す短い追記にする (前の返事は出し直さない。 正本 ='
+                    ' claude-config/conventions/concise-output.md#decision-questions の「作業側の符号だけで聞かない」)')
     if not msgs:
         return None
-    sf.write_text(json.dumps({'sent_back': key}))
-    return 'board-asks: ' + ' / '.join(msgs)
+    with contextlib.suppress(OSError):
+        sf.write_text(json.dumps({'seen': (seen + new)[-SEEN_MAX:]}))
+    return OWN_MARK + ' ' + ' / '.join(msgs)
 
 
 def digest(root, session, max_chars=8000, path=None):
@@ -906,13 +1164,15 @@ def digest(root, session, max_chars=8000, path=None):
     if not opened and not answered:
         return ''
     lines = ['📌 この session の本人への問い (掲示板の問いの台帳 = board_asks.py。 依頼・調べを出す前に、 同じ問いがあれば前の答えを読む。'
-             ' 本人の裁定は TODO の decided・DESIGN に記録したかを確かめる)']
+             ' 本人の裁定は TODO の decided・DESIGN に記録したかを確かめる)',
+             '　本人に問うときは、 番号を振らずに先に台帳に立てる (ask)。 問いの段は中身が先・印は後ろ、 本人に印や番号を打たせない。'
+             ' 問いを言い直すときは同じ印のまま (--reword)']
     for a in sorted(answered, key=lambda a: _last_settled(a).get('created_at', ''), reverse=True):
         ans = _last_settled(a)
-        lines.append(f"✅ {a['label']} {a['text'][:200]} → 本人「{(ans.get('quote') or '')[:300]}」"
+        lines.append(f"✅ {a['text'][:200]} ({a['label']}) → 本人「{(ans.get('quote') or '')[:300]}」"
                      + (f" 読み: {ans['reading'][:150]}" if ans.get('reading') else ''))
     for a in opened:
-        lines.append(f"❓ {a['label']} {a['text'][:200]} / おすすめ: {a.get('recommend', '')[:150]}")
+        lines.append(f"❓ {a['text'][:200]} ({a['label']}) / おすすめ: {a.get('recommend', '')[:150]}")
     out, n = [], 0
     for i, ln in enumerate(lines):
         if n + len(ln) > max_chars:
@@ -956,6 +1216,7 @@ def main(argv=None):
     ap.add_argument('--evidence', action='append', default=[])
     ap.add_argument('--applied', action='store_true')
     ap.add_argument('--reask', default='', help='同じ問いに本人の答えが既にあっても問い直す理由 (何が変わったか)')
+    ap.add_argument('--reword', default='', help='開いた問いを同じ印のまま言い直す (同じ key、 何を変えたか)')
     ap.add_argument('--denied', default='', help='その変更を書く時の守りが止めた理由 (判定の道具が「要らない」 と言っても立てる)')
     ap.add_argument('--label', action='append', default=[])
     ap.add_argument('--quote', default='')
@@ -983,10 +1244,10 @@ def main(argv=None):
             items = [{'text': t, 'recommend': a.recommend[i] if a.recommend else '',
                       'ground': a.ground[i] if len(a.ground) == n else a.ground[0], 'keys': a.key,
                       'evidence': (a.evidence[i] if len(a.evidence) == n else (a.evidence[0] if a.evidence else '')),
-                      'applied': a.applied, 'reask': a.reask, 'denied': a.denied} for i, t in enumerate(a.text)]
+                      'applied': a.applied, 'reask': a.reask, 'denied': a.denied, 'reword': a.reword} for i, t in enumerate(a.text)]
             res = ask(a.root, items, session=a.session, agent=a.agent, project=a.project)
             _print(res) if a.json else print(format_block(res))
-            return 0 if any(r['status'] in ('made', 'reused') for r in res) else 3
+            return 0 if any(r['status'] in ('made', 'reused', 'reworded') for r in res) else 3
         if a.cmd == 'answer':
             _print(answer(a.root, a.label, a.quote, a.binding, reading=a.reading, recorded=a.recorded, session=a.session))
             return 0
@@ -1046,12 +1307,15 @@ def main(argv=None):
 
 def selftest():
     ok = True
+    verbose = bool(os.environ.get('BOARD_ASKS_SELFTEST_VERBOSE'))   # PASS lines too (board_asks.mutants.json reads them)
 
     def check(cond, msg):
         nonlocal ok
         if not cond:
             ok = False
             print('FAIL', msg)
+        elif verbose:
+            print('PASS', msg)
     saved = {k: os.environ.get(k) for k in ('BOARD_ASKS_PREFIX', 'BOARD_ASKS_STATE_DIR')}
     try:
         with tempfile.TemporaryDirectory() as td:
@@ -1095,7 +1359,7 @@ def selftest():
                      validator=Path(td) / 'missing.py')
             check(r7[0]['status'] == 'made' and r7[0]['message'].startswith('⚠️'), '判定の道具が無ければ立てて、 確かめていないと言う')
             blk = format_block(r)
-            check('〔問 H1〕 問い一' in blk and 'おすすめ: はい' in blk, '問いの段の形')
+            check('問い一 〔問 H1〕' in blk and 'おすすめ: はい' in blk and not blk.startswith('〔'), '問いの段の形 (中身が先、 印は後ろ)')
             check(shown_by(load(led), 's2') == ['H1'], '出し直した問いも見せた問いに数える')
             # binding
             o2 = ['H1', 'H2']
@@ -1172,35 +1436,54 @@ def selftest():
             rb = ask(None, [{'text': '問い一', 'ground': 'choice', 'keys': ['todo:x:1']}], session='s5', path=led)
             check(rb[0]['status'] == 'answered-before' and rb[0]['label'] == 'H1' and rb[0]['quote'] == 'H1 です',
                   f'同じ key に本人の答えがあれば問わずにその答えを返す {rb}')
-            check('(問わない) 〔問 H1〕' in format_block(rb), '答え済みの印と本人の語を出す')
+            check('(問わない) 問い一 〔問 H1〕' in format_block(rb), '答え済みの印と本人の語を出す')
             rb2 = ask(None, [{'text': '別の問い', 'ground': 'choice', 'keys': ['todo:x:1']}], session='s5', path=led)
             check(rb2[0]['status'] == 'refused' and '別の問いなら key' in rb2[0]['message'] and 'H1 です' in rb2[0]['message'],
                   '同じ key の別の文の問いには前の答えを答えとして返さず、 前の答えを見せて断る')
             rr = ask(None, [{'text': '問い一 (前提が変わった)', 'ground': 'choice', 'keys': ['todo:x:1'], 'reask': '期日が変わった'}],
                      session='s5', path=led)
             check(rr[0]['status'] == 'made', '理由つきなら問い直せる')
-            # one policy check per request, put by the requester (native id in actor.task too)
+            # one policy check per piece of work; refused from a worker of the request (native id in actor.task too)
             board = Path(td) / 'board'
             (board / 'events' / 'proj' / 'th').mkdir(parents=True)
-            (board / 'events' / 'proj' / 'th' / 'R1--20260101T000000Z-claude-abc123.json').write_text(json.dumps(
-                {'kind': 'request', 'event_id': '20260101T000000Z-claude-abc123',
+            rid = '20260101T000000Z-claude-abc123'
+            (board / 'events' / 'proj' / 'th' / f'R1--{rid}.json').write_text(json.dumps(
+                {'kind': 'request', 'event_id': rid, 'request_id': rid, 'assignee': {'agent': 'claude', 'session_id': 'role-x-worker'},
                  'actor': {'agent': 'claude', 'session_id': 'role-x-y', 'task': 'deadbeef (opus)'}}), encoding='utf-8')
-            pk = ['request:20260101T000000Z-claude-abc123']
+            (board / 'events' / 'proj' / 'th' / 'C1--20260101T000100Z-claude-def456.json').write_text(json.dumps(
+                {'kind': 'claim', 'event_id': '20260101T000100Z-claude-def456', 'request_id': rid,
+                 'actor': {'agent': 'claude', 'session_id': 'role-x-worker', 'task': 'feedf00d (opus)'}}), encoding='utf-8')
+            pk = [f'request:{rid}']
             check(ask(board, [{'text': '方針でよいか', 'ground': 'policy'}], session='deadbeef-1', path=led)[0]['status'] == 'refused',
-                  '方針の確認には依頼の key が要る')
+                  '方針の確認には依頼か窓の key が要る')
             check(ask(None, [{'text': '方針でよいか', 'ground': 'policy', 'keys': ['request:nowhere']}], session='deadbeef-1',
-                      path=led)[0]['status'] == 'refused', '依頼の作者を確かめられなければ方針の確認は立てない')
+                      path=led)[0]['status'] == 'refused', '依頼の event を確かめられなければ方針の確認は立てない')
             rw = ask(None, [{'text': '方針の中の選択をどうするか', 'ground': 'choice'}], session='worker-9', path=led)
             check(rw[0]['status'] == 'made' and '--ground policy' in rw[0]['message'], '方針の語を別の理由で問うと注意を添える')
-            check(ask(board, [{'text': '方針の中の選択', 'ground': 'policy', 'keys': pk}], session='worker-9', path=led)[0]['status'] == 'refused',
-                  '依頼元でない session は方針の確認を立てない')
+            rwk = ask(board, [{'text': '方針の中の選択', 'ground': 'policy', 'keys': pk}], session='feedf00d-2222', path=led)
+            check(rwk[0]['status'] == 'refused' and 'worker' in rwk[0]['message'], f'その依頼の worker (claim した session) は方針の確認を立てない {rwk}')
             rp = ask(board, [{'text': '方針でよいか', 'ground': 'policy', 'keys': pk}], session='deadbeef-1111', path=led)
             check(rp[0]['status'] == 'made', f'role id で出した依頼でも、 task の中の native id の session は立てられる {rp}')
             check(ask(board, [{'text': '方針でよいか', 'ground': 'policy', 'keys': pk}], session='deadbeef-1111', path=led)[0]['status'] == 'reused',
                   '同じ依頼の方針の確認は 1 回だけ (2 回目は同じ印)')
+            check(ask(board, [{'text': '方針でよいか', 'ground': 'policy', 'keys': pk}], session='cafe1234-3333', path=led)[0]['status'] == 'reused',
+                  '依頼元を引き継いだ session (作者でも worker でもない) も門を通る (同じ問いなので同じ印)')
+            rs = ask(None, [{'text': '窓の作業の方針でよいか', 'ground': 'policy', 'keys': ['session:abcd0123-4444']}],
+                     session='abcd0123-4444', path=led)
+            check(rs[0]['status'] == 'made', f'掲示板の依頼の無い窓は自分の id の key で方針の確認を立てられる {rs}')
+            check(ask(None, [{'text': '別の窓の方針', 'ground': 'policy', 'keys': ['session:0000ffff-5555']}], session='abcd0123-4444',
+                      path=led)[0]['status'] == 'refused', '別の窓の id の key では立てない')
+            # rewording keeps the label
+            rr0 = ask(None, [{'text': '研究会に行くか', 'ground': 'choice', 'keys': ['ev:1']}], session='s11', path=led)
+            rr1 = ask(None, [{'text': '研究会 (11/16、 配信あり) に行くか', 'ground': 'choice', 'keys': ['ev:1'], 'reword': '日付と配信を足した'}],
+                      session='s11', path=led)
+            check(rr1[0]['status'] == 'reworded' and rr1[0]['label'] == rr0[0]['label']
+                  and state(load(led))[rr0[0]['label']]['text'].startswith('研究会 (11/16'), f'言い直しは同じ印のまま文を変える {rr1}')
+            check('--reword' in ask(None, [{'text': '研究会に行くかどうか', 'ground': 'choice', 'keys': ['ev:1']}], session='s11',
+                                    path=led)[0]['message'], '同じ key の別の文は、 言い直しの道を添えて断る')
             check('H1' in precompact_text(None, {'session_id': 's1'}, path=led), '圧縮の前の指示に印を出す')
             d = digest(None, 's1', path=led)
-            check('✅ H1' in d and 'H1 です' in d, f'開始・圧縮の後の出力 {d[:160]}')
+            check('✅ 問い一 (H1)' in d and 'H1 です' in d and '番号を振らずに' in d, f'開始・圧縮の後の出力 {d[:160]}')
             check(digest(None, 'nobody', path=led) == '', '問いの無い session には何も出さない')
             # hooks on a transcript
             tr = Path(td) / 't.jsonl'
@@ -1213,17 +1496,17 @@ def selftest():
                 tr.write_text('\n'.join(json.dumps(x, ensure_ascii=False) for x in lines) + '\n', encoding='utf-8')
             r8 = ask(None, [{'text': '問い八', 'ground': 'choice'}, {'text': '問い九', 'ground': 'choice'}], session='s9', path=led)
             l8, l9 = r8[0]['label'], r8[1]['label']
-            write_tr(('RCA を見せて', f'### 1. 報告\n\n〔問 {l8}〕 問い八\n\n〔問 {l9}〕 問い九'))
+            write_tr(('RCA を見せて', f'### 1. 報告\n\n問い八 〔問 {l8}〕\n\n問い九 〔問 {l9}〕'))
             w0, w1 = windows(str(tr))
             check(labels_in(w0) == [l8, l9] and w1 == '', '直前の窓の問いの印')
             check(hook_stop(None, {'session_id': 's9', 'transcript_path': str(tr)}, path=led) is None, '印つきの問いは差し戻さない')
             msg = hook_prompt(None, {'session_id': 's9', 'transcript_path': str(tr), 'prompt': '１はメールで伝えよう'}, path=led)
-            check(msg and '🔒' in msg, f'見出しの番号と問いの段が並ぶ返事への「１は…」 は推定 {msg}')
+            check(msg and '🔒' in msg and '中身' in msg, f'見出しの番号と問いの段が並ぶ返事への「１は…」 は推定 {msg}')
             check(hook_pretool(None, {'session_id': 's9', 'tool_name': 'SendMessage', 'tool_input': {}}, path=led), '推定で止まる')
-            write_tr(('RCA を見せて', f'### 1. 報告\n\n〔問 {l8}〕 問い八\n\n〔問 {l9}〕 問い九'),
-                     ('１はメールで伝えよう', f'{l8} (問い八) と読みました。よいですか'))
+            write_tr(('RCA を見せて', f'### 1. 報告\n\n問い八 〔問 {l8}〕\n\n問い九 〔問 {l9}〕'),
+                     ('１はメールで伝えよう', f'問い八 ({l8}) と読みました。よいですか'))
             check(hook_stop(None, {'session_id': 's9', 'transcript_path': str(tr)}, path=led) is None,
-                  '候補の印を名指した確かめの文は差し戻さない')
+                  '候補を中身で名指し、 印を後ろに添えた確かめの文は差し戻さない')
             msg = hook_prompt(None, {'session_id': 's9', 'transcript_path': str(tr), 'prompt': 'はい'}, path=led)
             check(msg and '確かめた読み' in msg and l8 in msg, f'確かめの文が名指した印に「はい」 が結ぶ {msg}')
             check(hook_pretool(None, {'session_id': 's9', 'tool_name': 'SendMessage', 'tool_input': {}}, path=led) is None, '解ける')
@@ -1242,6 +1525,89 @@ def selftest():
             write_tr(('x', '規則は「送る前に よいですか と聞く」 です。 説明だけです。'))
             check(hook_stop(None, {'session_id': 's10', 'transcript_path': str(tr)}, path=led) is None,
                   '規則を説明する地の文の中の、 鉤括弧で引いた問いの語は数えない')
+            # paragraphs that do not ask the owner here (forms measured in send-backs; the sentences are synthetic)
+            for i, txt in enumerate((
+                    '- **済んだこと**: 試験が通りました。 worker が決めてほしいと言った細かい 4 つは、 検収で決まりました。',
+                    '承認がまだです。 本人にはその worker の窓から確認が出るので、 そこで答えてください。',
+                    '今から印で答えを頼むのをやめます。 本人は普段の言葉で答えてください。',
+                    '決めてほしいことは、 それぞれの窓を開いて答えてください。',
+                    '**本人に決めてほしいもの**\n\n- 面接と重なる予定をどうするか 〔問 %s〕' % l8)):
+                write_tr(('x', txt))
+                check(hook_stop(None, {'session_id': f'fp{i}', 'transcript_path': str(tr)}, path=led) is None,
+                      f'本人にこの窓で問うていない段は差し戻さない: {txt[:30]}')
+            # real questions are still sent back
+            for i, txt in enumerate(('どちらの案で進めるか、 決めてください。',
+                                     'A と B のどちらで送るか、 この窓で答えてください。',
+                                     '**本人に決めてほしいこと**\n\n- 研究会に行くか\n- 予定をずらすか',
+                                     'これで進めてよいですか')):
+                write_tr(('x', txt))
+                check(bool(hook_stop(None, {'session_id': f'tp{i}', 'transcript_path': str(tr)}, path=led)),
+                      f'本当の問いは今までどおり差し戻す: {txt[:30]}')
+
+            # the window = the text since the previous Stop; the same paragraph is never sent back twice
+            def write_raw(*rows):
+                lines = []
+                for kind, text_ in rows:
+                    if kind == 'stop':
+                        lines.append({'type': 'system', 'subtype': 'stop_hook_summary'})
+                    elif kind == 'user':
+                        lines.append({'type': 'user', 'message': {'role': 'user', 'content': text_}})
+                    elif kind == 'meta':
+                        lines.append({'type': 'user', 'isMeta': True, 'message': {'role': 'user', 'content': text_}})
+                    else:
+                        lines.append({'type': 'assistant', 'message': {'role': 'assistant', 'content': [{'type': 'text', 'text': text_}]}})
+                tr.write_text('\n'.join(json.dumps(x, ensure_ascii=False) for x in lines) + '\n', encoding='utf-8')
+            old_ask = 'このあと、 A と B のどちらにするか決めてください。'
+            write_raw(('user', '状況は？'), ('reply', old_ask), ('stop', ''),
+                      ('user', '<task-notification>done</task-notification>'), ('reply', '背景の作業が終わりました。 問いはありません。'))
+            check(turn_window(str(tr))[0] == '背景の作業が終わりました。 問いはありません。', '今の窓 = 前の Stop の後の返事')
+            check(hook_stop(None, {'session_id': 'tw1', 'transcript_path': str(tr)}, path=led) is None,
+                  '前の Stop で判定を通った段を、 後の turn (背景の知らせで始まる) で読み直さない')
+            write_raw(('user', '状況は？'), ('reply', old_ask))
+            first = hook_stop(None, {'session_id': 'tw2', 'transcript_path': str(tr)}, path=led)
+            write_raw(('user', '状況は？'), ('reply', old_ask), ('user', 'Another Claude session sent a message: x'),
+                      ('reply', '別の窓の知らせを読みました。'))
+            again = hook_stop(None, {'session_id': 'tw2', 'transcript_path': str(tr)}, path=led)
+            check(bool(first) and again is None, f'窓の印の無い会話記録でも、 一度差し戻した段は次の turn で差し戻さない {again}')
+            write_raw(('user', 'x'), ('reply', '返事'), ('meta', 'Stop hook feedback: 🧭 別の hook の差し戻し'), ('stop', ''),
+                      ('reply', '追記です。 これで送ってよいですか'))
+            check(bool(hook_stop(None, {'session_id': 'tw3', 'transcript_path': str(tr), 'stop_hook_active': True}, path=led)),
+                  '別の hook の差し戻しの後の追記は判定する')
+            write_raw(('user', 'x'), ('reply', '返事'), ('meta', 'Stop hook feedback: board-asks: 本人に答えを求める段に…'), ('stop', ''),
+                      ('reply', '追記です。 これで送ってよいですか'))
+            check(hook_stop(None, {'session_id': 'tw4', 'transcript_path': str(tr), 'stop_hook_active': True}, path=led) is None,
+                  '自分が差し戻した続きは判定しない')
+            write_raw(('user', 'x'), ('reply', '返事です。 これで送ってよいですか'))
+            check(hook_stop(None, {'session_id': 'tw5', 'transcript_path': str(tr), 'stop_hook_active': True}, path=led) is None,
+                  '続きの形が分からない (Stop の記録が無い) ときは判定しない')
+            # labels used as numbers for the owner (a session that showed two asks with content words)
+            r12 = ask(None, [{'text': '研究会の出欠を出すか', 'ground': 'choice'}, {'text': '面接と重なる家庭の予定をどうするか', 'ground': 'choice'}],
+                      session='s12', path=led)
+            la, lb_ = r12[0]['label'], r12[1]['label']
+            stop12 = lambda: hook_stop(None, {'session_id': 's12', 'transcript_path': str(tr)}, path=led) or ''
+            write_tr(('x', f'研究会の出欠を出すか 〔問 {la}〕\n\nどれか 1 つなら「{la} 送って」 と返してください。'))
+            u = stop12()
+            check('印・番号で答えさせる' in u, f'本人に印を打たせる文を差し戻す {u}')
+            write_tr(('x', '違う所があれば、 番号で教えてください。'))
+            check('番号で答えさせる' in stop12(), '「番号で教えて」 を差し戻す')
+            write_tr(('x', f'答えは「{la} 1 つ目」 か「{la} 2 つ目」 でどうぞ。'))
+            check('番号で答えさせる' in stop12(), '序数の答え方を差し戻す')
+            write_tr(('x', f'{la}・{lb_} は、 検収係が決めます。'))
+            check('中身の無い印の並び' in stop12(), '中身の無い印の並びを差し戻す')
+            write_tr(('x', f'- **{la}** 研究会の出欠を出すか\n'))
+            check('行の頭に置いた印' in stop12(), '行の頭の印を差し戻す')
+            for i, txt in enumerate((f'研究会の出欠 ({la}) と面接の予定 ({lb_}) は、 検収係が決めます。',
+                                     f'{la}・{lb_} (研究会の出欠と面接の予定) は、 検収係が決めます。',
+                                     '今から印で答えを頼むのをやめます。 印で答えてもらうのは、 もうしません。',
+                                     '本人は「送って」 と返せば足ります。',
+                                     f'本人は「{la} 1 つ目」 と返した。',
+                                     '番号で答えが返ってくる件を調べる worker を起こしました。',
+                                     '本人の「いまだに行番号で答えを返してくる」 の件です。',
+                                     f'返事が中身を書かずに印だけで呼んだ (「{la}・{lb_} は…」)。',
+                                     # lb_ (not la): a key already sent back above would hide a send-back here
+                                     f'本人に印で答えるよう頼んでいた (「「{lb_} 送って」 と返して」、 「答えるときは番号でどうぞ」)。')):
+                write_tr(('x', txt))
+                check(stop12() == '', f'中身つきの印・やめる宣言・印の無い答え方・過去の報告は差し戻さない: {txt[:30]}')
     finally:
         for k, v in saved.items():
             if v is None:

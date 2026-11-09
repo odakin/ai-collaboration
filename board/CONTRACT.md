@@ -602,7 +602,7 @@ bound to the wrong item, and the agent acts on it in the same turn (measured). A
 answered questions into a one-line "done" (measured).
 
 ```sh
-python3 board_asks.py ask    --root <board> --text '<question>' --recommend '<answer>' --ground <why the owner> [--key todo:<repo>:<id>] [--evidence <repo>@<rev>:<path>]
+python3 board_asks.py ask    --root <board> --text '<question>' --recommend '<answer>' --ground <why the owner> [--key todo:<repo>:<id>] [--evidence <repo>@<rev>:<path>] [--reword '<what changed>']
 python3 board_asks.py answer --root <board> --label H12 --quote '<owner words>' --binding label|order|confirmed|guess [--reading '<one line>']
 python3 board_asks.py list   --root <board> [--open] [--session S]
 python3 board_asks.py digest --root <board> --session S
@@ -610,9 +610,14 @@ python3 board_asks.py digest --root <board> --session S
 
 - **Labels are the board's**: a letter fixed per machine plus that machine's running number (`H12`), never reused, so
   the same question keeps one label in every window and on every day. `ask` prints the block to paste into the reply
-  (`〔問 H12〕 <question>` and the recommended answer). **A key names one question**: an open ask with the same key and
-  the same text is shown again under its label; the same key with another text is refused (split the key per
-  question, or withdraw the old ask first). The letter comes from the hook's configuration and is kept next to the
+  (`<question> 〔問 H12〕` and the recommended answer): **the question first and the label after it**, because the
+  owner reads the question and the label is only a handle; the agent never asks the owner to type a label, a number or
+  an ordinal (rule = claude-config `conventions/concise-output.md#decision-questions`, "作業側の符号だけで聞かない";
+  measured: with the label at the head of the line, replies listed labels without content and told the owner to
+  answer by them). **A key names one question**: an open ask with the same key and the same text is shown again under
+  its label; the same question in other words is `--reword '<what changed>'` and keeps its label (measured:
+  re-asking under a new label changed the owner's handle for one matter twice in a morning); the same key with another
+  question is refused (split the key per question). The letter comes from the hook's configuration and is kept next to the
   ledger for asks typed by hand; without one it is `Q` (a host name's first letter collides with chip names such as
   `M5`, measured).
 - **A gate before asking**: every ask names its ground (a protected part of the owner's document, a rule change that
@@ -627,11 +632,14 @@ python3 board_asks.py digest --root <board> --session S
   another window after the owner had answered them). The same key with another text is refused with the earlier
   answer shown, never handed back as the answer to the new question. `--reask '<what changed>'` asks again and
   records why.
-- **One policy check per request, by the requester**: an ask on the ground "policy check before implementation" needs
-  the key `request:<id>` and is made only by the session that posted that request (its session id, or the native id
-  kept in the request's task field when it was posted under a role id), once; it is refused when the request's event
-  is on neither this board nor a board beside it. Choices inside a worker's policy file are settled at the
-  requester's review, not asked of the owner one by one.
+- **One policy check per piece of work, never from its worker**: an ask on the ground "policy check before
+  implementation" needs the key `request:<id>` (work on a board request) or `session:<own id>` (a window without a
+  board request; another window's id is refused), and is made once per key. It is refused from a worker of that
+  request (its assignee, a session it was handed over to as assignee, or a session that claimed it; the native id kept
+  in the task field counts), and when the request's event is on neither this board nor a board beside it. The
+  requester, a session that took over the requester's work (a conductor's successor) and the reviewer may put it
+  (measured: requiring the posting session refused a successor). Choices inside a worker's policy file are settled at
+  the requester's review, not asked of the owner one by one.
 - **Binding an answer**: the owner may answer by a label this session showed (upper case: `v3` is a version), or by
   position when the latest reply shows only the ask block and the reply before shows no open ask. A quantity ("2件",
   "1つだけ") is not a position, and an affirmation binds only as a short answer on its own. Anything else (another
@@ -641,10 +649,28 @@ python3 board_asks.py digest --root <board> --session S
   the ledger or its markers) stop until the owner's next words settle it. While a guess is pending, only the binding
   hook records the settling answer; a settling `answer` typed by the agent is refused. A guess whose candidates were
   all answered or withdrawn elsewhere stops nothing. An answer that only defers ("H2 は後で") is recorded and leaves
-  the ask open. Reading, searching and drafting are not stopped. The first line of the reply names the label it
-  bound.
+  the ask open. Reading, searching and drafting are not stopped. The first line of the reply names the question it
+  bound by its content, with the label after it ("<question> (H12) への答えと読みました"); a guess is confirmed the
+  same way.
 - **Asking without a label is sent back once**: a paragraph of the reply that asks the owner and carries no ask label
-  is sent back, even beside a labelled one. Drafts in code blocks, quoted lines and phrases in quotes are not counted.
+  is sent back, even beside a labelled one. The addendum says the question is now in the ledger and pastes the tool's
+  block (an addendum cannot remove the earlier unlabelled list from the screen). Not counted: drafts in code blocks,
+  quoted lines and phrases in quotes; reported words ("worker が決めてほしいと言った…"); a sentence that sends the
+  owner to answer in another window ("その窓で答えてください"; "この窓で" still asks); an instruction on how to
+  answer with no question in the sentence ("普段の言葉で答えてください"); a one-line heading is read with the
+  paragraph under it.
+- **Labels used as numbers are sent back once**: a reply that tells the owner to answer by a label, a number or an
+  ordinal (「H14 送って」 と返して / 番号で教えて / 「1 つ目」 か「2 つ目」 で), names two or more labels in a sentence
+  without the content of their questions ("H3・H12・H13 は…"), or puts a label at the head of a line is sent back with
+  a request to restate only those sentences by content. Quotes are cited, not used, and are not counted (one form is
+  still read as used: forms listed in parentheses after a past-tense report, measured).
+- **What the Stop check reads**: only the text written since the previous Stop (the desktop app writes a
+  `stop_hook_summary` record after every Stop's hooks; without one, the text since the owner's last words), and a
+  paragraph or sentence sent back once is never sent back again (its key is kept per session). The first version
+  read everything since the owner's last words and keyed the send-back on the tail of that text, so every later turn
+  started by a task notice or another session's message sent the same earlier paragraph back again (measured, many
+  times in one window). A continuation after another hook's send-back is judged (its addendum is new text); one after
+  this hook's own send-back, or of an unknown shape, is not.
 - **After a compaction and at a session's start** the session's open and answered asks (the owner's words verbatim)
   are printed; before a compaction the summarizer is told to keep them as question → answer → what was done.
 - **Store**: an append-only ledger local to the board checkout (`.local/asks.jsonl`, the same location rule as item

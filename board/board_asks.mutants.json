@@ -1,0 +1,189 @@
+{
+  "_comment": "board_asks.py の Stop の網の直し (前の Stop からの文だけを読む・同じ段を 2 度差し戻さない・報告と別の窓への案内と答え方の案内を問いと読まない・差し戻しの続きの扱い・印の使い方の検査・方針の問いの関門) の selftest が、 直した箇所を 1 つずつ外した版でそれぞれ落ちるか",
+  "target": "board_asks.py",
+  "run": "env BOARD_ASKS_SELFTEST_VERBOSE=1 python3 {} --selftest",
+  "fail_marker": "FAIL ",
+  "pass_marker": "PASS ",
+  "mutants": [
+    {
+      "name": "前の Stop からの文でなく、 本人の最後の発言からの文を読む (直す前の窓)",
+      "pairs": [
+        [
+          "    text = w0 if turn is None else turn\n",
+          "    text = w0\n"
+        ]
+      ],
+      "expect_fail": [
+        "前の Stop で判定を通った段を"
+      ]
+    },
+    {
+      "name": "一度差し戻した段を覚えない",
+      "pairs": [
+        [
+          "            if k not in seen and k not in new:\n                new.append(k)\n                loose.append",
+          "            if True:\n                new.append(k)\n                loose.append"
+        ]
+      ],
+      "expect_fail": [
+        "一度差し戻した段は次の turn で差し戻さない"
+      ]
+    },
+    {
+      "name": "人の言葉の報告 (「…と言った」) を問いと読む",
+      "pairs": [
+        [
+          "        if REPORTED_AFTER.match(u[m.end():]):\n            continue\n",
+          ""
+        ]
+      ],
+      "expect_fail": [
+        "本人にこの窓で問うていない段は差し戻さない: - **済んだこと**"
+      ]
+    },
+    {
+      "name": "別の窓で答えてもらう案内を問いと読む",
+      "pairs": [
+        [
+          "        if ROUTED_RE.search(sent):\n            continue\n",
+          ""
+        ]
+      ],
+      "expect_fail": [
+        "本人にこの窓で問うていない段は差し戻さない: 決めてほしいことは、 それぞれの窓"
+      ]
+    },
+    {
+      "name": "答え方の案内 (問いの無い「普段の言葉で答えてください」) を問いと読む",
+      "pairs": [
+        [
+          "        if m.group(0) in MANNER_ASKS and not QUESTION_CONTENT.search(sent):\n            continue\n",
+          ""
+        ]
+      ],
+      "expect_fail": [
+        "本人にこの窓で問うていない段は差し戻さない: 今から印で答えを頼むのをやめます"
+      ]
+    },
+    {
+      "name": "見出しの 1 行を下の段とまとめずに読む",
+      "pairs": [
+        [
+          "        if '\\n' not in p.strip() and HEADING_PARA.match(p.strip()) and i + 1 < len(raw):",
+          "        if False:"
+        ]
+      ],
+      "expect_fail": [
+        "本人にこの窓で問うていない段は差し戻さない: **本人に決めてほしいもの**"
+      ]
+    },
+    {
+      "name": "差し戻しの続きを全部見ない (別の hook の差し戻しの後の追記も見ない)",
+      "pairs": [
+        [
+          "    if data.get('stop_hook_active') and (own is None or own):\n",
+          "    if data.get('stop_hook_active'):\n"
+        ]
+      ],
+      "expect_fail": [
+        "別の hook の差し戻しの後の追記は判定する"
+      ]
+    },
+    {
+      "name": "自分が差し戻した続きも判定する",
+      "pairs": [
+        [
+          "    if data.get('stop_hook_active') and (own is None or own):\n",
+          "    if data.get('stop_hook_active') and own is None:\n"
+        ]
+      ],
+      "expect_fail": [
+        "自分が差し戻した続きは判定しない"
+      ]
+    },
+    {
+      "name": "外側の引用の中の例を、 本人に印を打たせる文と読む",
+      "pairs": [
+        [
+          "        if before.count('「') > before.count('」'):\n            continue",
+          "        if False:\n            continue"
+        ]
+      ],
+      "expect_fail": [
+        "中身つきの印・やめる宣言・印の無い答え方・過去の報告は差し戻さない: 本人に印で答えるよう頼んでいた"
+      ]
+    },
+    {
+      "name": "「印で答えてもらうのは、 もうしません」 の打ち消しを見ない",
+      "pairs": [
+        [
+          "        if not NEGATED_AFTER.match(u[m.end():]):\n",
+          "        if True:\n"
+        ]
+      ],
+      "expect_fail": [
+        "中身つきの印・やめる宣言・印の無い答え方・過去の報告は差し戻さない: 今から印で答えを頼むのをやめます"
+      ]
+    },
+    {
+      "name": "印の並びで、 中身の語の有無を見ない",
+      "pairs": [
+        [
+          "            if any(_content_words(heads[lb]) and not any(w in sent for w in _content_words(heads[lb])) for lb in named):",
+          "            if True:"
+        ]
+      ],
+      "expect_fail": [
+        "(研究会の出欠と面接の予定) は"
+      ]
+    },
+    {
+      "name": "方針の問いを、 依頼の worker からも立てさせる",
+      "pairs": [
+        [
+          "            if any(_same_session(x, me) for x in workers) and not any(_same_session(x, me) for x in authors):",
+          "            if False:"
+        ]
+      ],
+      "expect_fail": [
+        "その依頼の worker (claim した session) は方針の確認を立てない"
+      ]
+    },
+    {
+      "name": "掲示板の依頼の無い窓の key (session:) を受けない",
+      "pairs": [
+        [
+          "        if not rids and not sids:",
+          "        if not rids:"
+        ]
+      ],
+      "expect_fail": [
+        "掲示板の依頼の無い窓は自分の id の key で方針の確認を立てられる"
+      ]
+    },
+    {
+      "name": "問いの段を、 印を先に出す元の形に戻す",
+      "pairs": [
+        [
+          "            lines.append(f\"{r['text']} 〔問 {r['label']}〕\")",
+          "            lines.append(f\"〔問 {r['label']}〕 {r['text']}\")"
+        ]
+      ],
+      "expect_fail": [
+        "問いの段の形 (中身が先、 印は後ろ)"
+      ]
+    },
+    {
+      "name": "言い直しを受けず、 同じ key の別の文を断るだけにする",
+      "pairs": [
+        [
+          "        if it.get('reword'):",
+          "        if False:"
+        ]
+      ],
+      "expect_fail": [
+        "言い直しは同じ印のまま文を変える"
+      ]
+    }
+  ]
+}
