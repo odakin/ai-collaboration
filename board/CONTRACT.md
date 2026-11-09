@@ -573,23 +573,39 @@ python3 board_asks.py digest --root <board> --session S
 
 - **Labels are the board's**: a letter fixed per machine plus that machine's running number (`H12`), never reused, so
   the same question keeps one label in every window and on every day. `ask` prints the block to paste into the reply
-  (`〔問 H12〕 <question>` and the recommended answer); an open ask with the same key is reused rather than asked twice.
+  (`〔問 H12〕 <question>` and the recommended answer). **A key names one question**: an open ask with the same key and
+  the same text is shown again under its label; the same key with another text is refused (split the key per
+  question, or withdraw the old ask first). The letter comes from the hook's configuration and is kept next to the
+  ledger for asks typed by hand; without one it is `Q` (a host name's first letter collides with chip names such as
+  `M5`, measured).
 - **A gate before asking**: every ask names its ground (a protected part of the owner's document, a rule change that
   needs a ruling, an outbound message, the owner's own choice, a policy check before implementation, a fact only the
-  owner knows). A ground a machine can judge is judged by a validator (`BOARD_ASKS_VALIDATOR`): a change that needs no
-  ruling is refused with "apply it and report", including asks to ratify such a change after the fact (measured).
-- **An earlier answer comes first**: an ask whose key matches a question the owner already answered is not made; the
-  earlier answer (the owner's words) is printed instead (measured: the same questions were asked again in another
-  window after the owner had answered them). `--reask '<what changed>'` asks again and records why.
+  owner knows). A change named by `--evidence` is judged by a validator (`BOARD_ASKS_VALIDATOR`) whatever the ground:
+  a change that needs no ruling is refused with "apply it and report", including asks to ratify such a change after
+  the fact (measured). The validator runs outside the ledger's lock.
+- **An earlier answer comes first**: an ask whose key and text match a question the owner already answered is not
+  made; the earlier answer (the owner's words) is printed instead (measured: the same questions were asked again in
+  another window after the owner had answered them). The same key with another text is refused with the earlier
+  answer shown, never handed back as the answer to the new question. `--reask '<what changed>'` asks again and
+  records why.
 - **One policy check per request, by the requester**: an ask on the ground "policy check before implementation" needs
-  the key `request:<id>` and is made only by the session that posted that request, once; choices inside a worker's
-  policy file are settled at the requester's review, not asked of the owner one by one.
-- **Binding an answer**: the owner may answer by label, or by position when the latest reply shows only the ask block
-  and the reply before shows no open ask. Anything else (another numbered list in the reply, open asks in two replies,
-  a position outside the block) is a `guess`: the answer is recorded with its candidates, and the session's effective
-  actions (sending, recording a decision, messaging another session, closing a session) stop until the owner's next
-  words settle it. Reading, searching and drafting are not stopped. The first line of the reply names the label it
+  the key `request:<id>` and is made only by the session that posted that request (its session id, or the native id
+  kept in the request's task field when it was posted under a role id), once; it is refused when the request's event
+  is on neither this board nor a board beside it. Choices inside a worker's policy file are settled at the
+  requester's review, not asked of the owner one by one.
+- **Binding an answer**: the owner may answer by a label this session showed (upper case: `v3` is a version), or by
+  position when the latest reply shows only the ask block and the reply before shows no open ask. A quantity ("2件",
+  "1つだけ") is not a position, and an affirmation binds only as a short answer on its own. Anything else (another
+  numbered list or numbered table row in the reply, open asks in two replies, a position outside the block, two
+  digits followed by more than an affirmation) is a `guess`: the answer is recorded with its candidates, and the
+  session's effective actions (sending, recording a decision, messaging, starting or closing another session, writing
+  the ledger or its markers) stop until the owner's next words settle it. While a guess is pending, only the binding
+  hook records the settling answer; a settling `answer` typed by the agent is refused. A guess whose candidates were
+  all answered or withdrawn elsewhere stops nothing. An answer that only defers ("H2 は後で") is recorded and leaves
+  the ask open. Reading, searching and drafting are not stopped. The first line of the reply names the label it
   bound.
+- **Asking without a label is sent back once**: a paragraph of the reply that asks the owner and carries no ask label
+  is sent back, even beside a labelled one. Drafts in code blocks, quoted lines and phrases in quotes are not counted.
 - **After a compaction and at a session's start** the session's open and answered asks (the owner's words verbatim)
   are printed; before a compaction the summarizer is told to keep them as question → answer → what was done.
 - **Store**: an append-only ledger local to the board checkout (`.local/asks.jsonl`, the same location rule as item
