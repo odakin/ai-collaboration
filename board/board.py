@@ -29,6 +29,8 @@ view=importlib.util.module_from_spec(spec); spec.loader.exec_module(view)
 GIT_TIMEOUT=int(os.environ.get('AGENT_BOARD_GIT_TIMEOUT','120'))  # seconds per git call (clone/push of the temporary checkout)
 NOTIFY_POLL_S=2     # watch: how often the local last-push note is looked at between remote checks
 DEFAULT_REVIEWER_ENV='AGENT_BOARD_DEFAULT_REVIEWER'   # request: reviewer session id when --reviewer is absent; <project> expands
+SEPARATE_REVIEWER_ENV='AGENT_BOARD_REVIEWER_SEPARATE'  # request: `1` = the requesting window may not accept it (owner wiring for a window that has a separate reviewer); CONTRACT.md#separate-reviewer
+SEPARATE_REVIEWER_LINE='review-separate: yes'          # written into such a request's details; accept reads it there, not in its own environment
 LAUNCH_CONFIG_DIR_ENV='AGENT_BOARD_LAUNCH_CONFIG_DIR'  # request to a role: the CLI config dir the worker runs under (a logged-in account); owner wiring
 LAUNCH_MODEL_ENV='AGENT_BOARD_LAUNCH_MODEL'            # request to a role: default --model (else --expect-model, else the requester's own model)
 LAUNCH_EFFORT_ENV='AGENT_BOARD_LAUNCH_EFFORT'          # request to a role: the effort when --effort is not given (else the requester's CLAUDE_EFFORT)
@@ -999,6 +1001,47 @@ def _compactions(native):
     return n
 
 
+def separate_reviewer():
+    """Whether the request being posted is one its requesting window may not accept (env SEPARATE_REVIEWER_ENV = `1`,
+    set by the owner's wiring for a window that has a separate reviewer; CONTRACT.md#separate-reviewer)."""
+    return os.environ.get(SEPARATE_REVIEWER_ENV,'').strip()=='1'
+
+
+def accepting_native(a):
+    """The native id of the window running this accept or revise: the first word of --session-name, else the session
+    environment (CLAUDE_CODE_SESSION_ID, CODEX_THREAD_ID for Codex). '' when neither says. Measured: reviewers that left
+    --session-name out were recorded as `review-nth: unknown`, so which window had reviewed was lost."""
+    head=(getattr(a,'session_name',None) or '').strip().split(' ')[0]
+    if head: return head
+    env=(os.environ.get('CODEX_THREAD_ID' if getattr(a,'agent','')=='codex' else 'CLAUDE_CODE_SESSION_ID') or '').strip()
+    return env if re.fullmatch(r'[0-9a-f]{8}[0-9a-f-]*',env) else ''
+
+
+def self_review(native, req):
+    """Whether the window `native` is the window that made the request `req`. The requester is read from the request's
+    actor: its native session id, else the head of its session name. Measured: the earlier check compared the session
+    name only, which a request posted without --session-name carries as `workflow`, so it never fired."""
+    n8=(native or '')[:8]
+    return len(n8)==8 and bool(re.fullmatch(r'[0-9a-f]{8}',n8)) and n8==_native8(req.get('actor'))
+
+
+def self_review_line(a, events):
+    """The `review-self` line of an ordinary accept, or '' when another window accepts. A request whose details carry
+    SEPARATE_REVIEWER_LINE is refused here when its requesting window accepts it, unless `--self-review '<why the
+    reviewer cannot take it, and the reviewer window started again>'` says why (written into the line)."""
+    req=next(e for e in events if e['event_id']==a.request and e['kind']=='request')
+    if not self_review(accepting_native(a),req): return ''
+    why=' '.join((getattr(a,'self_review',None) or '').split())
+    if SEPARATE_REVIEWER_LINE in (req.get('details') or '').splitlines() and not why:
+        raise ValueError('依頼を出した窓はこの依頼を受け取らない (依頼に '+SEPARATE_REVIEWER_LINE+' = 別の検収係の窓が受け取る。'
+                         ' CONTRACT.md#separate-reviewer)。 受け取りは検収役の窓で。 検収役の窓が落ちていて自分で受け取るなら'
+                         " --self-review '<落ちている理由と、 起こし直した検収役の窓>' を足す")
+    if why and len(why)<8:
+        raise ValueError("--self-review は検収役が受け取れない理由と起こし直した窓を書く (8 字以上)")
+    print('⚠️ 受け取る窓が依頼を出した窓と同じ (この掲示板に検収係が居るなら、 検収係が受け取る)',file=sys.stderr)
+    return 'review-self: yes'+(f' ({why[:200]})' if why else '')
+
+
 def review_form(a, events, cfg, ev):
     """The accept gate of a board whose board.json sets `accept_review_form` (CONTRACT.md#accept-review-form). Before
     an acceptance is posted: (1) the posts elsewhere that build on this request are printed and written into the
@@ -1046,20 +1089,20 @@ def review_form(a, events, cfg, ev):
             via=next((h.split(':')[1] for h in hit if h.startswith('spec:')),'')
             print(f"   {e['event_id']} {e['project']['key']}/{e['thread_id']} {e['kind']}: {str(e.get('summary') or '')[:90]}"
                   +(f" (依頼書 {via} が引く)" if via else '')+(f" / 本人の発言: {q.group(1)[:90]}" if q else ''),file=sys.stderr)
-    native=(a.session_name or '').split(' ')[0]
+    native=accepting_native(a)
     mine=[e for e in events if e['kind'] in ('accept','revise') and native
-          and ((e.get('actor') or {}).get('task') or '').startswith(native)]
+          and (((e.get('actor') or {}).get('task') or '').startswith(native)
+               or f'review-window: {native[:8]}' in (e.get('details') or '').splitlines())]
     comp=_compactions(native)
-    req_native=((req.get('actor') or {}).get('task') or '').split(' ')[0]
     lines=[*(f'review-check: {c}' for c in checked),*(f'review-decided: {d}' for d in decided),
            *(f'review-owner: {o}' for o in owner),*(['review-questions: none'] if none_q else []),
            *(f'review-leftover: {l}' for l in leftover),
            f'review-prior: {len(prior)}'+(' ('+', '.join(e['event_id'] for e,_ in prior[-10:])+')' if prior else ''),
-           f'review-nth: {len(mine)+1}' if native else 'review-nth: unknown (no --session-name)',
+           f'review-nth: {len(mine)+1}' if native else 'review-nth: unknown (no --session-name, no session environment)',
            f'review-compactions: {comp}' if comp is not None else 'review-compactions: unknown (no transcript on this machine)']
-    if len(native)>=8 and req_native[:8]==native[:8]:
-        lines.append('review-self: yes')
-        print('⚠️ 受け取る窓が依頼を出した窓と同じ (この掲示板に検収係が居るなら、 検収係が受け取る)',file=sys.stderr)
+    if native: lines.append(f'review-window: {native[:8]}')
+    selfl=self_review_line(a,events)
+    if selfl: lines.append(selfl)
     text='\n'.join(x for x in (ev.get('details'),*lines) if x)
     if len(text)>4000:
         raise ValueError(f'accept の検収票が長すぎる ({len(text)} 字 > 4000、 規則 = {rule}): 中身は結果の file に書き、 ここは 1 行ずつの要点に')
@@ -1347,6 +1390,8 @@ def event_from(a, events):
             elif not getattr(a,'stage',None) and getattr(a,'stage_reason',None): a.stage='exempt'
             if policy_stage_details(a):
                 ev['details']='\n'.join(x for x in (ev.get('details'),policy_stage_details(a)) if x)
+            if separate_reviewer():
+                ev['details']='\n'.join(x for x in (ev.get('details'),SEPARATE_REVIEWER_LINE) if x)
     if kind=='handover':
         if not a.to or not a.to_session or not a.role: raise ValueError('handover needs --to, --to-session, --role')
         ev.update(target={'agent':a.to,'session_id':a.to_session},handover_role=a.role)
@@ -2368,6 +2413,8 @@ def main():
     ap.add_argument('--owner-ruling',action='append',default=[],help="accept (review form): a question that needs the owner's own ruling: '<ground>: <問い>' with a ground from the owner-asks GROUNDS (repeatable)")
     ap.add_argument('--no-questions',action='store_true',help='accept (review form): the submission left no question to the requester')
     ap.add_argument('--leftover',action='append',default=[],help="accept (review form): a follow-up of the submission's out-of-scope rest: 'in <where the confirmed policy is>: <rest>' or 'out: <rest>' (repeatable)")
+    ap.add_argument('--self-review',help="accept: the requesting window accepts a request marked for a separate reviewer"
+                    " (CONTRACT.md#separate-reviewer): why the reviewer's window cannot take it, and the reviewer window started again")
     ap.add_argument('--spec-local',help='request / launch to a role: the spec file on the requester\'s side, named only in the'
                     ' worker\'s hand-off text and this machine\'s launch record, never in the post. A restricted request refuses'
                     ' --reference, so this is how its worker finds the spec; on an ordinary request it takes the place of the'
@@ -2697,6 +2744,9 @@ def main():
                 ev['reply_to']=ev.get('reply_to') or re.search(r'^submit: (\S+)$',ev['details'],re.M).group(1)
             if ev['kind']=='accept' and a.policy=='ordinary' and cfg.get('accept_review_form'):
                 ev['details']=review_form(a,events,cfg,ev)
+            elif ev['kind']=='accept' and a.policy=='ordinary':
+                selfl=self_review_line(a,events)   # the separate-reviewer refusal holds on a board without the form too
+                if selfl: ev['details']='\n'.join(x for x in (ev.get('details'),selfl) if x)
             view.assert_writable(events, ev['project']['key'], ev['thread_id'], ev['event_id'])
         except ValueError:
             if attempt==0 and _REUSED: continue
@@ -2777,11 +2827,15 @@ def main():
             import copy
             h=copy.copy(a); h.command='handover'; h.request=ev['event_id']; h.reply_to=ev['event_id']; h.to=a.agent; h.to_session=reviewer
             h.role='reviewer'; h.event_id=None; h.touch=None; h.deliverable=[]; h.reference=[]; h.acceptance=None
-            h.summary=None if a.policy=='encrypted-metadata-only' else f'検収役 = {reviewer} (依頼元 {a.session[:8]} の window が閉じても受領できる id。 依頼元が生きていれば同じ id で受領する)'
+            h.summary=None if a.policy=='encrypted-metadata-only' else (
+                f'検収役 = {reviewer} (依頼元 {a.session[:8]} とは別の窓 = 検収係が受け取る。 依頼元の窓は受け取らない = CONTRACT.md#separate-reviewer)'
+                if separate_reviewer() else
+                f'検収役 = {reviewer} (依頼元 {a.session[:8]} の window が閉じても受領できる id。 依頼元が生きていれば同じ id で受領する)')
             hev=event_from(h,events+[ev])
             probs=errors(hev,json.loads(SCHEMA_PATH.read_text()))+[x for x in reduce_workflow(same+[ev,hev],view.now_utc())['errors'] if x.startswith(hev['event_id']+':')]
             if probs: raise ValueError('reviewer handover: '+'; '.join(probs))
-            print('posted '+post(a.root,hev)+f' (検収役 = {a.agent}/{reviewer}: 提出は inbox --session {reviewer} に載る。 受領は --session {reviewer} --session-name \'<native id 8 chars> (<model>)\' で accept / revise)')
+            print('posted '+post(a.root,hev)+f' (検収役 = {a.agent}/{reviewer}: 提出は inbox --session {reviewer} に載る。 受領は --session {reviewer} --session-name \'<native id 8 chars> (<model>)\' で accept / revise'
+                  +(' = 検収役の窓が打つ。 この窓は受け取らない)' if separate_reviewer() else ')'))
         plan=announce_launch(a,ev,cfg['audience'])
         if plan and launch_now(a,cfg['audience']):
             if getattr(a,'_codex_launch',False): run_codex_launch(a,ev['event_id'],*plan)

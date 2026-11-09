@@ -502,15 +502,34 @@ The engine adds, and writes into the event's `details` as `review-*` lines toget
   carry (measured: a reviewer whose context had been compacted put back to the owner questions the owner had already
   answered under a follow-up request built on the same results file).
 - `review-nth` and `review-compactions`: the acceptance's position among the acceptances and revisions of the window
-  that `--session-name` names (its first word, the native id), and the context compactions that window's transcript
-  on this machine records (`unknown` elsewhere), so that later records can show whether checks thin out in a
-  long-lived reviewing window.
-- `review-self: yes`, with a warning, when the accepting window is the window that made the request.
+  that `--session-name` names (its first word, the native id; without it, the session environment
+  `CLAUDE_CODE_SESSION_ID` / `CODEX_THREAD_ID`), and the context compactions that window's transcript on this machine
+  records (`unknown` elsewhere), so that later records can show whether checks thin out in a long-lived reviewing
+  window. `review-window: <native 8>` records that window (measured: receipts without `--session-name` were all
+  `unknown`, so which window had reviewed was lost).
+- `review-self: yes`, with a warning, when the accepting window is the window that made the request (the request's
+  native session id, else the first word of its session name: measured, a check that read the session name alone
+  never fired, because a request posted without `--session-name` carries `workflow` there). A request marked for a
+  separate reviewer is refused instead ([#separate-reviewer](#separate-reviewer)).
 
 Nothing is run on the reviewer's behalf: on a collaborators board a submission's text is written by another party's
 agent, and a command taken from it would run on the reviewer's machine. A board without the field (the engine's
 default) accepts with one `--reference` as before; `revise` is not gated. The form's lines count toward the
 4000-character `details` limit: keep one line per point and the content in the receipt file.
+
+### <a id="separate-reviewer"></a>A request its requesting window does not accept
+
+Where the board's owner keeps a separate reviewer window for a requesting window (a conductor with its own reviewer),
+the owner's wiring sets `AGENT_BOARD_REVIEWER_SEPARATE=1` for that window's `request`. The engine then writes
+`review-separate: yes` into the request's `details`, and the reviewer handover says the requesting window does not
+receive. An ordinary `accept` of such a request from the window that made it (the same native id, read as in
+`review-self` above, whatever `--session` role id it posts under) is refused before anything is posted, on any board,
+with or without the review form. While the reviewer's window is down, the requesting window may accept with
+`--self-review '<why the reviewer cannot take it, and the reviewer window started again>'`; the reason is written as
+`review-self: yes (<reason>)`. `revise` is not refused. The mark is read from the request, not from the accepting
+window's environment, so it holds for a window that lost the wiring. Measured: a conductor accepted its own requests
+while its reviewer was not raised, under a default that told the requester to receive; the warning on such an accept
+never fired (the session-name check above).
 
 ### <a id="edit-approval"></a>The reviewer's approval of a protected edit (approve-edit)
 
@@ -744,7 +763,8 @@ python3 board_asks.py digest --root <board> --session S
   should print the request's title under the row as a question to answer.
 - <a id="standing-reviewer-role"></a>**A standing reviewer for an owner's board**: `role-<project>-owner-review`
   (see `--reviewer` above); the owner's wiring may set it as the default so no request's receipt depends on one
-  window staying open.
+  window staying open. A wiring that keeps a separate reviewer per requesting window sets that reviewer's role id as
+  the default for the window instead, and marks its requests ([#separate-reviewer](#separate-reviewer)).
 - <a id="worker-handoff-text"></a>**Starting the worker a role names**: a `request --to claude --to-session role-…`
   writes the hand-off text to the outbox (`<request id>.handoff.txt`) and prints one shell line that opens the worker
   as a background CLI session with its model, reasoning effort and config dir pinned —

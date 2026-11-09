@@ -2820,8 +2820,15 @@ class ReviewFormUnit(unittest.TestCase):
             d=board.review_form(self.ns(ev[0],checked=['照らした → 合う'],no_questions=True),ev,self.CFG,{'details':'policy-stage: exempt'})
         self.assertEqual(d.splitlines()[0],'policy-stage: exempt')                      # earlier details are kept first
         self.assertIn('review-compactions: 3',d.splitlines())
-        d=self.form(ev,checked=['照らした → 合う'],no_questions=True,session_name=None)
-        self.assertIn('review-nth: unknown (no --session-name)',d.splitlines())
+        import os
+        with mock.patch.dict(os.environ,{'CLAUDE_CODE_SESSION_ID':'','CODEX_THREAD_ID':''}):
+            d=self.form(ev,checked=['照らした → 合う'],no_questions=True,session_name=None)
+        self.assertIn('review-nth: unknown (no --session-name, no session environment)',d.splitlines())
+        self.assertNotIn('review-window',d)
+        # Without --session-name the session environment names the window (measured: such receipts were all `unknown`)
+        with mock.patch.dict(os.environ,{'CLAUDE_CODE_SESSION_ID':'feed1234-0000-4000-8000-000000000009'}):
+            d=self.form(ev,checked=['照らした → 合う'],no_questions=True,session_name=None).splitlines()
+        self.assertIn('review-nth: 1',d); self.assertIn('review-window: feed1234',d)
 
     def test_prior_decisions_and_window_count(self):
         r,c,sub=chain()
@@ -2867,6 +2874,25 @@ class ReviewFormUnit(unittest.TestCase):
     def test_requesting_window_accepting_its_own_request_is_marked(self):
         r,c,sub=chain(); r['actor']['task']='abcd1234 (opus)'
         self.assertIn('review-self: yes',self.form([r,c,sub],checked=['照らした → 合う'],no_questions=True).splitlines())
+        # The measured form: a request posted without --session-name carries task `workflow` and the requesting window's
+        # native id in session_id. The earlier check read the task only and never fired on it.
+        r,c,sub=chain(); r['actor'].update(task='workflow',session_id='abcd1234-0000-4000-8000-000000000001')
+        self.assertIn('review-self: yes',self.form([r,c,sub],checked=['照らした → 合う'],no_questions=True).splitlines())
+        r['actor']['session_id']='99991234-0000-4000-8000-000000000001'                        # another window requested
+        self.assertNotIn('review-self',self.form([r,c,sub],checked=['照らした → 合う'],no_questions=True))
+
+    def test_separate_reviewer_refuses_the_requesting_window(self):
+        r,c,sub=chain(); r['actor'].update(task='workflow',session_id='abcd1234-0000-4000-8000-000000000001')
+        r['details']='policy-stage: implement\n'+board.SEPARATE_REVIEWER_LINE
+        with self.assertRaises(ValueError) as cm: self.form([r,c,sub],checked=['照らした → 合う'],no_questions=True)
+        self.assertIn('--self-review',str(cm.exception)); self.assertIn('separate-reviewer',str(cm.exception))
+        with self.assertRaisesRegex(ValueError,'8 字以上'):
+            self.form([r,c,sub],checked=['照らした → 合う'],no_questions=True,self_review='落ちた')
+        d=self.form([r,c,sub],checked=['照らした → 合う'],no_questions=True,
+                    self_review='検収係の窓が止まった、 起こし直した窓 = 12345678').splitlines()
+        self.assertIn('review-self: yes (検収係の窓が止まった、 起こし直した窓 = 12345678)',d)
+        d=self.form([r,c,sub],checked=['照らした → 合う'],no_questions=True,session_name='77771234 (opus)')
+        self.assertNotIn('review-self',d)                                                     # the reviewer's window accepts
 
     def test_grounds_are_the_owner_asks_list(self):
         spec=importlib.util.spec_from_file_location('board_asks',board.ENGINE/'board_asks.py'); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
@@ -2920,6 +2946,48 @@ class AcceptReviewForm(EffortFlag):
         self.assertIn('review-check: 回した python3 count.py → 12 件で合う',d)
         self.assertIn('review-questions: none',d)
         self.assertIn('review-nth: 1',d)
+
+    def test_separate_reviewer(self):
+        """A request posted with AGENT_BOARD_REVIEWER_SEPARATE=1 carries the mark, its reviewer handover says the requesting
+        window does not receive, and an accept from the requesting window (under the reviewer's role id) is refused
+        before anything is posted unless --self-review says why; another window accepts as before. A request posted
+        without the variable is accepted by its requesting window with the review-self line only."""
+        import os
+        native='abcd1234-0000-4000-8000-000000000001'
+        b=self.post_args(); b[b.index('--session')+1]=native
+        src=b[b.index('--source')+1]
+        def run(thread, separate):
+            if separate: os.environ[board.SEPARATE_REVIEWER_ENV]='1'
+            try: rid=self.rid(self.cli('request',*b,'--thread',thread,'--to','codex','--to-session','codex-w-9',
+                                       '--reviewer','role-eproj-reviewer').stdout)
+            finally: os.environ.pop(board.SEPARATE_REVIEWER_ENV,None)
+            w=['--root',str(self.root),'--agent','codex','--session','codex-w-9','--source',src,'--policy','ordinary']
+            cid=self.rid(self.cli('claim',*w,'--request',rid,'--summary','引き受ける').stdout)
+            sid=self.rid(self.cli('submit',*w,'--request',rid,'--reply-to',cid,'--summary','出した','--deliverable','results/x.md').stdout)
+            return rid,['accept','--root',str(self.root),'--agent','claude','--session','role-eproj-reviewer','--source',src,
+                        '--policy','ordinary','--request',rid,'--reply-to',sid,'--summary','受け取る','--reference','results/x.md']
+        rid,acc=run('2026-01-01-rf-c',True)
+        with board.snapshot(self.root,fresh=True) as snap: evs=board.read(snap)
+        req=next(e for e in evs if e['event_id']==rid)
+        self.assertIn(board.SEPARATE_REVIEWER_LINE,(req.get('details') or '').splitlines())
+        hand=next(e for e in evs if e['kind']=='handover' and e.get('request_id')==rid)
+        self.assertIn('依頼元の窓は受け取らない',hand['summary'])
+        p=self.cli(*acc,'--session-name','abcd1234 (opus)',ok=False)                       # the requesting window
+        self.assertEqual(p.returncode,1,p.stdout+p.stderr); self.assertIn('--self-review',p.stderr)
+        self.assertEqual(self.accepted(),[])
+        self.cli(*acc,'--session-name','abcd1234 (opus)','--self-review','検収係の窓が止まった、 起こし直した窓 = 12345678')
+        d=(self.accepted()[0].get('details') or '').splitlines()
+        self.assertIn('review-self: yes (検収係の窓が止まった、 起こし直した窓 = 12345678)',d)
+        rid2,acc2=run('2026-01-01-rf-d',True)
+        self.cli(*acc2,'--session-name','77771234 (opus)')                                  # the reviewer's window
+        self.assertEqual(len(self.accepted()),2)
+        rid3,acc3=run('2026-01-01-rf-e',False)                                               # no mark: as before
+        with board.snapshot(self.root,fresh=True) as snap:
+            req3=next(e for e in board.read(snap) if e['event_id']==rid3)
+        self.assertNotIn(board.SEPARATE_REVIEWER_LINE,req3.get('details') or '')
+        self.cli(*acc3,'--session-name','abcd1234 (opus)')
+        last=max(self.accepted(),key=lambda e:e['created_at'])
+        self.assertIn('review-self: yes',(last.get('details') or '').splitlines())
 
 
 class EditApprovalUnit(unittest.TestCase):
