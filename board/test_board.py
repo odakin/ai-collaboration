@@ -1145,6 +1145,21 @@ class CollaboratorBoards(unittest.TestCase):
         self.cli('request','--root',b,'--agent','claude','--session','c-1','--thread','2026-10-05-stats','--to','codex','--to-session','x-1','--summary','s','--acceptance','a')
         p=subprocess.run([self.sys.executable,str(board.ENGINE/'board-view.py'),'--root',b,'--stats','--sync'],capture_output=True,text=True)
         self.assertEqual(p.returncode,0,p.stderr); self.assertIn('依頼 1 件',p.stdout); self.assertIn('[引受待ち] proj/2026-10-05-stats',p.stdout)
+    def test_acceptance_value_notice(self):
+        # A page count without a value, or overfull boxes, in --acceptance prints one notice line and still posts
+        # (CONTRACT.md#acceptance-value-check); a page limit or a number of pages says nothing.
+        b=str(self.proj/'board')
+        def post(n, acceptance):
+            return self.cli('request','--root',b,'--agent','claude','--session','c-1','--thread',f'2026-11-09-pages-{n}',
+                            '--to','codex','--to-session','x-1','--summary','s','--acceptance',acceptance)
+        warned=post(1,'LuaLaTeX で組んで頁数・未定義の参照 0・overfull 0')
+        self.assertIn('event_id=',warned.stdout)
+        notes=[l for l in warned.stderr.splitlines() if '完了条件 (--acceptance)' in l]
+        self.assertEqual(len(notes),1,warned.stderr); self.assertIn('値の無い頁数・overfull',notes[0])
+        self.assertIn('edit-intent-record.md#page-count-not-a-gate',notes[0])
+        for n,acceptance in ((2,'letter の上限 4 頁を超えない頁数で組む'),(3,'arXiv の package を組み直して頁数 27 のまま'),
+                             (4,'commit + push、 submit')):
+            self.assertNotIn('完了条件 (--acceptance)',post(n,acceptance).stderr,acceptance)
     def test_discovery_and_resolution(self):
         import board_config as bc
         found={b['name']:b for b in bc.discover(self.ws)}

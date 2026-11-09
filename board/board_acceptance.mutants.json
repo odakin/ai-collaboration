@@ -1,0 +1,73 @@
+{
+ "_comment": "board_acceptance.py の、 完了条件の値の無い頁数・overfull を見分ける判定を 1 つずつ外した版で selftest がそれぞれ落とすか (値の除外・上限の除外・報告だけの除外・文の境目・overfull の検出)",
+ "target": "board_acceptance.py",
+ "run": "python3 {} --selftest",
+ "fail_marker": "[FAIL] ",
+ "pass_marker": "[PASS] ",
+ "mutants": [
+  {
+   "name": "頁の数を値と読まない",
+   "pairs": [
+    [
+     "if (PAGE_NUMBER.search(near) or NUMBER_AFTER_TERM.match(after)",
+     "if (False or NUMBER_AFTER_TERM.match(after)"
+    ]
+   ],
+   "expect_fail": [
+    "number of pages before the term"
+   ]
+  },
+  {
+   "name": "上限の語を値と読まない",
+   "pairs": [
+    [
+     "or LIMIT.search(near)\n",
+     "or False\n"
+    ]
+   ],
+   "expect_fail": [
+    "page limit without a number",
+    "English limit"
+   ]
+  },
+  {
+   "name": "「報告だけ」 を除かない (頁数)",
+   "pairs": [
+    [
+     "                or REPORT_ONLY.search(near) or NOT_CHECKED.search(after)):",
+     "                or NOT_CHECKED.search(after)):"
+    ]
+   ],
+   "expect_fail": [
+    "report only",
+    "report only, English",
+    "no note"
+   ]
+  },
+  {
+   "name": "別の文の値を数える (文の境目で切らない)",
+   "pairs": [
+    [
+     "    if b:\n        before = before[b[-1].end():]",
+     "    if False:\n        before = before[b[-1].end():]"
+    ]
+   ],
+   "expect_fail": [
+    "value in another sentence"
+   ]
+  },
+  {
+   "name": "overfull を見ない",
+   "pairs": [
+    [
+     "        overfull = True\n        break",
+     "        break"
+    ]
+   ],
+   "expect_fail": [
+    "overfull 0 alone",
+    "unvalued page count in a pass/fail list"
+   ]
+  }
+ ]
+}

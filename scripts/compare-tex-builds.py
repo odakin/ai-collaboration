@@ -5,7 +5,9 @@
 
 1. **log 比較** (`--before-log / --after-log`): error 数・未定義参照・未定義引用・多重定義・頁数・
    overfull/underfull を両版で出し、 **後版で新たに出たものだけ**を名指しする。 改稿で増えた組版警告と
-   元から在ったものを混同しない。 ⚠️ TeX の log は 79 桁で折り返すので、 素の grep は
+   元から在ったものを混同しない。 頁数の違いは新しい警告と同じ `[NEW]` でなく `[info] pages: a -> b` で出す
+   (文を直せば頁数は動き、 不具合ではない = conventions/edit-intent-record.md#page-count-not-a-gate。 終了値にも数えない)。
+   ⚠️ TeX の log は 79 桁で折り返すので、 素の grep は
    `Overfull \hbox (N.NNpt too wide) in paragraph at lines A--B` を途中で切る。 本 script は
    折返しを復元してから数える (= 素の grep より多く見つかる)。
 
@@ -277,7 +279,8 @@ def report(bl: dict | None, al: dict | None, drift: dict | None,
                     fail += len(new)
 
         if bl["pages"] != al["pages"]:
-            print(f"\n[NEW] page count changed: {bl['pages']} -> {al['pages']}")
+            # Not [NEW]: editing text moves the page count, which is not a defect (edit-intent-record.md#page-count-not-a-gate).
+            print(f"\n[info] pages: {bl['pages']} -> {al['pages']}")
 
     if drift is not None:
         print(f"\n[info] labels: {len(drift['moved_page'])} moved page, "
@@ -373,6 +376,17 @@ def selftest() -> int:
     check("strict does NOT fail on a new overfull by default",
           report(clean, only_of, None, True, False) == 0)
     check("--strict-overfull does fail on it", report(clean, only_of, None, True, True) == 1)
+    # a page-count change is information, not a new warning (edit-intent-record.md#page-count-not-a-gate)
+    import contextlib
+    import io
+    longer = parse_log("Output written on main.pdf (13 pages, 1 bytes).\n")
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = report(clean, longer, None, True, True)
+    out = buf.getvalue()
+    check("a page-count change is printed as [info], not [NEW]",
+          "[info] pages: 12 -> 13" in out and "[NEW]" not in out)
+    check("a page-count change does not fail even --strict --strict-overfull", rc == 0)
 
     # spec parsing (no TeX needed)
     check("plain path spec", parse_spec("paper.tex") == (None, "paper.tex"))

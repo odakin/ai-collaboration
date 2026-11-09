@@ -2770,6 +2770,11 @@ def main():
         try: pnote=policy_stage_note(cfg,a)
         except Exception: pnote=''   # a notice never stops a post
         if pnote: print(pnote,file=sys.stderr)
+        try:   # a page count without a value, or overfull boxes, in the acceptance (CONTRACT.md#acceptance-value-check)
+            from board_acceptance import acceptance_value_note
+            vnote=acceptance_value_note(a.acceptance)
+        except Exception: vnote=''
+        if vnote: print(vnote,file=sys.stderr)
     dnote=restricted_dropped_note(a)
     if dnote: print(dnote,file=sys.stderr)
     claim_model_check(a)   # a worker on another model than its request was launched for does not take the work (measured: the app started one on the requester's model)

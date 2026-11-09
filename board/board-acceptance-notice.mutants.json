@@ -1,0 +1,24 @@
+{
+ "_comment": "board.py の request が完了条件の値の無い頁数・overfull の注意を出す差し込みを外した版で、 engine を通す試験が落とすか (CONTRACT.md#acceptance-value-check)",
+ "target": "board.py",
+ "run": "python3 test_board.py -v CollaboratorBoards.test_acceptance_value_notice CollaboratorBoards.test_stats_smoke",
+ "fail_marker": "FAIL: ",
+ "pass_marker": "test_",
+ "mutants": [
+  {
+   "name": "request で完了条件の注意を出さない",
+   "pairs": [
+    [
+     "            vnote=acceptance_value_note(a.acceptance)",
+     "            vnote=''"
+    ]
+   ],
+   "expect_fail": [
+    "test_acceptance_value_notice"
+   ],
+   "expect_pass": [
+    "test_stats_smoke"
+   ]
+  }
+ ]
+}

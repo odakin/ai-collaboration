@@ -475,6 +475,23 @@ is the owner's call. Refusing is the owner's call after the records show how the
 the field (the engine's default, and a collaborators board unless it sets one) says nothing, and a restricted request
 carries no marks.
 
+### <a id="acceptance-value-check"></a>A page count or overfull boxes in the acceptance
+
+`request` prints one notice line (never a refusal), on every board, when `--acceptance` lists a page count with no
+value next to it (no number of pages, no limit such as 上限 / 以内 / at most, no "report only" word, no "not checked"
+word), or overfull / underfull boxes (even "overfull 0") with no "report only", "not checked" or final-pass word.
+Editing text moves lines, so the page count and the pagination change, and that is the result of the edit, not a
+defect; overfull boxes are not a gate before the final pass. A receiver given a page count without a value reads the
+previous report's value as the expected one and starts investigating when it changes (measured), and requests kept
+copying the form from earlier requests after the rule was written (measured), so the notice reaches the writer when
+the request is posted. A page count is a pass/fail item only for a rebuild whose output must not change (an arXiv
+package, reproducing a frozen revision, swapping a build tool) or under an outside page limit (a letter, a form, a
+proposal); there the request writes the expected number or the limit, and the notice stays silent. The rule =
+[`edit-intent-record.md#page-count-not-a-gate`](../conventions/edit-intent-record.md#page-count-not-a-gate); the
+detector and its selftest = [`board_acceptance.py`](board_acceptance.py) (a text's notice =
+`python3 board_acceptance.py --check '<acceptance>'`). Only `--acceptance` is read: a summary that discusses page
+counts is not flagged.
+
 ### <a id="accept-review-form"></a>The review form of an acceptance
 
 A board whose `board.json` sets `accept_review_form` (`{"rule": "<where the rule is written>"}`) refuses an ordinary

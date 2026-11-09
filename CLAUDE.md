@@ -67,7 +67,7 @@ layer 1 (public、全 Claude Code / Codex ユーザー向け)。**依存でき�
 ```bash
 set -e
 for s in scripts/*.py; do python3 "$s" --selftest; done
-python3 board/board-view.py --selftest && python3 board/board-session-start.py --selftest && python3 board/board_transport.py --selftest && python3 board/board-post-reach-check.py --selftest && python3 board/test_board.py && python3 board/board_items.py --selftest   # git-crypt が要る (暗号化 transport の試験)
+python3 board/board-view.py --selftest && python3 board/board-session-start.py --selftest && python3 board/board_transport.py --selftest && python3 board/board-post-reach-check.py --selftest && python3 board/test_board.py && python3 board/board_items.py --selftest && python3 board/board_acceptance.py --selftest   # git-crypt が要る (暗号化 transport の試験)
 AGENT_BOARD_TRANSPORT=clone python3 board/test_board.py   # 旧 transport (1 版だけ残す) も同じ試験を通す
 for m in scripts/*.mutants.json board/*.mutants.json; do python3 ../claude-config/scripts/check-foil-teeth.py "$m"; done   # selftest と試験の foil の歯 (修正の一部を外した mutant で落ちるか)、 claude-config の clone が隣に要る
 ```
