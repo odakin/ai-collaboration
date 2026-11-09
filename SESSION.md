@@ -72,6 +72,10 @@ owner 専用の掲示板から engine を移し、 共同研究の repo に層2 
 
 再開前後の比較には [snapshot helper](scripts/review-artifact-snapshot.py) を使える。次の利用時は baseline の対象と writer の停止を確認し、追加物の回収範囲は呼び元で指定する。運用入口は [CLAUDE](CLAUDE.md)。
 
+## 現在地：封じた sandbox の回収
+
+`make-review-sandbox.py collect` は規則の外に書かれた file も `outside-rules/` に写し、 sandbox の外の台帳に回収を残す。 未回収と回収の後に書き足された sandbox は `status`、 回収しない sandbox は `close --reason` ([規約](conventions/cold-eyes-isolation.md#collect-everything-written))。 未確認 = 雛形の規則 4 (一時 file も scratch に) に Claude の reviewer が従うか: 締めの headless の行が worker の記録の scratchpad への書き込みを数えるので、 次の盲検の受領の締めで出る。
+
 ## 現在地：Codex の worker に作業 dir の外の書き込み dir を渡す
 
 Codex の役割宛ての request は `--launch-writable-root <dir>` (繰り返し可) で、 作業 dir の外に書く dir を起動の時点で渡す ([契約](board/CONTRACT.md#codex-worker-launch))。 request の details に 1 dir 1 行で載り、 `launch --request` が読み戻して起動の道具の `--writable-root` に足す。
