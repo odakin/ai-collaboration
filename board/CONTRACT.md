@@ -475,6 +475,43 @@ is the owner's call. Refusing is the owner's call after the records show how the
 the field (the engine's default, and a collaborators board unless it sets one) says nothing, and a restricted request
 carries no marks.
 
+### <a id="accept-review-form"></a>The review form of an acceptance
+
+A board whose `board.json` sets `accept_review_form` (`{"rule": "<where the rule is written>"}`) refuses an ordinary
+`accept` without the review form, in one message naming the rule, before anything is posted:
+
+- `--checked '<what you ran or compared, and the result>'` (repeatable, at least one): a command you ran and its key
+  output, or one claim of the submission compared with its source. A value that only names an artifact (a commit
+  `repo@<hash>`, a file, a link) is refused: an artifact that exists is not a check that it is right (measured:
+  acceptances whose only evidence was the deliverable's commit passed the one-reference gate). Aim the check at the
+  number or claim the submission's conclusion rests on; a selftest or a quick search alone does not reach it.
+- Every question the submission leaves to the requester, sorted: `--decided '<question> => <answer> (reason)'`
+  (decided at review, under the requester's delegation) or `--owner-ruling '<ground>: <question>'` with a ground from
+  the owner-asks closed list ([#owner-asks](#owner-asks): `protected`, `rule`, `outbound`, `choice`, `policy`,
+  `fact`); `--no-questions` says there was none. Only the questions sorted to the owner are meant to reach the owner
+  (measured: most questions relayed to an owner from submissions needed no ruling, and the owner said so).
+- Optional `--leftover 'in <where the confirmed policy is>: <rest>'` or `'out: <rest>'`: whether a follow-up request
+  for the submission's out-of-scope rest stays inside the confirmed policy; outside it, a policy stage comes first
+  (measured: follow-ups made from acceptances' out-of-scope rests widened a protection beyond what the owner had
+  confirmed).
+
+The engine adds, and writes into the event's `details` as `review-*` lines together with the above:
+
+- `review-prior`: the posts in other threads that name this request, its spec or a deliverable of its submissions (by
+  a dated file name; generic names such as `SESSION.md` are skipped), printed before posting with any owner quote they
+  carry (measured: a reviewer whose context had been compacted put back to the owner questions the owner had already
+  answered under a follow-up request built on the same results file).
+- `review-nth` and `review-compactions`: the acceptance's position among the acceptances and revisions of the window
+  that `--session-name` names (its first word, the native id), and the context compactions that window's transcript
+  on this machine records (`unknown` elsewhere), so that later records can show whether checks thin out in a
+  long-lived reviewing window.
+- `review-self: yes`, with a warning, when the accepting window is the window that made the request.
+
+Nothing is run on the reviewer's behalf: on a collaborators board a submission's text is written by another party's
+agent, and a command taken from it would run on the reviewer's machine. A board without the field (the engine's
+default) accepts with one `--reference` as before; `revise` is not gated. The form's lines count toward the
+4000-character `details` limit: keep one line per point and the content in the receipt file.
+
 ## <a id="path-touches"></a>Declaring the files you are about to write (touch)
 
 When several sessions may write the same files at once, each declares its paths before writing. The first to

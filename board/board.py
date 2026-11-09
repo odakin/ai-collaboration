@@ -915,6 +915,157 @@ def policy_stage_note(cfg, a, texts=None):
             f" exempt (--stage-reason '<番号>: <理由>') のどれかを書く (規則 = {rule}#delegating)")
 
 
+REVIEW_FORM_DOC='CONTRACT.md#accept-review-form'
+# A "check" that only names an artifact (a commit, a file, a link) shows the artifact exists, not that it is right
+# (measured: acceptances whose only evidence was the deliverable's commit passed the one-reference gate).
+_REF_ONLY_RE=re.compile(r'[\w.\-]+@[0-9a-f]{7,40}|[\w.\-~/]+\.[A-Za-z0-9]{1,5}(?:#[\w.\-]+)?|https?://\S+')
+
+
+def _owner_grounds():
+    """The closed list of reasons a question needs the owner's own ruling = the owner-asks ledger's GROUNDS (one list
+    for both gates), read from the sibling engine file; the bare keys if it cannot be loaded."""
+    try:
+        spec=importlib.util.spec_from_file_location('board_asks',ENGINE/'board_asks.py'); m=importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m); return dict(m.GROUNDS)
+    except Exception:
+        return {k:k for k in ('protected','rule','outbound','choice','policy','fact')}
+
+
+SPEC_READ_MAX=300_000   # bytes of one referenced spec read by review_prior (larger files are skipped)
+
+
+def _ref_path(ref, ws):
+    """A post's --reference / policy-ref as a readable file below the workspace `ws`, or None (a link, a commit, a
+    path outside the workspace, a missing or oversized file)."""
+    r=str(ref).split('#')[0].strip()
+    if not r or re.match(r'[a-z]+://',r) or re.fullmatch(r'[\w.\-]+@[0-9a-f]{7,40}',r): return None
+    r=r.split('@',1)[-1] if re.match(r'[\w.\-]+@[^/]',r) else r
+    try:
+        p=(Path(r) if r.startswith('/') else Path(ws)/r).resolve()
+        if not p.is_relative_to(Path(ws).resolve()) or not p.is_file() or p.stat().st_size>SPEC_READ_MAX: return None
+    except (OSError,ValueError):
+        return None
+    return p
+
+
+def review_prior(events, req, subs, ws=None):
+    """Posts in other threads that name this request, its spec or a deliverable of its submissions, oldest first, as
+    (event, matched keys) = the decisions taken on top of the work under review. Measured: an acceptance put back to
+    the owner questions the owner had already answered under a follow-up request built on the same results file,
+    which the reviewer's compacted context no longer held. A file key is its base name only when it is specific (a
+    digit and at least 12 characters, e.g. a dated plan); generic names (SESSION.md) are left out.
+    With the workspace `ws`, a request in another thread also counts when the spec it references (or its policy-ref)
+    names a key: measured, the follow-up request that carried the owner's answer named only its own spec, and only
+    that spec named the results file under review (keys found this way are marked `spec:<file>`). Files are read, never
+    run."""
+    keys={req['event_id']}
+    for n in list(req.get('references') or [])+[d for s in subs for d in (s.get('deliverables') or [])]:
+        base=os.path.basename(str(n).split('#')[0].split('@')[-1].rstrip('/'))
+        if len(base)>=12 and re.search(r'\d',base): keys.add(base)
+    here=(req.get('project') or {}).get('key'),req.get('thread_id')
+    out=[]
+    for e in events:
+        if ((e.get('project') or {}).get('key'),e.get('thread_id'))==here: continue
+        hay=' '.join(str(x) for x in (e.get('summary'),e.get('acceptance'),e.get('details'),*(e.get('references') or []),
+                                      *(e.get('deliverables') or [])) if x)
+        hit=sorted(k for k in keys if k in hay)
+        if not hit and ws and e.get('kind')=='request':
+            refs=list(e.get('references') or [])+re.findall(r'^policy-ref:\s*(\S+)',e.get('details') or '',re.M)
+            for p in filter(None,(_ref_path(r,ws) for r in refs)):
+                try: text=p.read_text(encoding='utf-8',errors='replace')
+                except OSError: continue
+                hit+=[f'spec:{p.name}:{k}' for k in sorted(keys) if k in text]
+        if hit: out.append((e,hit))
+    return sorted(out,key=lambda x:x[0].get('created_at') or '')
+
+
+def _compactions(native):
+    """Context compactions the native Claude session `native` (8+ hex chars) has been through, counted in this
+    machine's transcript, or None (another machine, another vendor, no companion tool)."""
+    if not native or not re.fullmatch(r'[0-9a-f]{8}[0-9a-f-]*',native): return None
+    try:
+        sm=_session_model()
+        hits=[f for root in sm.projects_dirs() for f in glob.glob(os.path.join(glob.escape(root),'*',glob.escape(native)+'*.jsonl'))]
+    except Exception:
+        return None
+    if not hits: return None
+    n=0
+    with open(max(hits,key=os.path.getmtime),encoding='utf-8',errors='replace') as f:
+        for line in f:
+            if '"compact_boundary"' not in line: continue
+            try: e=json.loads(line)
+            except ValueError: continue
+            n+=e.get('type')=='system' and e.get('subtype')=='compact_boundary'
+    return n
+
+
+def review_form(a, events, cfg, ev):
+    """The accept gate of a board whose board.json sets `accept_review_form` (CONTRACT.md#accept-review-form). Before
+    an acceptance is posted: (1) the posts elsewhere that build on this request are printed and written into the
+    event; (2) at least one check the reviewer ran or compared is written (`--checked`; naming a commit, a file or a
+    link alone is refused); (3) every question the submission left to the requester is sorted (`--decided` with the
+    answer and reason, or `--owner-ruling <ground>: <question>` with a ground from the closed list), or
+    `--no-questions` says there was none; optional `--leftover` lines say whether a follow-up stays inside the
+    confirmed policy. Also written: the acceptance's position among the reviewing window's acceptances and revisions,
+    and the compactions that window went through, so that later records show whether checks thin out in a
+    long-lived window. Nothing is run on the reviewer's behalf: on a shared board the submission is written by
+    another party's agent. Returns the event's details text."""
+    spec=cfg.get('accept_review_form') or {}
+    rule=(spec.get('rule') or '').strip() or f'{bc.CONFIG} の accept_review_form'
+    pick=lambda name:[c.strip() for c in (getattr(a,name,None) or []) if c and c.strip()]
+    checked,decided,owner,leftover=pick('checked'),pick('decided'),pick('owner_ruling'),pick('leftover')
+    none_q=bool(getattr(a,'no_questions',False))
+    grounds=_owner_grounds()
+    problems=[]
+    if not checked:
+        problems.append("--checked '<回した command か照らした原典と、 その結果>' が 1 つも無い (確かめを 1 つ以上回す)")
+    problems+=[f"--checked「{c[:60]}」 は成果物の commit・file・link を指すだけ = 何を回したか・何と照らしたかと結果を書く"
+               for c in checked if _REF_ONLY_RE.fullmatch(c)]
+    for o in owner:
+        g,_,q=o.partition(':')
+        if g.strip() not in grounds or not q.strip():
+            problems.append(f"--owner-ruling「{o[:60]}」 は '<ground>: <問い>' の形 (ground = {' / '.join(grounds)})")
+    if none_q and (decided or owner):
+        problems.append('--no-questions と --decided / --owner-ruling は一緒に書かない')
+    if not (none_q or decided or owner):
+        problems.append("提出の「依頼元に決めてもらうこと」 の仕分けが無い: 1 つずつ --decided '<問い> => <答え> (理由)' か"
+                        " --owner-ruling '<ground>: <問い>'、 1 つも無ければ --no-questions")
+    problems+=[f"--leftover「{l[:60]}」 は 'in <確認済みの方針の在り処>: <残り>' か 'out: <残り>' の形"
+               for l in leftover if not re.match(r'(?:in|out)\b',l)]
+    if problems:
+        raise ValueError(f'accept の検収票が足りない (規則 = {rule}、 書き方 = {REVIEW_FORM_DOC}):\n  - '+'\n  - '.join(problems))
+    req=next(e for e in events if e['event_id']==a.request and e['kind']=='request')
+    subs=[e for e in events if e.get('request_id')==a.request and e['kind']=='submit']
+    try: ws=bc.workspace(a.root) if getattr(a,'root',None) else None
+    except Exception: ws=None
+    prior=review_prior(events,req,subs,ws)
+    if prior:
+        print(f'📎 先の決定 = この依頼・依頼書・成果物を引く別の thread の投稿 {len(prior)} 件 (受け取りの記録に写す):',file=sys.stderr)
+        for e,hit in prior[-10:]:
+            q=re.search(r'^policy-quote:\s*(.+)$',e.get('details') or '',re.M)
+            via=next((h.split(':')[1] for h in hit if h.startswith('spec:')),'')
+            print(f"   {e['event_id']} {e['project']['key']}/{e['thread_id']} {e['kind']}: {str(e.get('summary') or '')[:90]}"
+                  +(f" (依頼書 {via} が引く)" if via else '')+(f" / 本人の発言: {q.group(1)[:90]}" if q else ''),file=sys.stderr)
+    native=(a.session_name or '').split(' ')[0]
+    mine=[e for e in events if e['kind'] in ('accept','revise') and native
+          and ((e.get('actor') or {}).get('task') or '').startswith(native)]
+    comp=_compactions(native)
+    req_native=((req.get('actor') or {}).get('task') or '').split(' ')[0]
+    lines=[*(f'review-check: {c}' for c in checked),*(f'review-decided: {d}' for d in decided),
+           *(f'review-owner: {o}' for o in owner),*(['review-questions: none'] if none_q else []),
+           *(f'review-leftover: {l}' for l in leftover),
+           f'review-prior: {len(prior)}'+(' ('+', '.join(e['event_id'] for e,_ in prior[-10:])+')' if prior else ''),
+           f'review-nth: {len(mine)+1}' if native else 'review-nth: unknown (no --session-name)',
+           f'review-compactions: {comp}' if comp is not None else 'review-compactions: unknown (no transcript on this machine)']
+    if len(native)>=8 and req_native[:8]==native[:8]:
+        lines.append('review-self: yes')
+        print('⚠️ 受け取る窓が依頼を出した窓と同じ (この掲示板に検収係が居るなら、 検収係が受け取る)',file=sys.stderr)
+    text='\n'.join(x for x in (ev.get('details'),*lines) if x)
+    if len(text)>4000:
+        raise ValueError(f'accept の検収票が長すぎる ({len(text)} 字 > 4000、 規則 = {rule}): 中身は結果の file に書き、 ここは 1 行ずつの要点に')
+    return text
+
+
 def event_from(a, events):
     restricted=a.policy=='encrypted-metadata-only'
     if a.command=='request' or (a.command=='note' and not a.request):
@@ -2001,6 +2152,12 @@ def main():
                     ' refused. Kept in the launch record')
     ap.add_argument('--summary'); ap.add_argument('--acceptance')
     ap.add_argument('--deliverable',action='append',default=[]); ap.add_argument('--reference',action='append',default=[])
+    # accept on a board with accept_review_form (CONTRACT.md#accept-review-form)
+    ap.add_argument('--checked',action='append',default=[],help='accept (review form): a check you ran or compared and its result, e.g. "回した <command> → <要点>" or "<主張> を <path#anchor> と照らした → 合う" (repeatable; a bare commit or file is refused)')
+    ap.add_argument('--decided',action='append',default=[],help="accept (review form): a question the submission left to the requester, decided at review: '<問い> => <答え> (理由)' (repeatable)")
+    ap.add_argument('--owner-ruling',action='append',default=[],help="accept (review form): a question that needs the owner's own ruling: '<ground>: <問い>' with a ground from the owner-asks GROUNDS (repeatable)")
+    ap.add_argument('--no-questions',action='store_true',help='accept (review form): the submission left no question to the requester')
+    ap.add_argument('--leftover',action='append',default=[],help="accept (review form): a follow-up of the submission's out-of-scope rest: 'in <where the confirmed policy is>: <rest>' or 'out: <rest>' (repeatable)")
     ap.add_argument('--spec-local',help='request / launch to a role: the spec file on the requester\'s side, named only in the'
                     ' worker\'s hand-off text and this machine\'s launch record, never in the post. A restricted request refuses'
                     ' --reference, so this is how its worker finds the spec; on an ordinary request it takes the place of the'
@@ -2309,6 +2466,8 @@ def main():
             a.touch=new or [NONE_TOUCH]; a.command='note'
         try:
             ev=event_from(a,events)
+            if ev['kind']=='accept' and a.policy=='ordinary' and cfg.get('accept_review_form'):
+                ev['details']=review_form(a,events,cfg,ev)
             view.assert_writable(events, ev['project']['key'], ev['thread_id'], ev['event_id'])
         except ValueError:
             if attempt==0 and _REUSED: continue

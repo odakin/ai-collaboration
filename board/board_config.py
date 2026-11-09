@@ -11,7 +11,8 @@ board.json (format 1):
      "labels": {"codex": "..."}, "description": "...",
      "launch_effort_floor": {"effort": "low" | "medium" | "high" | "xhigh" | "max", "rule": "<where the rule is written>"},
      "launch_model_allow": {"tiers": ["opus", ...], "rule": "<where the rule is written>"},
-     "policy_stage_check": {"rule": "<where the rule is written>", "confirmed_words": ["<word>", ...]}}
+     "policy_stage_check": {"rule": "<where the rule is written>", "confirmed_words": ["<word>", ...]},
+     "accept_review_form": {"rule": "<where the rule is written>"}}
 
 - `audience: owner` — only the owner reads it; any source may post (still subject to source classification).
 - `audience: collaborators` — the collaborators of the listed `sources` read it. Only those projects may post,
@@ -30,6 +31,11 @@ board.json (format 1):
   stage mark (`--stage`), an implementation quoting no confirmed policy, and a reply-drafting request with neither a
   policy stage nor a confirmed policy; `confirmed_words` adds the board's own words that say a policy was confirmed.
   Absent = no notice (the engine's default).
+- `accept_review_form` (optional) — an ordinary `accept` needs the review form (CONTRACT.md#accept-review-form): at
+  least one check the reviewer ran or compared (`--checked`), the submission's questions to the requester sorted
+  (`--decided` / `--owner-ruling <ground>: …` / `--no-questions`); the engine adds the posts elsewhere that build on
+  the request, and the reviewing window's count and compactions. A missing part is refused in one message naming
+  `rule`. Absent = an accept needs one `--reference` only (the engine's default).
 """
 from __future__ import annotations
 
@@ -45,7 +51,7 @@ CONFIG = 'board.json'
 GITCRYPT_MAGIC = b'\x00GITCRYPT'
 AUDIENCES = {'owner', 'collaborators'}
 ENCRYPTIONS = {'git-crypt', 'none'}
-FIELDS = {'board_format', 'name', 'audience', 'encryption', 'branch', 'sources', 'readable', 'labels', 'description', 'launch_effort_floor', 'launch_model_allow', 'policy_stage_check'}
+FIELDS = {'board_format', 'name', 'audience', 'encryption', 'branch', 'sources', 'readable', 'labels', 'description', 'launch_effort_floor', 'launch_model_allow', 'policy_stage_check', 'accept_review_form'}
 EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')   # a worker's reasoning effort, lowest first
 KEY_RE = re.compile(r'[a-z0-9][a-z0-9-]{1,63}')
 
@@ -128,6 +134,9 @@ def validate(cfg: dict) -> dict:
                                 and isinstance(psc.get('confirmed_words', []), list)
                                 and all(isinstance(w, str) and w.strip() for w in psc.get('confirmed_words', []))):
         problems.append('policy_stage_check is {"rule": "<where the rule is written>", "confirmed_words": ["<word>", ...]}')
+    arf = cfg.get('accept_review_form')
+    if arf is not None and not (isinstance(arf, dict) and set(arf) <= {'rule'} and isinstance(arf.get('rule', ''), str)):
+        problems.append('accept_review_form is {"rule": "<where the rule is written>"}')
     if problems:
         raise ValueError(f'{CONFIG}: ' + '; '.join(problems))
     return {'branch': 'main', 'labels': {}, **cfg}

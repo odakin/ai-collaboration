@@ -2768,4 +2768,158 @@ class CollaboratorBoardsClone(CollaboratorBoards):
         else: os.environ['AGENT_BOARD_TRANSPORT']=self._saved
 
 
+class ReviewFormUnit(unittest.TestCase):
+    """The accept review form (CONTRACT.md#accept-review-form) judged on its own: a check that only names an artifact,
+    a missing check, unsorted questions, a ground outside the closed list and a malformed leftover line are refused in
+    one message naming the rule; a full form is written as review-* lines with the posts elsewhere that build on the
+    request, the reviewing window's count and compactions, and a warning when the requesting window accepts its own
+    request."""
+    CFG={'accept_review_form':{'rule':'owner-notes/review.md#review-desk'}}
+
+    def ns(self, req, **kw):
+        import argparse
+        base=dict(command='accept',policy='ordinary',session_name='abcd1234 (opus)',checked=[],decided=[],owner_ruling=[],
+                  no_questions=False,leftover=[],request=req['event_id'])
+        base.update(kw); return argparse.Namespace(**base)
+
+    def form(self, events, **kw):
+        from unittest import mock
+        with mock.patch.object(board,'_compactions',return_value=None):
+            return board.review_form(self.ns(events[0],**kw),events,self.CFG,{'details':None})
+
+    def refused(self, events, needle, **kw):
+        with self.assertRaises(ValueError) as cm: self.form(events,**kw)
+        msg=str(cm.exception)
+        self.assertIn('owner-notes/review.md#review-desk',msg); self.assertIn(needle,msg)
+        return msg
+
+    def test_refusals(self):
+        ev=list(chain())
+        self.refused(ev,'--checked',no_questions=True)                                   # no check at all
+        for bare in ('proj@1a2b3c4d','results/example.md','plans/x.md#sec-2','https://example.org/r/1'):
+            self.refused(ev,'指すだけ',checked=[bare],no_questions=True)                    # an artifact named, nothing checked
+        self.refused(ev,'--no-questions',checked=['回した x.py → 12 件で合う'])              # questions not sorted
+        self.refused(ev,'一緒に',checked=['回した x.py → 合う'],no_questions=True,decided=['A か B => A (理由)'])
+        self.refused(ev,'ground',checked=['回した x.py → 合う'],owner_ruling=['urgent: 送るか'])
+        self.refused(ev,'ground',checked=['回した x.py → 合う'],owner_ruling=['outbound:   '])
+        self.refused(ev,"'in ",checked=['回した x.py → 合う'],no_questions=True,leftover=['maybe: 残りの道具の直し'])
+        self.refused(ev,'長すぎる',checked=['回した x.py → 合う '+'x'*4100],no_questions=True)
+
+    def test_full_form_is_recorded(self):
+        ev=list(chain())
+        d=self.form(ev,checked=['回した python3 count.py → 12 件で数が合う'],decided=['A か B => A (中身の理由)'],
+                    owner_ruling=['outbound: 共著者に送るか'],leftover=['in plans/p.md#5: 道具の段','out: 別の面の網'])
+        for line in ('review-check: 回した python3 count.py → 12 件で数が合う','review-decided: A か B => A (中身の理由)',
+                     'review-owner: outbound: 共著者に送るか','review-leftover: in plans/p.md#5: 道具の段','review-leftover: out: 別の面の網',
+                     'review-prior: 0','review-nth: 1','review-compactions: unknown (no transcript on this machine)'):
+            self.assertIn(line,d.splitlines())
+        self.assertNotIn('review-self',d)
+        self.assertIn('review-questions: none',self.form(ev,checked=['照らした §2 の数 → 合う'],no_questions=True).splitlines())
+        from unittest import mock
+        with mock.patch.object(board,'_compactions',return_value=3):
+            d=board.review_form(self.ns(ev[0],checked=['照らした → 合う'],no_questions=True),ev,self.CFG,{'details':'policy-stage: exempt'})
+        self.assertEqual(d.splitlines()[0],'policy-stage: exempt')                      # earlier details are kept first
+        self.assertIn('review-compactions: 3',d.splitlines())
+        d=self.form(ev,checked=['照らした → 合う'],no_questions=True,session_name=None)
+        self.assertIn('review-nth: unknown (no --session-name)',d.splitlines())
+
+    def test_prior_decisions_and_window_count(self):
+        r,c,sub=chain()
+        r['references']=['proj/plans/2026-01-06-tool-fixes-results.md','proj/SESSION.md']
+        later=event('request',9,thread='2026-01-07-tool-fixes-implement')
+        later['references']=['other/plans/2026-01-06-tool-fixes-results.md#next']           # built on the same results file
+        later['details']='policy-stage: implement\npolicy-quote: それで進めて'
+        named=event('note',10,thread='2026-01-08-elsewhere'); named['summary']=f"{r['event_id']} の続き"   # names the request
+        generic=event('note',11,thread='2026-01-08-generic'); generic['references']=['x/SESSION.md']      # a generic name only
+        same=event('note',12); same['references']=['proj/plans/2026-01-06-tool-fixes-results.md']  # this thread
+        old=event('accept',13,thread='2026-01-01-old'); old['actor']['task']='abcd1234 (opus)'           # this window's earlier review
+        ev=[r,c,sub,later,named,generic,same,old]
+        prior=board.review_prior(ev,r,[sub])
+        self.assertEqual([e['event_id'] for e,_ in prior],[later['event_id'],named['event_id']])
+        d=self.form(ev,checked=['照らした → 合う'],no_questions=True).splitlines()
+        self.assertIn(f"review-prior: 2 ({later['event_id']}, {named['event_id']})",d)
+        self.assertIn('review-nth: 2',d)
+
+    def test_prior_decision_named_only_in_another_request_spec(self):
+        # The follow-up request that carried the owner's answer named only its own spec, and only that spec named the
+        # results file under review (measured): one hop through a referenced spec finds it. Files are read, never run;
+        # a path outside the workspace, a link and a commit are not opened.
+        with tempfile.TemporaryDirectory(prefix='review-prior-') as tmp:
+            ws=Path(tmp)
+            (ws/'proj/plans').mkdir(parents=True)
+            (ws/'proj/plans/2026-01-07-impl-spec.md').write_text('基準 = proj/plans/2026-01-06-fixes-results.md の推す答え')
+            (ws/'proj/plans/2026-01-07-other-spec.md').write_text('関係の無い依頼書')
+            outside=Path(tmp+'-outside.md'); outside.write_text('2026-01-06-fixes-results.md')
+            try:
+                r,c,sub=chain(); sub['deliverables']=['proj/plans/2026-01-06-fixes-results.md']
+                impl=event('request',9,thread='2026-01-07-impl'); impl['references']=['proj/plans/2026-01-07-impl-spec.md']
+                impl['details']='policy-stage: implement\npolicy-quote: それで進めて'
+                other=event('request',10,thread='2026-01-07-other')
+                other['references']=['proj/plans/2026-01-07-other-spec.md',str(outside),'https://example.org/x','proj@1a2b3c4d']
+                ev=[r,c,sub,impl,other]
+                self.assertEqual(board.review_prior(ev,r,[sub]),[])                            # without the workspace: events only
+                prior=board.review_prior(ev,r,[sub],ws)
+                self.assertEqual([(e['event_id'],h) for e,h in prior],
+                                 [(impl['event_id'],['spec:2026-01-07-impl-spec.md:2026-01-06-fixes-results.md'])])
+            finally:
+                outside.unlink()
+
+    def test_requesting_window_accepting_its_own_request_is_marked(self):
+        r,c,sub=chain(); r['actor']['task']='abcd1234 (opus)'
+        self.assertIn('review-self: yes',self.form([r,c,sub],checked=['照らした → 合う'],no_questions=True).splitlines())
+
+    def test_grounds_are_the_owner_asks_list(self):
+        spec=importlib.util.spec_from_file_location('board_asks',board.ENGINE/'board_asks.py'); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+        self.assertEqual(set(board._owner_grounds()),set(m.GROUNDS))
+
+    def test_config_field(self):
+        import board_config as bc
+        base={'board_format':1,'audience':'owner','encryption':'none'}
+        self.assertEqual(bc.validate({**base,'accept_review_form':{'rule':'x.md'}})['accept_review_form'],{'rule':'x.md'})
+        for bad in ({'rule':1},{'rule':'x','other':2},'on'):
+            with self.assertRaisesRegex(ValueError,'accept_review_form'): bc.validate({**base,'accept_review_form':bad})
+
+
+class AcceptReviewForm(EffortFlag):
+    """A board whose board.json sets accept_review_form refuses, from the command line and before anything is posted, an
+    ordinary accept without the review form, and records the form in the accepted event's details. A board without the
+    field accepts with one --reference as before."""
+    test_order = test_three_surfaces = test_refusals_and_live_note = None   # EffortFlag's tests run once, in EffortFlag
+    RULE='owner-notes/review.md#review-desk'
+
+    def flow(self, thread):
+        b=self.post_args()
+        rid=self.rid(self.cli('request',*b,'--thread',thread,'--to','codex','--to-session','codex-w-9').stdout)
+        src=b[b.index('--source')+1]
+        w=['--root',str(self.root),'--agent','codex','--session','codex-w-9','--source',src,'--policy','ordinary']
+        cid=self.rid(self.cli('claim',*w,'--request',rid,'--summary','引き受ける').stdout)
+        sid=self.rid(self.cli('submit',*w,'--request',rid,'--reply-to',cid,'--summary','出した','--deliverable','results/x.md').stdout)
+        acc=['accept','--root',str(self.root),'--agent','claude','--session','claude-win-9','--source',src,'--policy','ordinary',
+             '--request',rid,'--reply-to',sid,'--summary','受け取る','--reference','results/x.md','--session-name','abcd1234 (opus)']
+        return rid,acc
+
+    def accepted(self):
+        with board.snapshot(self.root,fresh=True) as snap: return [e for e in board.read(snap) if e['kind']=='accept']
+
+    def test_off_by_default(self):
+        _,acc=self.flow('2026-01-01-rf-a')
+        self.cli(*acc); self.assertEqual(len(self.accepted()),1)
+        self.assertNotIn('review-check',self.accepted()[0].get('details') or '')
+
+    def test_on_refuses_and_records(self):
+        cfg=json.loads((self.root/'board.json').read_text()); cfg['accept_review_form']={'rule':self.RULE}
+        (self.root/'board.json').write_text(json.dumps(cfg))
+        board.run(self.root,'commit','-q','-am','Turn the review form on'); board.run(self.root,'push','-q','origin','main')
+        _,acc=self.flow('2026-01-01-rf-b')
+        p=self.cli(*acc,ok=False)
+        self.assertEqual(p.returncode,1,p.stdout+p.stderr)
+        for s in (self.RULE,'--checked','--no-questions'): self.assertIn(s,p.stderr)
+        self.assertEqual(self.accepted(),[])                                              # nothing posted
+        self.cli(*acc,'--checked','回した python3 count.py → 12 件で合う','--no-questions')
+        d=(self.accepted()[0].get('details') or '').splitlines()
+        self.assertIn('review-check: 回した python3 count.py → 12 件で合う',d)
+        self.assertIn('review-questions: none',d)
+        self.assertIn('review-nth: 1',d)
+
+
 if __name__=='__main__': unittest.main()
