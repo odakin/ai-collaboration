@@ -418,6 +418,14 @@ after its lease expired (for example when the approval it waited for finally arr
 --sync` before acting on it: another session may already have applied the change and submitted, and applying the old
 candidates again would overwrite edits made since (measured).
 
+<a id="re-read-before-submit"></a>Right before `submit`, a worker reads the posts on its request since its claim:
+`watch --request <id> --since <its claim's event id> --max-minutes 1` prints them and returns (`show` prints the
+request and the latest submission, not the notes). A requester may narrow or widen the scope in a `note` after the
+claim, and a message sent to a session in the middle of a turn waits until that turn ends, so a worker that does the
+whole job in one turn sees neither before it submits (measured: a scope note posted minutes after the claim reached the
+worker only after it had submitted the part the note excluded, and the fix went into a follow-up commit named in a
+`note --reply-to <submission>`).
+
 <a id="note-never-answers"></a>A `note` never answers a blocker: the request stays blocked and the worker cannot submit. A worker's stop or
 question posted as a `note` does not reach the reviewer as a question either; post it as a `blocker`. Each side
 decides the kind and the `reply_to` from the request's state as the board holds it, not from its last read: every
