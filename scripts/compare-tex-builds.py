@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""2 版の LaTeX build を機械比較する組版 gate: log から error / 未定義参照 / overfull を折返し復元して数え、.aux の label→頁 写像の drift を出し (= 総頁数が同じでも中の頁割りは動く)、配布 PDF を自分の build が再現するかを pdftotext で証明し、 build の道具を入れ替えた前後で頁画像が 1 画素も違わないかを確かめる。--selftest 内蔵、規律 = conventions/edit-intent-record.md#build-gate
+"""2 版の LaTeX build を機械比較する組版 gate: log から error / 未定義参照 / overfull を折返し復元して数え、.aux の label→頁 写像の drift を出し (= 総頁数が同じでも中の頁割りは動く)、配布 PDF を自分の build が再現するかを pdftotext で証明し、 build の道具を入れ替えた前後で頁画像が 1 画素も違わないかを確かめ、 書体を替えた候補の font の入れ替わりと頁ごとの行の折れを出す。--selftest 内蔵、規律 = conventions/edit-intent-record.md#build-gate
 
-5 つの独立した機能。 どれも他版・他者の成果物を読む前に回す。
+7 つの独立した機能。 どれも他版・他者の成果物を読む前に回す。
 
 1. **log 比較** (`--before-log / --after-log`): error 数・未定義参照・未定義引用・多重定義・頁数・
    overfull/underfull を両版で出し、 **後版で新たに出たものだけ**を名指しする。 改稿で増えた組版警告と
@@ -32,6 +32,18 @@
    (色だけの差は文字の比較を通る = selftest の foil)。 頁数が違えば FAIL。 dpi を下げると細かい差が
    潰れうるので、 一致を書くときは使った dpi も書く。
 
+6. **font の入れ替わり** (`--fonts before.pdf after.pdf`): 2 つの PDF の font を名前 (subset の接頭辞
+   `ABCDEF+` を外す) で比べ、 前版にだけ在る font・後版にだけ在る font と、 両版の埋め込まれていない
+   font・Type 3 の font を出す。 書体を替える候補 (math alphabet の宣言し直しなど) で、 替わったのが
+   狙った font だけで、 他の font の一覧が動いていないことの証拠。 埋め込まれていない font か Type 3 が
+   どちらかに在れば exit 1 (font の名前の入れ替わりだけなら 0)。
+
+7. **頁ごとの行の折れ** (`--lines before.pdf after.pdf`): 頁ごとに抽出した行を、 空白を全部落として比べる。
+   行の数か中身が違う頁 = 段落の折れが動いた頁、 空白の入り方だけが違う頁 (字の送り幅・kern で抽出の
+   空白が変わる) は別に数える。 頁数の一致は折れが動いていない証拠にならない — 斜体の字を数式に使うと、
+   上付き・下付きが italic correction の分だけ右へ動き、 文中の式の幅が増えて段落が折れ直す (実測)。
+   頁数か折れが違えば exit 1。 PyMuPDF の抽出の行を使う (pdftotext -layout の桁揃えの空白に依らない)。
+
 使い方:
 
     python3 compare-tex-builds.py --before-log before/main.log --after-log after/main.log \
@@ -39,6 +51,8 @@
     python3 compare-tex-builds.py --reproduce distributed.pdf --built mybuild/main.pdf
     python3 compare-tex-builds.py --chars before/main.pdf after/main.pdf
     python3 compare-tex-builds.py --pixels before/main.pdf after/main.pdf --dpi 72
+    python3 compare-tex-builds.py --fonts before/main.pdf after/main.pdf
+    python3 compare-tex-builds.py --lines before/main.pdf after/main.pdf
     python3 compare-tex-builds.py --build-cmd 'pdflatex -interaction=nonstopmode main'   # 参考出力のみ
 
 `--strict` で、 後版にだけ在る error / 未定義参照 / 多重定義があれば exit 1 (overfull は既定で
@@ -176,6 +190,60 @@ def page_image_diff(a: Path, b: Path, dpi: int = 60) -> dict:
         if (pa.width, pa.height) != (pb.width, pb.height) or pa.samples != pb.samples:
             differ.append(i + 1)
     return {"pages": (len(da), len(db)), "differ": differ}
+
+
+def _fitz():
+    try:
+        import fitz  # PyMuPDF
+    except ImportError:
+        raise RuntimeError("PyMuPDF (fitz) not found (pip install pymupdf)")
+    return fitz
+
+
+def classify_fonts(entries: list[tuple]) -> dict[str, dict]:
+    """PyMuPDF の page.get_fonts() の行 (xref, ext, type, basefont, ...) の並びを
+    {名前 (subset の接頭辞を外す): {"embedded": bool, "type3": bool}} にまとめる。
+    同じ名前が 1 度でも埋め込まれていなければ embedded=False (頁ごとに別の xref がありうる)。"""
+    out: dict[str, dict] = {}
+    for e in entries:
+        ext, ftype, base = e[1], e[2], e[3]
+        name = re.sub(r"^[A-Z]{6}\+", "", base or "") or f"(unnamed {ftype})"
+        d = out.setdefault(name, {"embedded": True, "type3": False})
+        d["embedded"] = d["embedded"] and ext not in ("n/a", "")
+        d["type3"] = d["type3"] or ftype == "Type3"
+    return out
+
+
+def pdf_fonts(pdf: Path) -> dict[str, dict]:
+    doc = _fitz().open(str(pdf))
+    return classify_fonts([f for page in doc for f in page.get_fonts(full=True)])
+
+
+def font_diff(a: dict[str, dict], b: dict[str, dict]) -> dict:
+    """{'only_before', 'only_after', 'not_embedded': (before, after), 'type3': (before, after)} (名前の sorted list)。"""
+    def names(f: dict, key: str, want: bool) -> list[str]:
+        return sorted(n for n, d in f.items() if d[key] == want)
+    return {"only_before": sorted(set(a) - set(b)), "only_after": sorted(set(b) - set(a)),
+            "not_embedded": (names(a, "embedded", False), names(b, "embedded", False)),
+            "type3": (names(a, "type3", True), names(b, "type3", True))}
+
+
+def page_lines(pdf: Path) -> list[list[str]]:
+    doc = _fitz().open(str(pdf))
+    return [page.get_text().splitlines() for page in doc]
+
+
+def line_reflow(a: list[list[str]], b: list[list[str]]) -> dict:
+    """頁ごとの行の並び 2 つを比べる。 {'pages': (na, nb), 'reflow': [行の数か、 空白を落とした中身が違う頁],
+    'space_only': [空白の入り方だけが違う頁]} (頁は 1 から)。 短い方を越える頁は頁数が語る。"""
+    def squash(lines: list[str]) -> list[str]:
+        return ["".join(x.split()) for x in lines]
+    reflow, space_only = [], []
+    for i in range(min(len(a), len(b))):
+        if a[i] == b[i]:
+            continue
+        (reflow if squash(a[i]) != squash(b[i]) else space_only).append(i + 1)
+    return {"pages": (len(a), len(b)), "reflow": reflow, "space_only": space_only}
 
 
 # ---------------------------------------------------------------- build
@@ -479,6 +547,48 @@ def selftest() -> int:
             check("page images: a page-count change is reported",
                   page_image_diff(black, two)["pages"] == (1, 2))
 
+    # fonts: the subset prefix is not part of the name; one non-embedded occurrence marks the name
+    entries = [(1, "cff", "Type1C", "ABCDEF+LMSans10-Oblique"), (2, "n/a", "Type1", "Helvetica"),
+               (3, "pfa", "Type1", "GHIJKL+CMR10"), (4, "n/a", "Type1", "CMR10"), (5, "", "Type3", "T3Font")]
+    fc = classify_fonts(entries)
+    check("fonts: the subset prefix is stripped and the names merge",
+          sorted(fc) == ["CMR10", "Helvetica", "LMSans10-Oblique", "T3Font"])
+    check("fonts: a name embedded on one page but not on another counts as not embedded",
+          fc["CMR10"]["embedded"] is False and fc["LMSans10-Oblique"]["embedded"] is True)
+    check("fonts: Type 3 is flagged", fc["T3Font"]["type3"] is True and fc["CMR10"]["type3"] is False)
+    same = {"embedded": True, "type3": False}
+    fd = font_diff({"CMSS10": same, "CMR10": same}, {"LMSans10-Oblique": same, "CMR10": same})
+    check("fonts: a swapped face shows on both sides and the unchanged font on neither",
+          fd["only_before"] == ["CMSS10"] and fd["only_after"] == ["LMSans10-Oblique"])
+
+    # lines: a re-broken paragraph is a reflow, a spacing-only change is not
+    before = [["head", "alpha beta gamma", "delta epsilon"], ["page two"]]
+    rebroken = [["head", "alpha beta", "gamma delta epsilon"], ["page two"]]
+    spaced = [["head", "alpha beta gamma", "delta epsilon"], ["page  two"]]
+    check("lines: identical pages give nothing", line_reflow(before, before)["reflow"] == [])
+    check("lines: a paragraph broken at another word is a reflow on that page  [foil]",
+          line_reflow(before, rebroken)["reflow"] == [1])
+    check("lines: a spacing-only change is not a reflow but is counted",
+          line_reflow(before, spaced) == {"pages": (2, 2), "reflow": [], "space_only": [2]})
+    check("lines: the same letters re-broken stay a reflow (the letter comparison misses it)  [foil]",
+          char_multiset_diff(sum(before, []), sum(rebroken, [])) == {})
+    if fitz is not None:
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            def make_font(name: str, font: str) -> Path:
+                doc = fitz.open()
+                doc.new_page(width=200, height=100).insert_text((20, 50), "Same words",
+                                                                fontname=font, fontsize=14)
+                out = Path(td) / name
+                doc.save(str(out))
+                return out
+            fa, fb = pdf_fonts(make_font("h.pdf", "helv")), pdf_fonts(make_font("t.pdf", "tiro"))
+            d = font_diff(fa, fb)
+            check("fonts (PDF): Helvetica -> Times shows as a swap",
+                  d["only_before"] == ["Helvetica"] and d["only_after"] == ["Times-Roman"])
+            check("fonts (PDF): the base-14 fonts PyMuPDF writes are reported as not embedded",
+                  d["not_embedded"] == (["Helvetica"], ["Times-Roman"]))
+
     print("\nALL PASS" if ok else "\nFAILED")
     return 0 if ok else 1
 
@@ -499,6 +609,12 @@ def main() -> int:
                    help="render both PDFs page by page and compare the pixels (swapping a build tool "
                         "for an equivalent one must give 0 differing pages)")
     p.add_argument("--dpi", type=int, default=60, help="resolution for --pixels (default: 60)")
+    p.add_argument("--fonts", nargs=2, type=Path, metavar=("BEFORE_PDF", "AFTER_PDF"),
+                   help="compare the font names of two PDFs (subset prefix dropped) and list fonts that "
+                        "are not embedded or Type 3 (a typeface swap must change only the intended fonts)")
+    p.add_argument("--lines", nargs=2, type=Path, metavar=("BEFORE_PDF", "AFTER_PDF"),
+                   help="compare the extracted lines page by page with whitespace removed: pages whose "
+                        "lines differ were re-broken (equal page counts do not prove unchanged line breaks)")
     p.add_argument("--build", metavar="SPEC",
                    help="typeset SPEC and report its log/aux. SPEC = path to a .tex, or "
                         "REV:file.tex to take the whole revision via `git archive` "
@@ -543,6 +659,35 @@ def main() -> int:
             print(f"   {k!r}: {v:+d}")
         return 0 if tot == 0 else 1
 
+    if a.fonts:
+        fa, fb = pdf_fonts(a.fonts[0]), pdf_fonts(a.fonts[1])
+        d = font_diff(fa, fb)
+        bad = any(d["not_embedded"]) or any(d["type3"])
+        print(f"[{'FAIL' if bad else 'PASS'}] fonts {len(fa)} / {len(fb)}; not embedded "
+              f"{len(d['not_embedded'][0])} / {len(d['not_embedded'][1])}; Type 3 "
+              f"{len(d['type3'][0])} / {len(d['type3'][1])}")
+        print("   only in before: " + (", ".join(d["only_before"]) or "-"))
+        print("   only in after:  " + (", ".join(d["only_after"]) or "-"))
+        for kind, pair in (("not embedded", d["not_embedded"]), ("Type 3", d["type3"])):
+            for side, names in zip(("before", "after"), pair):
+                if names:
+                    print(f"   {kind} in {side}: " + ", ".join(names))
+        return 1 if bad else 0
+
+    if a.lines:
+        import difflib
+        la, lb = page_lines(a.lines[0]), page_lines(a.lines[1])
+        r = line_reflow(la, lb)
+        (na, nb), reflow = r["pages"], r["reflow"]
+        bad = na != nb or bool(reflow)
+        print(f"[{'FAIL' if bad else 'PASS'}] pages {na} / {nb}, pages re-broken: {len(reflow)}, "
+              f"pages differing only in spacing: {len(r['space_only'])}")
+        for pg in reflow[:10]:
+            print(f"   page {pg}:")
+            for dl in list(difflib.unified_diff(la[pg - 1], lb[pg - 1], lineterm="", n=0))[2:14]:
+                print(f"      {dl}")
+        return 1 if bad else 0
+
     if a.pixels:
         r = page_image_diff(a.pixels[0], a.pixels[1], a.dpi)
         (na, nb), differ = r["pages"], r["differ"]
@@ -572,7 +717,7 @@ def main() -> int:
                           parse_aux(a.after_aux.read_text(encoding="latin-1")))
     if not (bl or drift):
         p.error("give --before-log/--after-log, --before-aux/--after-aux, --reproduce/--built, --chars, "
-                "--pixels or --build")
+                "--pixels, --fonts, --lines or --build")
     return report(bl, al, drift, a.strict, a.strict_overfull)
 
 
