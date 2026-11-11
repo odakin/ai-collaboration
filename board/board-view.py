@@ -125,7 +125,8 @@ def event_paths(root: Path) -> list[tuple[Path, bool]]:
             if sha: COMMIT_META[p] = {"sha": sha, "date": date, "author": author}
             out.append((p, True))
         return out
-    seen: list[Path] = []
+    # Keep first-add order without scanning the history collected so far for each path.
+    committed_by_path: dict[Path, bool] = {}
     # git prints paths from the repository top; a board in `<repo>/board/` strips that prefix
     prefix = git(root, "rev-parse", "--show-prefix").strip()
     # sentinel は平文 prefix (= \x1e/\x1f は str.strip() が空白扱いで削る。 path は必ず events/ で始まるので衝突しない)
@@ -141,23 +142,23 @@ def event_paths(root: Path) -> list[tuple[Path, bool]]:
         if not line.endswith(".json") or not line.startswith(prefix):
             continue
         p = root / line[len(prefix):]
-        if p not in seen:
-            seen.append(p)
+        if p not in committed_by_path:
+            committed_by_path[p] = True
             if cur:
                 COMMIT_META[p] = cur
     # A deleted historical record is a damaged history, not an absent event.
-    out = [(p, True) for p in seen]
+    new_paths: list[tuple[Path, bool]] = []
     status = git(root, "status", "--porcelain", "--untracked-files=all", "--", "events")
     for line in status.splitlines():
         rel = line[3:].strip()
         if not rel.endswith(".json") or not rel.startswith(prefix):
             continue
         p = root / rel[len(prefix):]
-        if p in seen:
-            out = [(old, False if old == p else committed) for old, committed in out]
+        if p in committed_by_path:
+            committed_by_path[p] = False
         elif p.is_file():
-            out.append((p, False))
-    return out
+            new_paths.append((p, False))
+    return list(committed_by_path.items()) + new_paths
 
 
 class EventIssue:
