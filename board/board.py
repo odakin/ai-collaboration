@@ -1560,8 +1560,16 @@ def check_model_allow(cfg, model, quote):
     print(f"ℹ️ 掲示板が起こす model ({' / '.join(tiers)}) に無い {m} で起こす = 本人の名指し「{' '.join(quote.split())}」 (起動の記録に残す)")
 
 
+# `request --preview` shows the launch it would get without writing it (CONTRACT.md#preview-writes-nothing): the plans
+# still return the paths, but nothing lands in the outbox. Measured: every preview to a role left a hand-off, a launch
+# record and start_session arguments under a request id that was never posted.
+_OUTBOX={'dry':False}
+
+
 def write_outbox(root, name, text):
-    path=outbox_dir(root)/name; path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+    path=outbox_dir(root)/name
+    if _OUTBOX['dry']: return path
+    path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
     path.write_text(text,encoding='utf-8'); path.chmod(0o600)
     return path
 
@@ -2359,7 +2367,7 @@ def inbox_show(a, root, *, board_name=None, collect=None):
             else:
                 print(f"{pk}/{tid} [{w['label']}] request={w['request_id']}")
                 print(w.get('title') or '')
-                print('\n'.join(view.handoff_lines(w)))
+                print('\n'.join(view.handoff_lines(w, notes='all')))
                 for err in w.get('errors',[]): print('🔴 '+err)
                 print(w.get('next_action') or 'この依頼は終了しています。')
             return
@@ -2798,7 +2806,11 @@ def main():
         probs+=reduce_workflow(same+[ev],view.now_utc())['errors']
         if probs: raise ValueError('; '.join(probs))
         print(json.dumps(ev,ensure_ascii=False,indent=2))
-        announce_launch(a,ev,cfg['audience'])   # shown, not run: the requester sees the command it will get
+        _OUTBOX['dry']=True
+        try: announce_launch(a,ev,cfg['audience'])   # shown, not run: the requester sees the command it will get
+        finally: _OUTBOX['dry']=False
+        if a.command=='request' and (a.to_session or '').startswith('role-'):
+            print('  (preview = 上の hand-off 文・引数・起動の記録は outbox に書いていない。 投稿すると、 その投稿の request id の名前で書く)')
         return
     from board_schema import errors
     probs=errors(ev,json.loads(SCHEMA_PATH.read_text()))

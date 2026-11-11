@@ -564,6 +564,48 @@ class Note(unittest.TestCase):
         # but a legacy 'done' still cannot close a v2 request
         r,c,sub=chain(); done,_=board.view.build_template(kind='done',project='example',thread='2026-09-06-example',task='t',agent='codex',repo='o/example',restricted=False,lease_hours=12,summary='done',now=NOW+dt.timedelta(seconds=9))
         w2=reduce_workflow([r,c,sub,done],NOW+dt.timedelta(seconds=30)); self.assertEqual(w2['status'],'submitted'); self.assertTrue(w2['errors'])
+    def _notes_state(self, events):
+        r=events[0]
+        return board.view.derive(events,NOW+dt.timedelta(seconds=60))['example',r['thread_id']]
+    def test_notes_after_the_request_reach_inbox_show_and_json(self):
+        # A requester's note that adds an item after the claim reaches the worker's inbox and show (measured: neither
+        # printed it and the worker read events/ by hand); engine marks (pickup, touch) are a count, and nothing moves.
+        r,c,_=chain()
+        added=event('note',2,agent='claude'); added['summary']='Add one item: check the second domain condition.'
+        pick=event('note',3,agent='codex'); pick['summary']='引き受けた: 検収する'
+        touch=event('note',4,agent='codex'); touch['summary']='触る: example/x.py'; touch['touches']=['example/x.py']
+        t=self._notes_state([r,c,added,pick,touch]); w=t['workflow']
+        self.assertEqual(w['status'],'working')
+        inbox='\n'.join(board.view.handoff_lines(w)); show='\n'.join(board.view.handoff_lines(w,notes='all'))
+        for text in (inbox,show):
+            self.assertIn(added['summary'],text); self.assertIn(added['event_id'],text)
+            self.assertNotIn('引き受けた: 検収する',text); self.assertIn('道具の印の note 2 本',text)
+        rendered=board.view.render({('example',r['thread_id']):t},[],surface=True,project=None,now=NOW,locked=False)
+        self.assertIn(added['summary'],rendered)
+        row=board.view.workflow_row('example',r['thread_id'],t,reader={'agent':'codex','session_id':'codex-session-001'})
+        self.assertEqual([(n['event_id'],n['tool']) for n in row['notes']],[(added['event_id'],False),(pick['event_id'],True),(touch['event_id'],True)])
+    def test_inbox_lists_requester_side_and_post_claim_notes_newest_first_up_to_five(self):
+        r=event('request',0)
+        early=event('note',1,agent='other'); early['actor']['session_id']='other-session-009'; early['summary']='An unrelated remark before the claim.'
+        c=event('claim',2)
+        req=[]
+        for i in range(7):
+            n=event('note',3+i,agent='claude'); n['summary']=f'Requester note {i}.'; req.append(n)
+        t=self._notes_state([r,early,c,*req]); w=t['workflow']
+        inbox=board.view.handoff_lines(w); show=board.view.handoff_lines(w,notes='all')
+        listed=[l for l in inbox if l.startswith('    依頼の後の note')]
+        self.assertEqual(len(listed),5)
+        self.assertIn('Requester note 6.',listed[0]); self.assertIn('Requester note 2.',listed[-1])   # newest first
+        self.assertNotIn('An unrelated remark before the claim.','\n'.join(inbox))
+        self.assertIn('ほかの note 3 本 = show --request '+r['event_id'],'\n'.join(inbox))
+        shown=[l for l in show if l.startswith('    依頼の後の note')]
+        self.assertEqual(len(shown),8); self.assertIn('An unrelated remark before the claim.',shown[0])   # all, oldest first
+        self.assertFalse([l for l in show if 'ほかの note' in l])
+        # a third party's note after the claim is listed too
+        late=event('note',20,agent='other'); late['actor']['session_id']='other-session-009'; late['summary']='A late remark.'
+        w2=self._notes_state([r,early,c,*req,late])['workflow']
+        listed2=[l for l in board.view.handoff_lines(w2) if l.startswith('    依頼の後の note')]
+        self.assertIn('A late remark.',listed2[0])
     def test_empty_backticks_in_summary_are_refused(self):
         import argparse
         a=argparse.Namespace(command='note',policy='ordinary',source=Path('/nonexistent/example'),project='example',thread='2026-09-07-x',repo='o/example',
@@ -2335,6 +2377,22 @@ class EffortFlag(unittest.TestCase):
         out=self.cli('request',*b,'--thread','2026-01-01-eff-e','--to','claude','--to-session','role-eproj-e','--surface','desktop','--effort','high','--preview').stdout
         self.assertIn('"effort": "high"',out); self.assertIn('Opus 5.5 high',out)
         with board.snapshot(self.root,fresh=True) as snap: self.assertEqual(len([e for e in board.read(snap) if e['kind']=='request']),4)
+
+    def test_preview_writes_nothing_to_the_outbox(self):
+        # A --preview to a role prints the launch it would get, but writes no hand-off, launch record or start_session
+        # arguments (measured: each preview left them under an id that was never posted). The post still writes them.
+        b=self.post_args(); ob=board.outbox_dir(self.root)
+        before=set(ob.glob('*')) if ob.is_dir() else set()
+        for i,surface in enumerate(('desktop','background','agent')):
+            p=self.cli('request',*b,'--thread',f'2026-01-01-prev-{i}','--to','claude','--to-session',f'role-eproj-prev{i}',
+                       '--surface',surface,'--effort','xhigh','--preview')
+            self.assertIn('outbox に書いていない',p.stdout,surface); self.assertRegex(p.stdout,r'\.(handoff\.txt|start_session\.json)',surface)
+            self.assertEqual(set(ob.glob('*')) if ob.is_dir() else set(),before,surface)
+        out=self.cli('request',*b,'--thread','2026-01-01-prev-post','--to','claude','--to-session','role-eproj-prevpost',
+                     '--surface','desktop','--effort','xhigh').stdout
+        rid=self.rid(out); self.assertNotIn('outbox に書いていない',out)
+        self.assertTrue((ob/(rid+'.start_session.json')).is_file()); self.assertEqual(board.launch_record(self.root,rid)['effort'],'xhigh')
+        with board.snapshot(self.root,fresh=True) as snap: self.assertEqual(len([e for e in board.read(snap) if e['kind']=='request']),1)
 
     def test_refusals_and_live_note(self):
         p=self.cli('claim','--root',str(self.root),'--agent','claude','--session','role-x','--effort','high',ok=False)

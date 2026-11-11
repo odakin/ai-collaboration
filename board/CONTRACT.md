@@ -384,7 +384,12 @@ or return a pending submission first); a reviewer handover keeps the submission 
 Runners and dashboards read `inbox --json`: actionable requests and scoped error rows, warnings on stderr, `[]` when
 nothing waits. Each row carries the latest valid `question`, `answer`, `submission` and `review` with their own
 summary, author, event id, `reply_to`, references and deliverables. A later status note cannot replace a submission
-or receipt. A worker that changes its deliverables after `submit` and before the review cannot submit again (the
+or receipt. <a id="notes-in-views"></a>Each row also carries `notes`: the notes posted on the request after it was
+made, each marked `tool` when the engine posted it by itself (a launch or pickup mark, a touch declaration). The text
+views print them under the request's lines: `show` every note, oldest first; inbox the notes of the requester's and
+the reviewer's side (and the owner's) and any note after the current claim, newest first, at most five, with the rest
+as a count; engine marks are a count in both. Measured: a requester's note that added an item after the claim reached
+neither view, and the worker read `events/` by hand. A worker that changes its deliverables after `submit` and before the review cannot submit again (the
 engine refuses with `already submitted`): it commits the change, posts a `note --reply-to <submission>` that names the
 new commit, and messages the reviewer; the reviewer names the commit it reviewed in its `accept`, or returns the
 submission with `revise` so that the worker submits again (measured).
@@ -421,8 +426,8 @@ after its lease expired (for example when the approval it waited for finally arr
 candidates again would overwrite edits made since (measured).
 
 <a id="re-read-before-submit"></a>Right before `submit`, a worker reads the posts on its request since its claim:
-`watch --request <id> --since <its claim's event id> --max-minutes 1` prints them and returns (`show` prints the
-request and the latest submission, not the notes). A requester may narrow or widen the scope in a `note` after the
+`watch --request <id> --since <its claim's event id> --max-minutes 1` prints them and returns (`show --request <id>
+--sync` lists every note on the request too, [#notes-in-views](#notes-in-views)). A requester may narrow or widen the scope in a `note` after the
 claim, and a message sent to a session in the middle of a turn waits until that turn ends, so a worker that does the
 whole job in one turn sees neither before it submits (measured: a scope note posted minutes after the claim reached the
 worker only after it had submitted the part the note excluded, and the fix went into a follow-up commit named in a
@@ -804,7 +809,10 @@ python3 board_asks.py digest --root <board> --session S
   `CLAUDE_CONFIG_DIR=<dir> claude --bg --model <m> --effort <e> --settings '{"remoteControlAtStartup": false, "worktree": {"bgIsolation": "none"}}' "$(cat <file>)"`
   — and `--launch` runs it at once
   (with `AGENT_BOARD_LAUNCH_DEFAULT=1` in the owner's wiring every such request on an owner board runs it,
-  `--no-launch` keeps it to the printed line; `--preview` never runs it). On a collaborator board that default does
+  `--no-launch` keeps it to the printed line; `--preview` never runs it <a id="preview-writes-nothing"></a>and writes
+  nothing to the outbox: it prints the hand-off text and the arguments, and the post writes them under the post's own
+  request id (a preview's id is never posted, so its paths are never written). Measured: previews left a hand-off, a launch record and start_session arguments under request ids
+  that were never posted, and arguments copied from a preview start a worker whose request is not on the board). On a collaborator board that default does
   not apply and only `--launch` runs it: a role there may be a collaborator's, opened in the collaborator's own
   environment, and a worker started on the requester's machine would claim under it ([#role-any-agent](#role-any-agent)),
   so the requester launches only a role on its own side. The worker starts in the workspace directory.

@@ -55,7 +55,7 @@ def reduce_workflow(events, now):
     state = {'status':'invalid', 'request':None, 'claim':None, 'submission':None,
              'blocker':None, 'question':None, 'answer':None, 'review':None,
              'waiting_on':None, 'next_action':'', 'claim_expired':False,
-             'errors':[], 'accepted_ids':[], 'assigned_to':None, 'reviewer':None}
+             'errors':[], 'accepted_ids':[], 'assigned_to':None, 'reviewer':None, 'notes':[]}
     seen = set()
     # Legacy (v1) events cannot move a request, so they are errors only once a v2 request exists in the
     # thread. Before that (v1 status thread later joined by v2 notes) they stay live and inert.
@@ -99,6 +99,10 @@ def apply(s, e, seen):
     if kind == 'note':
         # Status sharing that never moves a request. Allowed before or after a request exists,
         # so agents do not fall back to hand-committed legacy v1 events (measured: sessions of both vendors did).
+        # Notes after the request are kept for inbox/show: a requester narrows or widens the work in a note, and a
+        # view that dropped them sent the worker to read events/ by hand (measured).
+        if s['request'] is not None:
+            s['notes'].append(e)
         return
     req = s['request']
     if kind == 'request':

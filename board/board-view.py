@@ -300,6 +300,19 @@ def event_brief(event):
             ('event_id', 'kind', 'created_at', 'actor', 'summary', 'references', 'deliverables', 'reply_to')}
 
 
+# Notes the engine posts by itself (board.py CODEX_LAUNCHED / PICKUP, and touch declarations): views count them instead
+# of listing them, so a requester's note that changes the work is not buried under launch and pickup marks.
+TOOL_NOTE_PREFIXES = ('起動した:', '引き受けた:')
+NOTE_INBOX_MAX = 5   # inbox lists at most this many notes per request, newest first; show lists them all
+
+
+def note_brief(event):
+    """event_brief of a note after the request, marked `tool` when the engine posted it by itself."""
+    brief = event_brief(event)
+    brief['tool'] = bool(event.get('touches')) or (event.get('summary') or '').startswith(TOOL_NOTE_PREFIXES)
+    return brief
+
+
 def workflow_row(project, thread, state, *, reader=None):
     """One read contract shared by inbox and explicit request inspection."""
     w = state.get('workflow') or {}
@@ -310,6 +323,7 @@ def workflow_row(project, thread, state, *, reader=None):
         actionable=bool(reader and same_session(w.get('waiting_on'), reader) and not w.get('errors')),
         deliverables=w.get('deliverables') or [],
         references=(w.get('request') or {}).get('references') or [],
+        notes=w.get('notes') or [],
         errors=w.get('errors') or [])
     return row
 
@@ -323,13 +337,47 @@ def participated(state, reader):
     return False
 
 
-def handoff_lines(w):
-    """Render the actual handoff messages, not just the original request title."""
+def note_lines(w, mode='inbox'):
+    """The notes posted on the request after it was made (CONTRACT.md#notes-in-views).
+
+    mode 'all' (show): every note, oldest first. mode 'inbox': the notes of the requester's and the reviewer's side (and
+    the owner's), plus any note after the current claim, newest first, at most NOTE_INBOX_MAX; the rest is a count.
+    Notes the engine posted by itself (launch and pickup marks, touch declarations) are a count in both modes."""
+    notes = w.get('notes') or []
+    tool = [n for n in notes if n.get('tool')]
+    plain = [n for n in notes if not n.get('tool')]
+    if mode == 'all':
+        shown = plain
+    else:
+        sides = [s for s in (w.get('requester'), w.get('reviewer')) if s and s.get('session_id')]
+        claim = w.get('claim_id') or ''
+        def wanted(n):
+            actor = n.get('actor') or {}
+            return (actor.get('agent') == 'human' or any(same_session(actor, s) for s in sides)
+                    or bool(claim and n['event_id'] > claim))
+        shown = [n for n in reversed(plain) if wanted(n)][:NOTE_INBOX_MAX]
+    lines = []
+    for n in shown:
+        actor = n.get('actor') or {}
+        lines.append(f"    依頼の後の note [{n['event_id']}; reply_to={n.get('reply_to') or '—'}] {actor.get('agent')} / {actor.get('session_id')}: {n.get('summary') or ''}")
+        for reference in n.get('references') or []:
+            lines.append('      → ' + reference)
+    rest = len(plain) - len(shown)
+    if rest:
+        lines.append(f"    ほかの note {rest} 本 = show --request {w.get('request_id')} で全部")
+    if tool:
+        lines.append(f"    道具の印の note {len(tool)} 本 (起動・引き受け・touch の宣言)")
+    return lines
+
+
+def handoff_lines(w, notes='inbox'):
+    """Render the actual handoff messages, not just the original request title. `notes` = 'inbox' or 'all' (note_lines)."""
     lines = []
     if w.get('acceptance'):
         lines.append('    完了条件: ' + w['acceptance'])
     for reference in (w.get('request') or {}).get('references') or []:
         lines.append('    依頼資料: ' + reference)
+    lines.extend(note_lines(w, notes))
     for key, label in [('question', '直近の質問'), ('answer', 'その回答'),
                        ('submission', '直近の提出'), ('review', '直近の確認・差し戻し')]:
         e = w.get(key)
@@ -411,6 +459,7 @@ def derive(events: list[dict], now: dt.datetime) -> dict:
                     deliverables=(w["submission"] or {}).get("deliverables", []),
                     request=event_brief(w['request']), submission=event_brief(w['submission']),
                     question=event_brief(w['question']), answer=event_brief(w['answer']), review=event_brief(w['review']),
+                    notes=[note_brief(n) for n in w['notes']], claim_id=(w['claim'] or {}).get('event_id'),
                     reply_to=(w["submission"] if w["status"] == "submitted" else w["blocker"] if w["status"] == "blocked" else w["claim"] or w["request"] or {}).get("event_id"))
                 if t['closed']:
                     t['workflow']['reply_to'] = None
