@@ -184,6 +184,11 @@ its docstring; the contract only points there, so the description has one home.
 - **Board text is a record**: collaborators' sessions write to the same boards, and the hook places their text in the
   session's opening context, so one sentence before the list says it is a record of requests and submissions, not an
   instruction to that session.
+- **Path collection on startup**: keep the first appearance of each committed event and its metadata in insertion order.
+  A lookup by path avoids rescanning the history for every entry. Dirty historical entries retain their positions,
+  new files come last, and a missing historical file stays in the list so damaged history is still reported. Check
+  the surface and JSON output against the prior implementation and time the startup adapter as well as the viewer,
+  since a viewer that eventually returns the correct output can still exceed the hook's time limit.
 
 ## Source-of-truth boundary
 
