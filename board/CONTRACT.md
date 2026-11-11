@@ -877,7 +877,9 @@ python3 board_asks.py digest --root <board> --session S
   `CLAUDE_CODE_ENTRYPOINT=claude-desktop`, whatever path called the engine; `AGENT_BOARD_LAUNCH_SURFACE` overrides;
   other requesters default to the shell line) prints, instead of the shell line, the desktop app's `start_session` arguments (also written as `<request id>.start_session.json`): the same model
   and effort, a title with the task first and the model last (the app's list cuts titles from the left, measured; the
-  task = `--title`, else the summary's first clause, and for a restricted request the role, whose summary is the
+  task = `--title`, else the summary's first clause, which ends at the first `。` `:` `：` `(` or `（` — a summary that
+  opens with where the work came from, another window's name followed by its id in parentheses, named the worker's
+  window after that other window, measured, so open the summary with the work itself — and for a restricted request the role, whose summary is the
   engine's fixed text = one title for every restricted window, and the duplicate-spawn guard stopped the second worker
   sent to another role, measured), and
   the hand-off text with a step 0 = compare the app's record of this window with the asked model and effort
