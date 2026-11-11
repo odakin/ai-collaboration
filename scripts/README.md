@@ -41,7 +41,7 @@ Each module's first docstring line is the description source of truth. Every scr
 | [`one_loop_pole.py`](one_loop_pole.py) | Exact 1/ε pole of one-loop Minkowski integrals with ≤ 2 propagators by large-loop-momentum expansion and covariant angular averaging (sympy, exact rationals only) — re-computes printed pole terms of self-energies, tadpoles and mixed two-point functions from printed Feynman rules; --selftest |
 | [`one_loop_vacuum.py`](one_loop_vacuum.py) | Exact radial log integrals, one-loop MSbar vacuum terms and logarithmic stationary points; --selftest. |
 | [`pdf-citation-contexts.py`](pdf-citation-contexts.py) | pdf-citation-contexts.py — 論文 PDF が特定の文献をどこで引いているかを拾う: 文献表の番号 ([n] / 行頭の "n.") を正規表現で特定し、 本文の [..] の引用 (範囲 [21–25] を展開) を頁と前後の文脈つきで全部出す。 erratum の下流 sweep (引用している論文が訂正前の式を値として使っているか) を読む入口。 --selftest 内蔵。 |
-| [`pdf-locator-grep.py`](pdf-locator-grep.py) | Pin page and equation locators: page-numbered regex hits in a PDF text layer, page-marked text dump, page renders (arXiv id or local file); --selftest. |
+| [`pdf-locator-grep.py`](pdf-locator-grep.py) | Pin page and equation locators: page-numbered regex hits in a PDF text layer, page-marked text dump, page renders, zoomed crops, printed page numbers and a copy's sha256 (arXiv id or local file); --selftest. |
 | [`povm_moment_variance.py`](povm_moment_variance.py) | Finite-POVM measured moments, first-operator variance and noise; --selftest. |
 | [`review-artifact-snapshot.py`](review-artifact-snapshot.py) | Capture and check immutable review inputs while listing newly added artifacts. |
 | [`review-markup-clean.py`](review-markup-clean.py) | review markup cleaner: 共著 review 用の着色と著者間問答を LaTeX source から外す (投稿前清掃 + 清掃版どうしの diff 用)。 |
