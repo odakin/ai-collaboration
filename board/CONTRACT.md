@@ -409,7 +409,9 @@ trustworthy thread scope, inbox/show fail instead of returning a misleading empt
 
 The worker's lease and the reviewer's obligation are distinct. An unanswered `blocker` stays addressed to the current
 reviewer even if the lease expires; inbox/show expose `claim_expired` and `lease_until` separately from `status` and
-`waiting_on`. Reclaiming, releasing or handing over the work does not answer the question, and a worker cannot
+`waiting_on`. A standing claim (a reviewer role that stays claimed while its post is open) outlives one lease: `claim`
+refuses while the same role's own claim is live, so the holder renews it before `lease_until` by `release` followed at
+once by `claim` (the request reads as awaiting assignment between the two posts; measured). Reclaiming, releasing or handing over the work does not answer the question, and a worker cannot
 submit while it is open. The reviewer's `update --reply-to <blocker>` resolves it. A submitted result still awaits
 receipt after lease expiry; only the reviewer can withdraw a request. A worker that takes over a request whose
 earlier claim expired reads `show --request <id>` and the files its notes name before starting: the earlier worker
