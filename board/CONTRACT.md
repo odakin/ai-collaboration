@@ -589,7 +589,12 @@ to the guard's `apply --reviewer-approval <event id>` instead of the owner's wor
 Write it as one simple command with literal paths (a line continuation `\` is fine; no `;`, `&&`, `|`, redirect,
 variable or substitution): the guard counts only that form as the reviewer's posting, and only when its tool result
 shows `posted <event id>` = let it finish in the foreground (a long tool timeout; a posting moved to the background
-leaves no such line in the transcript, and piping it into `tail` both breaks the form and can hide the line, measured). Any other command of the
+leaves no such line in the transcript, and piping it into `tail` both breaks the form and can hide the line, measured).
+A habitual `2>&1` counts too: the guard reads `>&` as an output redirect, so any command of the reviewer's that names
+the file or the candidate with `2>&1` after the pickup counts as writing them, and that window can no longer approve
+on that request (measured). Approve the candidates of the worker's final submission: the board takes one submission
+at a time, so a partial submission made only to get an approval needs a `revise` before the final one can be posted
+(measured). Any other command of the
 reviewer's that names the file, the candidate or a directory above the file must be made of reading commands only
 (the rule text lists them); review against copies made with `cp` to an absolute destination outside the
 repository and the candidate's directory, not links.
