@@ -200,6 +200,66 @@
         "印の無い問いの段に、 足す 1 行を勧める",
         "本人に印を打たせる文を差し戻す"
       ]
+    },
+    {
+      "name": "在りかの相対の repo の名を、 掲示板の root の上の dir から解かない (呼んだ shell の作業 dir 次第に戻す)",
+      "pairs": [
+        [
+          "    if root:\n        r = Path(root).expanduser().resolve()\n        bases += [r, *r.parents]\n",
+          "    if False:\n        pass\n"
+        ]
+      ],
+      "expect_fail": [
+        "在りかの相対の repo の名は、 掲示板の root の上の dir から解いて絶対 path で判定の道具に渡す"
+      ],
+      "expect_pass": [
+        "在りかの repo がどこにも無ければ立てない"
+      ]
+    },
+    {
+      "name": "--denied を会話記録と照らさない (言い換えでも判定の道具の「要らない」 を上書きする)",
+      "pairs": [
+        [
+          "        if seen is False:\n            return False, ('--denied は、",
+          "        if False:\n            return False, ('--denied は、"
+        ]
+      ],
+      "expect_fail": [
+        "--denied が会話記録に無い言い換えなら立てず、 候補を在りかにするよう言う"
+      ],
+      "expect_pass": [
+        "--denied が会話記録の守りの理由の写しなら立てる"
+      ]
+    },
+    {
+      "name": "検収係の受け取りが本人のものと分類しなかった理由の問いも立てる",
+      "pairs": [
+        [
+          "            if classes is not None and it['ground'] not in classes:",
+          "            if False:"
+        ]
+      ],
+      "expect_fail": [
+        "受け取りが本人のものと分類しなかった理由の問いは立てない"
+      ],
+      "expect_pass": [
+        "受け取りが本人のものと分類した理由の問いは立てる"
+      ]
+    },
+    {
+      "name": "最近の受け取りのある依頼元の、 どこから出たかの key の無い問いも立てる",
+      "pairs": [
+        [
+          "            recent = _recent_reviewed(root, me)\n",
+          "            recent = []\n"
+        ]
+      ],
+      "expect_fail": [
+        "最近の受け取りのある依頼元の、 どこから出たかの key の無い問いは立てない"
+      ],
+      "expect_pass": [
+        "受け取りから出したのでない問いは --not-from-review か、 どこから出たかの key で立つ"
+      ]
     }
   ]
 }

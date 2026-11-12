@@ -587,7 +587,9 @@ reviewer writes its approval of one candidate as a note to the submission, and t
 to the guard's `apply --reviewer-approval <event id>` instead of the owner's words:
 
 Write it as one simple command with literal paths (a line continuation `\` is fine; no `;`, `&&`, `|`, redirect,
-variable or substitution): the guard counts only that form as the reviewer's posting. Any other command of the
+variable or substitution): the guard counts only that form as the reviewer's posting, and only when its tool result
+shows `posted <event id>` = let it finish in the foreground (a long tool timeout; a posting moved to the background
+leaves no such line in the transcript, and piping it into `tail` both breaks the form and can hide the line, measured). Any other command of the
 reviewer's that names the file, the candidate or a directory above the file must be made of reading commands only
 (the rule text lists them); review against copies made with `cp` to an absolute destination outside the
 repository and the candidate's directory, not links.
@@ -735,7 +737,20 @@ python3 board_asks.py digest --root <board> --session S
   a change that needs no ruling is refused with "apply it and report", including asks to ratify such a change after
   the fact (measured). The validator runs outside the ledger's lock and is given the asking session (the write-time
   guard's net for rules the agent declined in that conversation reads it). When the write-time guard stops a change
-  the validator called free, `--denied '<the guard's reason>'` makes the ask and keeps the reason on it.
+  the validator called free, `--denied '<the guard's reason>'` makes the ask and keeps the reason on it. The reason is
+  the guard's own refusal copied from the asking window's tool results: an account of it, or of something another
+  window saw (a reviewer that did not approve), is refused, and a candidate is named by `<repo>@candidate=<absolute
+  path>:<path>` instead (measured: an account written into `--denied` overrode the validator's "no ruling needed").
+  A relative repo dir in the evidence is resolved from the board root and its parents before the validator sees it,
+  and a repo found nowhere is refused (measured: the validator resolved it from the asking shell's directory, so the
+  same evidence was judged free from one directory and "unreadable, asked anyway" from another).
+- **A question out of a reviewer's accept** carries `--key request:<id>` (`request:<id>#2` for a second one): it is made
+  only on a ground the latest accept of that request gave to the owner (`--owner-ruling '<class>: …'`), and what the
+  reviewer decided is not asked again. A window whose own requests had a reviewer's accept in the last 24 hours names
+  where any other choice, protected, rule or outbound question came from (`request:`, `todo:`, `plan:` or `session:`
+  key) or passes `--not-from-review '<one line>'` (measured: a conductor asked the owner, as the owner's choice, a
+  question its reviewer had decided, and asked the owner to approve files the reviewer had not classified as the
+  owner's). Policy checks before implementation are not gated by the accept.
 - **An earlier answer comes first**: an ask whose key and text match a question the owner already answered is not
   made; the earlier answer (the owner's words) is printed instead (measured: the same questions were asked again in
   another window after the owner had answered them). The same key with another text is refused with the earlier

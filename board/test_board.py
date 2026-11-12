@@ -2104,6 +2104,9 @@ class LaunchCommandCLI(Transport):
             self.assertIn('the permission check holds until the owner approves it in this session',args['prompt'])   # a relayed approval does not reach the worker's session
             # a protected file the rule guard stops: the owner answers in the requester's window, the worker applies with that answer
             self.assertIn("--owner-session claude:<the requester's session id> --quote '<the owner's words>'",args['prompt'])
+            # ... and within the owner's reviewer delegation, the reviewer's approval event is the other way to apply it
+            # (measured: the hand-off named only the owner's way, and workers asked the owner for files the reviewer could approve)
+            self.assertIn('--reviewer-approval <event id>',args['prompt']); self.assertIn('Reviewer-Approved: <event id>',args['prompt'])
             self.assertIn('do not list them in your replies here',args['prompt'])   # one question in one window
             self.assertIn("is not applied on another window's answer",args['prompt'])   # CLAUDE.md, permissions, config stay where the owner speaks
             self.assertNotIn('guard.py',args['prompt'])   # the hand-off names no guard file (naming one in board.py would lock the whole file)

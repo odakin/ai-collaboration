@@ -263,7 +263,130 @@ def _validator():
     return HERE.parent.parent / 'claude-config' / 'scripts' / 'owner-ask-validate.py'
 
 
-def gate(ground, evidence=None, *, applied=False, validator=None, session=None, denied=''):
+def _resolve_evidence(evidence, root=None):
+    """(evidence, error). A relative repo dir in `<repo>@<rev>:<path>` is resolved against the board root and its parents
+    (the work root holding the repos), then the current dir, and handed to the validator as an absolute path. A repo
+    found nowhere is an error (the ask is refused: fix the evidence). Measured: the validator ran `git -C <repo>` from the
+    asking shell's directory, so the same evidence judged "no ruling needed" from the work root and "unreadable, asked
+    anyway" from a repo directory, and the unreadable branch let asks through that needed no ruling."""
+    repo, sep, rest = (evidence or '').partition('@')
+    if not sep or not repo:
+        return evidence, ''          # malformed: the validator reports it
+    p = Path(os.path.expanduser(repo))
+    if p.is_absolute():
+        return (evidence, '') if p.is_dir() else (evidence, f'在りかの repo {repo} が無い (在りかを直して立て直す。 repo の dir の絶対 path が確か)')
+    bases = []
+    if root:
+        r = Path(root).expanduser().resolve()
+        bases += [r, *r.parents]
+    bases.append(Path.cwd())
+    for b in bases:
+        if (b / p).is_dir():
+            return f'{(b / p).resolve()}@{rest}', ''
+    return evidence, (f'在りかの repo {repo} が掲示板の root の上の dir にも作業 dir にも無い = 判定の道具が読めず、 裁定の要否を'
+                      ' 確かめないまま立ててしまう (在りかを直して立て直す。 repo の dir の絶対 path が確か)')
+
+
+def _session_transcript(session):
+    """The asking session's Claude Code transcript (BOARD_ASKS_TRANSCRIPT overrides, for the selftest), or None."""
+    env = os.environ.get('BOARD_ASKS_TRANSCRIPT')
+    if env:
+        return Path(os.path.expanduser(env))
+    if not session or session == 'unknown' or not re.fullmatch(r'[0-9a-f-]{8,64}', session):
+        return None
+    import glob
+    hits = glob.glob(os.path.expanduser(f'~/.claude*/projects/*/{session}.jsonl'))
+    return Path(max(hits, key=os.path.getmtime)) if hits else None
+
+
+def _denied_seen(session, denied):
+    """True = the start of `denied` is in a tool result of the asking session's transcript (the guard's own refusal was
+    copied), False = the transcript was read and the text is absent (a paraphrase, or something that happened in another
+    window), None = no transcript to read. Measured: a conductor wrote its own account ("the reviewer did not approve")
+    into --denied, and the validator's "no ruling needed" was overridden by it."""
+    t = _session_transcript(session)
+    if t is None or not t.is_file():
+        return None
+    want = _norm(denied)[:40]
+    if not want:
+        return False
+    try:
+        with open(t, encoding='utf-8', errors='replace') as f:
+            for line in f:
+                if '"tool_result"' not in line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                content = (rec.get('message') or {}).get('content')
+                for c in content if isinstance(content, list) else []:
+                    if not (isinstance(c, dict) and c.get('type') == 'tool_result'):
+                        continue
+                    body = c.get('content')
+                    text = body if isinstance(body, str) else ' '.join(
+                        x.get('text', '') for x in body or [] if isinstance(x, dict))
+                    if want in _norm(text):
+                        return True
+    except OSError:
+        return None
+    return False
+
+
+REVIEW_GATED = ('choice', 'protected', 'rule', 'outbound')   # grounds a reviewer's accept classifies (policy and fact are not)
+ORIGIN_KEYS = ('request:', 'todo:', 'plan:', 'session:')     # keys that name where a question came from
+REVIEW_WINDOW_H = 24
+
+
+def _request_file(root, request_id):
+    if not root or not request_id:
+        return None
+    hits = list(Path(root).expanduser().glob(f'events/*/*/*--{request_id}.json'))
+    return hits[0] if hits else None
+
+
+def _review_classes(root, request_id):
+    """The owner-ruling classes of the latest accept of a request on this board (`review-owner: <class>: …` lines of the
+    reviewer's form), an empty set when the accept names none, or None when the request has no accept here."""
+    f = _request_file(root, request_id)
+    if f is None:
+        return None
+    accepts = []
+    for g in f.parent.glob('*.json'):
+        with contextlib.suppress(OSError, ValueError):
+            e = json.loads(g.read_text(encoding='utf-8'))
+            if e.get('kind') == 'accept' and e.get('request_id') == request_id:
+                accepts.append(e)
+    if not accepts:
+        return None
+    last = max(accepts, key=lambda e: str(e.get('created_at', '')))
+    return set(re.findall(r'^review-owner: ([a-z]+):', str(last.get('details') or ''), re.M))
+
+
+def _recent_reviewed(root, me, hours=REVIEW_WINDOW_H):
+    """Request ids posted by this session whose accept (by a reviewer's form) is newer than `hours` on this board."""
+    if not root or not me or me == 'unknown':
+        return []
+    cutoff = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=hours)).strftime('%Y%m%dT%H%M%SZ')
+    out = []
+    for g in Path(root).expanduser().glob('events/*/*/*.json'):
+        if g.name[:16] < cutoff:
+            continue
+        with contextlib.suppress(OSError, ValueError):
+            e = json.loads(g.read_text(encoding='utf-8'))
+            if e.get('kind') != 'accept' or 'review-' not in str(e.get('details') or ''):
+                continue
+            rid = e.get('request_id') or ''
+            req = next(iter(g.parent.glob(f'*--{rid}.json')), None) if rid else None   # same thread dir (a board-wide glob per accept took seconds)
+            if req is None:
+                continue
+            actor = json.loads(req.read_text(encoding='utf-8')).get('actor') or {}
+            if any(_same_session(x, me) for x in _ids_of(actor, actor.get('task'))):
+                out.append(rid)
+    return out
+
+
+def gate(ground, evidence=None, *, applied=False, validator=None, session=None, denied='', root=None):
     """(ok, message). ok=False = do not ask; the message says why and what to do instead. A change named by evidence is
     judged whatever the ground (a rule change asked under another ground passes the same validator). The asking session
     goes to the validator (the write-time guard's refusal net reads that session). `denied` = the reason the write-time
@@ -276,6 +399,9 @@ def gate(ground, evidence=None, *, applied=False, validator=None, session=None, 
             return False, (f'理由 {ground} には変更の在りか (--evidence <repo>@<commit>:<path> か <repo>@worktree:<path>、 当てる前の候補なら <repo>@candidate=<候補の全文の絶対 path>:<path>) が要る'
                            ' (裁定の要否を機械で判定するため)')
         return True, ''
+    evidence, err = _resolve_evidence(evidence, root)
+    if err:
+        return False, err
     kind = ground if ground in JUDGED else ('protected' if re.search(r'\.tex$', evidence) else 'rule')
     v = Path(validator) if validator else _validator()
     if not v.exists():
@@ -293,7 +419,13 @@ def gate(ground, evidence=None, *, applied=False, validator=None, session=None, 
         return True, f'⚠️ 判定の道具の出力が読めない = 裁定の要否を確かめずに立てた ({(p.stderr or "")[:200]})'
     ok, msg = bool(res['ok']), str(res.get('message') or '')
     if not ok and denied:
-        return True, f'書く時の守りが止めた: {denied[:300]} (判定の道具は「要らない」: {msg[:160]})'
+        seen = _denied_seen(session, denied)
+        if seen is False:
+            return False, ('--denied は、 この窓で書く時の守りが止めたときの理由をそのまま写す欄 (この窓の会話記録の tool の結果に'
+                           ' 無い文 = 言い換えか、 別の窓で起きたこと)。 当てる前の候補の承認なら、 候補を在りかにして立て直す'
+                           ' (--evidence <repo>@candidate=<候補の全文の絶対 path>:<path> = 判定の道具が候補の中身で判定する)')
+        warn = '' if seen else ' ⚠️ --denied を会話記録と照らせなかった (この窓の会話記録が見つからない)'
+        return True, f'書く時の守りが止めた: {denied[:300]} (判定の道具は「要らない」: {msg[:160]}){warn}'
     if not ok:
         msg += ' (当てた時に書く時の守りが止めたら、 止めた理由を --denied \'<理由>\' に写して立て直す)'
     return ok, msg
@@ -418,6 +550,28 @@ def _decide(root, st, it, me):
             ' 別の問いなら key を問いごとに分ける (例: <key>#2)')}
     if not text:
         return 'refused', {'status': 'refused', 'text': '', 'message': '問いの文が空'}
+    if it.get('ground') in REVIEW_GATED and root:
+        # A question that comes out of a reviewer's accept goes to the owner only when the reviewer classified it as the
+        # owner's (`review-owner: <class>:`); what the reviewer decided (`review-decided:`) is not asked again. Measured:
+        # a conductor re-asked as the owner's choice a question its reviewer had decided, and asked the owner to approve
+        # files the reviewer had not classified as the owner's. Policy checks before implementation are not gated here.
+        # `request:<id>#2` names a second question out of the same request (the documented way to split keys)
+        rids = [k.split(':', 1)[1].split('#', 1)[0] for k in keys if k.startswith('request:')]
+        if rids:
+            classes = _review_classes(root, rids[0])
+            if classes is not None and it['ground'] not in classes:
+                return 'refused', {'status': 'refused', 'text': text, 'message': (
+                    f'依頼 {rids[0]} の検収係の受け取りは、 本人に回す問いとして {it["ground"]} を挙げていない'
+                    f' (挙げたのは: {", ".join(sorted(classes)) or "なし"})。 検収係が決めた答え (受け取りの review-decided) で進める。'
+                    ' 検収係が本人のものと分類し直すなら、 その受け取りの後に検収係が note か受け取り直しで書く')}
+        elif not any(k.startswith(ORIGIN_KEYS) for k in keys) and not (it.get('not_from_review') or '').strip():
+            recent = _recent_reviewed(root, me)
+            if recent:
+                return 'refused', {'status': 'refused', 'text': text, 'message': (
+                    f'この窓が出した依頼に、 最近 {REVIEW_WINDOW_H} 時間の検収係の受け取りがある (例: {recent[0]})。'
+                    ' 検収係の受け取りから出す問いには --key request:<依頼 id> を付ける (受け取りが本人のものと分類した問いだけが立つ)。'
+                    ' 受け取りから出したのでない問いなら、 どこから出たかの key (todo:<repo>:<id> / plan:<path>#<item> / session:<id>)'
+                    ' か --not-from-review \'<1 行>\' を付ける')}
     note = it.get('_note') or ''
     if it.get('ground') != 'policy' and re.search(r'方針|\bpolicy\b', text, re.I) and '--ground policy' not in note:
         note = ' '.join(x for x in (note, '⚠️ 方針の確認なら --ground policy (1 つの作業に 1 回、 依頼の worker からは立てない)') if x)
@@ -436,7 +590,7 @@ def ask(root, items, *, session=None, agent='claude', project='', path=None, val
         kind, payload = _decide(root, st0, it, me)
         if kind == 'ask':
             ok, msg = gate(payload.get('ground'), payload.get('evidence'), applied=bool(payload.get('applied')),
-                           validator=validator, session=me, denied=payload.get('denied') or '')
+                           validator=validator, session=me, denied=payload.get('denied') or '', root=root)
             note = payload.get('_note')
             msg = ' '.join(x for x in (msg, note) if x)
             pre.append(('ask', payload, ok, msg))
@@ -1220,6 +1374,8 @@ def main(argv=None):
     ap.add_argument('--reask', default='', help='同じ問いに本人の答えが既にあっても問い直す理由 (何が変わったか)')
     ap.add_argument('--reword', default='', help='開いた問いを同じ印のまま言い直す (同じ key、 何を変えたか)')
     ap.add_argument('--denied', default='', help='その変更を書く時の守りが止めた理由 (判定の道具が「要らない」 と言っても立てる)')
+    ap.add_argument('--not-from-review', default='',
+                    help='検収係の受け取りから出したのでない問いの印 (この窓の依頼に最近の受け取りがあるとき、 request: などの key が無ければ要る)')
     ap.add_argument('--label', action='append', default=[])
     ap.add_argument('--quote', default='')
     ap.add_argument('--binding', default='label')
@@ -1246,7 +1402,8 @@ def main(argv=None):
             items = [{'text': t, 'recommend': a.recommend[i] if a.recommend else '',
                       'ground': a.ground[i] if len(a.ground) == n else a.ground[0], 'keys': a.key,
                       'evidence': (a.evidence[i] if len(a.evidence) == n else (a.evidence[0] if a.evidence else '')),
-                      'applied': a.applied, 'reask': a.reask, 'denied': a.denied, 'reword': a.reword} for i, t in enumerate(a.text)]
+                      'applied': a.applied, 'reask': a.reask, 'denied': a.denied, 'reword': a.reword,
+                      'not_from_review': a.not_from_review} for i, t in enumerate(a.text)]
             res = ask(a.root, items, session=a.session, agent=a.agent, project=a.project)
             _print(res) if a.json else print(format_block(res))
             return 0 if any(r['status'] in ('made', 'reused', 'reworded') for r in res) else 3
@@ -1341,25 +1498,99 @@ def selftest():
                   '理由の無い問いは立てない')
             r4 = ask(None, [{'text': '規則', 'ground': 'rule'}], session='s1', path=led)
             check(r4[0]['status'] == 'refused' and 'evidence' in r4[0]['message'], '規則の理由には変更の在りかが要る')
+            rr = Path(td) / 'r'   # the evidence's repo dir must exist (the gate resolves and refuses a missing one)
+            rr.mkdir()
             stub = Path(td) / 'validator.py'
-            stub.write_text('import json,sys\nev=sys.argv[sys.argv.index("--evidence")+1]\n'
+            stub.write_text('import json,sys\nev=sys.argv[sys.argv.index("--evidence")+1].split("@",1)[1]\n'
                             'print(json.dumps({"error": "読めない"} if "bad" in ev else {"ok": "needs" in ev, "message": "stub"}))\n',
                             encoding='utf-8')
-            r5 = ask(None, [{'text': '要らない規則', 'ground': 'rule', 'evidence': 'r@HEAD:free'}], session='s1', path=led, validator=stub)
-            r6 = ask(None, [{'text': '要る規則', 'ground': 'rule', 'evidence': 'r@HEAD:needs'}], session='s1', path=led, validator=stub)
+            r5 = ask(None, [{'text': '要らない規則', 'ground': 'rule', 'evidence': f'{rr}@HEAD:free'}], session='s1', path=led, validator=stub)
+            r6 = ask(None, [{'text': '要る規則', 'ground': 'rule', 'evidence': f'{rr}@HEAD:needs'}], session='s1', path=led, validator=stub)
             check(r5[0]['status'] == 'refused' and r6[0]['status'] == 'made' and r6[0]['label'] == 'H3', f'判定の道具が要らないと言えば立てない {r5} {r6}')
-            r5b = ask(None, [{'text': '理由を選び直した規則', 'ground': 'choice', 'evidence': 'r@HEAD:free'}], session='s1', path=led, validator=stub)
+            r5b = ask(None, [{'text': '理由を選び直した規則', 'ground': 'choice', 'evidence': f'{rr}@HEAD:free'}], session='s1', path=led, validator=stub)
             check(r5b[0]['status'] == 'refused', '変更の在りかがあれば理由に依らず判定の道具を通す')
-            r5c = ask(None, [{'text': '在りかの誤り', 'ground': 'rule', 'evidence': 'r@HEAD:bad'}], session='s1', path=led, validator=stub)
+            r5c = ask(None, [{'text': '在りかの誤り', 'ground': 'rule', 'evidence': f'{rr}@HEAD:bad'}], session='s1', path=led, validator=stub)
             check(r5c[0]['status'] == 'refused' and '読めない' in r5c[0]['message'], '判定の道具の誤りを理由として返す')
-            r5d = ask(None, [{'text': '守りが止めた規則', 'ground': 'rule', 'evidence': 'r@HEAD:free', 'denied': '断った件の網'}],
+            r5d = ask(None, [{'text': '守りが止めた規則', 'ground': 'rule', 'evidence': f'{rr}@HEAD:free', 'denied': '断った件の網'}],
                       session='s1', path=led, validator=stub)
             check(r5d[0]['status'] == 'made' and '書く時の守りが止めた' in r5d[0]['message'],
                   '書く時の守りが止めた変更は、 判定の道具が要らないと言っても立てる')
             check('--denied' in r5[0]['message'], '要らないと断る時は、 守りが止めた時の立て直し方を添える')
-            r7 = ask(None, [{'text': '道具なし', 'ground': 'rule', 'evidence': 'r@HEAD:x'}], session='s1', path=led,
+            r7 = ask(None, [{'text': '道具なし', 'ground': 'rule', 'evidence': f'{rr}@HEAD:x'}], session='s1', path=led,
                      validator=Path(td) / 'missing.py')
             check(r7[0]['status'] == 'made' and r7[0]['message'].startswith('⚠️'), '判定の道具が無ければ立てて、 確かめていないと言う')
+            # the evidence's relative repo dir is resolved from the board root's parents, not from the asking shell's dir
+            # (measured: the same relative evidence judged "no ruling needed" from the work root and "unreadable, asked
+            # anyway" from a repo dir)
+            work = Path(td) / 'work'
+            (work / 'repoA').mkdir(parents=True)
+            (work / 'board').mkdir()
+            echo = Path(td) / 'echo.py'
+            echo.write_text('import json,sys\nev=sys.argv[sys.argv.index("--evidence")+1]\n'
+                            'print(json.dumps({"ok": True, "message": "saw " + ev}))\n', encoding='utf-8')
+            cwd0 = os.getcwd()
+            try:
+                os.chdir(rr)
+                rv = ask(work / 'board', [{'text': '相対の在りか', 'ground': 'rule', 'evidence': 'repoA@HEAD:x.md'}],
+                         session='s1', path=led, validator=echo)
+            finally:
+                os.chdir(cwd0)
+            check(rv[0]['status'] == 'made' and f'saw {(work / "repoA").resolve()}@HEAD:x.md' in rv[0]['message'],
+                  f'在りかの相対の repo の名は、 掲示板の root の上の dir から解いて絶対 path で判定の道具に渡す {rv}')
+            rm = ask(work / 'board', [{'text': '無い repo の在りか', 'ground': 'rule', 'evidence': 'nowhere@HEAD:x.md'}],
+                     session='s1', path=led, validator=echo)
+            check(rm[0]['status'] == 'refused' and '無い' in rm[0]['message'],
+                  f'在りかの repo がどこにも無ければ立てない (判定できないまま立てない) {rm}')
+            # --denied is the guard's own refusal copied from this window's tool results, not an account of it
+            trp = Path(td) / 'denied-transcript.jsonl'
+            trp.write_text(json.dumps({'type': 'user', 'message': {'content': [{'type': 'tool_result', 'content':
+                           '🛑 guard: 本人の具体的な裁定が無い保護領域の変更です。適用しない。'}]}}, ensure_ascii=False) + '\n',
+                           encoding='utf-8')
+            os.environ['BOARD_ASKS_TRANSCRIPT'] = str(trp)
+            try:
+                rd1 = ask(None, [{'text': '守りが止めた (写し)', 'ground': 'rule', 'evidence': f'{rr}@HEAD:free',
+                                  'denied': '本人の具体的な裁定が無い保護領域の変更です。'}], session='s1', path=led, validator=stub)
+                rd2 = ask(None, [{'text': '守りが止めた (言い換え)', 'ground': 'rule', 'evidence': f'{rr}@HEAD:free',
+                                  'denied': '検収係が委任の承認を出さなかった'}], session='s1', path=led, validator=stub)
+            finally:
+                os.environ.pop('BOARD_ASKS_TRANSCRIPT', None)
+            check(rd1[0]['status'] == 'made' and '⚠️ --denied' not in rd1[0]['message'],
+                  f'--denied が会話記録の守りの理由の写しなら立てる {rd1}')
+            check(rd2[0]['status'] == 'refused' and 'candidate=' in rd2[0]['message'],
+                  f'--denied が会話記録に無い言い換えなら立てず、 候補を在りかにするよう言う {rd2}')
+            check('⚠️ --denied' in r5d[0]['message'], '会話記録が見つからなければ立てて、 照らせなかったと添える')
+            # a question out of a reviewer's accept: only the classes the accept gave to the owner; decided ones are not asked
+            bd = Path(td) / 'rboard'
+            thr = bd / 'events' / 'proj' / '2026-01-01-x'
+            thr.mkdir(parents=True)
+            tsn = dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+            rq = '20260101T000000Z-claude-req001'
+            (thr / f'20260101T000000Z--{rq}.json').write_text(json.dumps({'kind': 'request', 'event_id': rq, 'request_id': rq,
+                'actor': {'agent': 'claude', 'session_id': 'cond-1111-aaaa'}}), encoding='utf-8')
+            (thr / f'{tsn}--20260101T000100Z-claude-acc001.json').write_text(json.dumps({'kind': 'accept', 'request_id': rq,
+                'event_id': '20260101T000100Z-claude-acc001', 'created_at': now_iso(),
+                'details': 'review-verdict: ok\nreview-decided: 形を全部止めるか => 止める (理由)\nreview-owner: outbound: 送るか'}),
+                encoding='utf-8')
+            ra = ask(bd, [{'text': '検収係が決めた問い', 'ground': 'choice', 'keys': [f'request:{rq}']}], session='cond-1111-aaaa', path=led)
+            check(ra[0]['status'] == 'refused' and 'review-decided' in ra[0]['message'],
+                  f'受け取りが本人のものと分類しなかった理由の問いは立てない (検収係が決めた答えで進める) {ra}')
+            rb = ask(bd, [{'text': '送るか', 'ground': 'outbound', 'keys': [f'request:{rq}#2']}], session='cond-1111-aaaa', path=led)
+            check(rb[0]['status'] == 'made', f'受け取りが本人のものと分類した理由の問いは立てる {rb}')
+            rb2 = ask(bd, [{'text': '同じ依頼の 3 つ目', 'ground': 'choice', 'keys': [f'request:{rq}#3']}], session='cond-1111-aaaa', path=led)
+            check(rb2[0]['status'] == 'refused' and 'review-decided' in rb2[0]['message'],
+                  f'key を分けた同じ依頼の問い (request:<id>#3) も、 その依頼の受け取りで判定する {rb2}')
+            rc = ask(bd, [{'text': '鍵なしの問い', 'ground': 'choice', 'keys': ['free-form-key']}], session='cond-1111-aaaa', path=led)
+            check(rc[0]['status'] == 'refused' and 'request:' in rc[0]['message'],
+                  f'最近の受け取りのある依頼元の、 どこから出たかの key の無い問いは立てない {rc}')
+            rc2 = ask(bd, [{'text': '受け取りと別の問い', 'ground': 'choice', 'keys': ['free-form-key2'],
+                            'not_from_review': '本人の予定の問い'}], session='cond-1111-aaaa', path=led)
+            rc3 = ask(bd, [{'text': 'TODO の問い', 'ground': 'choice', 'keys': ['todo:x:9']}], session='cond-1111-aaaa', path=led)
+            check(rc2[0]['status'] == 'made' and rc3[0]['status'] == 'made',
+                  '受け取りから出したのでない問いは --not-from-review か、 どこから出たかの key で立つ')
+            rp = ask(bd, [{'text': '方針でよいか', 'ground': 'policy', 'keys': [f'session:cond-1111-aaaa']}], session='cond-1111-aaaa', path=led)
+            check(rp[0]['status'] == 'made', f'実装の前の方針の確認は、 この門では止めない (規則 18 は本人の裁定のまま) {rp}')
+            rn = ask(bd, [{'text': '別の窓の問い', 'ground': 'choice', 'keys': ['free-form-key3']}], session='other-2222-bbbb', path=led)
+            check(rn[0]['status'] == 'made', f'受け取りの無い窓の問いは、 今までどおり立つ {rn}')
             blk = format_block(r)
             check('問い一 〔問 H1〕' in blk and 'おすすめ: はい' in blk and not blk.startswith('〔'), '問いの段の形 (中身が先、 印は後ろ)')
             check(shown_by(load(led), 's2') == ['H1'], '出し直した問いも見せた問いに数える')
