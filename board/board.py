@@ -2907,6 +2907,7 @@ def main():
         print('\n'.join(hints),file=sys.stderr)
 
 if __name__=='__main__':
+    bc.utf8_stdio()
     try: main()
     except (ValueError,OSError,subprocess.SubprocessError) as ex:
         print('ERROR: '+str(ex),file=sys.stderr); sys.exit(1)

@@ -49,10 +49,33 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
 ENGINE = Path(__file__).resolve().parent
+
+
+def utf8_stdio():
+    """Write stdout and stderr as UTF-8 (`errors='replace'`). Call it first in every entry point.
+
+    Python on a Japanese-locale Windows writes a pipe in the locale's code page (cp932) unless UTF-8 mode is on, and the
+    board's lines carry dashes and emoji cp932 cannot encode: the script dies with UnicodeEncodeError and a session-start
+    hook that drops stderr shows nothing at all (measured by imitating cp932 with PYTHONIOENCODING). Fixing it here
+    needs nothing from the reader's machine (no PYTHONUTF8 in their settings)."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding='utf-8', errors='replace')
+        except (AttributeError, ValueError, OSError):
+            pass
+
+
+def utf8_env(env=None) -> dict:
+    """The environment for a child Python whose output this process reads: UTF-8 mode on, so the child does not die on
+    the reader's code page before utf8_stdio runs (a child of an older engine never calls it)."""
+    out = dict(os.environ if env is None else env)
+    out.update(PYTHONUTF8='1', PYTHONIOENCODING='utf-8')
+    return out
 CONFIG = 'board.json'
 GITCRYPT_MAGIC = b'\x00GITCRYPT'
 AUDIENCES = {'owner', 'collaborators'}

@@ -56,6 +56,7 @@ from board_workflow import reduce_workflow, LABELS, same_session, address_label,
 from board_schema import check_schema, errors as schema_errors, history_errors
 import board_config as bc
 import board_transport as bt
+import board_activity as ba
 
 ENGINE = Path(__file__).resolve().parent
 SCHEMA_PATH = ENGINE / "schema" / "event.schema.json"
@@ -251,8 +252,11 @@ def load_events(root: Path):
     return events, invalid
 
 
-def to_json_payload(root: Path, threads: dict, invalid, *, now: dt.datetime, locked: bool, warnings=(), board=None) -> dict:
-    """--json: viewer (board-html.py) 向けの派生 state。 述語は derive() と同一 (= 二重実装しない)。"""
+def to_json_payload(root: Path, threads: dict, invalid, *, now: dt.datetime, locked: bool, warnings=(), board=None,
+                    activity=None) -> dict:
+    """--json: viewer (board-html.py) 向けの派生 state。 述語は derive() と同一 (= 二重実装しない)。
+    activity = board_activity.board_activity(): 共同研究の掲示板では thread に `counterpart` (依頼の後の相手側の commit と、
+    thread・request を名指す commit) が付く。 dashboard が「開かれていない」 を推測で出さないため。"""
     def pub(ev: dict) -> dict:
         body = {k: v for k, v in ev.items() if not k.startswith("_")}
         body["_path"] = str(ev["_path"].relative_to(root))
@@ -277,6 +281,7 @@ def to_json_payload(root: Path, threads: dict, invalid, *, now: dt.datetime, loc
             "open_blockers": [e.get("event_id") for e in t["open_blockers"]],
             "unpromoted": [e.get("event_id") for e in t["unpromoted"]],
             "events": [dict(pub(e), _live=e.get("event_id") in live_ids) for e in t["events"]],
+            **({"counterpart": ba.evidence(tid, t.get("workflow"), *activity)} if activity else {}),
         })
     return {
         **({"board": board} if board else {}),
@@ -552,7 +557,7 @@ def fmt_event(ev: dict, now: dt.datetime) -> str:
 
 
 def render(threads: dict, invalid, *, surface: bool, project: str | None,
-           now: dt.datetime, locked: bool, warnings=(), board: str | None = None) -> str:
+           now: dt.datetime, locked: bool, warnings=(), board: str | None = None, activity=None) -> str:
     lines: list[str] = []
     name = board or "board"
     if locked:
@@ -579,6 +584,11 @@ def render(threads: dict, invalid, *, surface: bool, project: str | None,
                         lines.append(f"    → この役割の session (Claude / Codex) は inbox --session {w['waiting_on']['session_id']} --sync で読み、 同じ --session で claim する")
                     lines.append(f"    {w['title']} / request={w['request_id']} / reply_to={w['reply_to']}")
                     lines.extend(handoff_lines(w))
+                    for u in (ba.unposted(key[1], w, *activity) if activity else ()):
+                        # the counterpart acted with a commit and the board never heard (board_activity.py docstring)
+                        lines.append(f"    ⚠️ この clone の commit {u['commit']} ({u['at'][:10]}) がこの依頼を名指しているが、"
+                                     " 掲示板は引受待ちのまま → 手を付けたなら claim・note・submit を 1 行"
+                                     " (commit だけでは依頼元に見えない)")
             for ev in t["active_claims"]:
                 lines.append(f"🟢 claim  {tag} — {actor_str(ev)} lease→{ev.get('lease_until')} "
                              f"({(ev.get('actor') or {}).get('task')})")
@@ -854,17 +864,25 @@ def _filter(threads, a):
     return threads
 
 
-def one_board(root: Path, a, name: str, now: dt.datetime):
-    """(payload for --json, text for the terminal) of one board, read from `root` as it stands."""
+def one_board(root: Path, a, name: str, now: dt.datetime, git_root: Path | None = None):
+    """(payload for --json, text for the terminal) of one board, read from `root` as it stands.
+    git_root = the board in its own checkout when `root` is a --sync snapshot (the project's history lives there)."""
     if is_locked(root):
         payload = to_json_payload(root, {}, [], now=now, locked=True, board=name)
         return payload, render({}, [], surface=a.surface, project=a.project, now=now, locked=True, board=name)
     events, invalid = load_events(root)
     warnings = history_warnings(events)
     threads = _filter(derive(events, now), a)
-    payload = to_json_payload(root, threads, invalid, now=now, locked=False, warnings=warnings, board=name)
+    activity = None
+    try:
+        if bc.load(root).get("audience") == "collaborators":
+            activity = ba.board_activity(git_root or root)
+    except (ValueError, OSError, subprocess.SubprocessError):
+        activity = None   # the evidence is extra: an unreadable history leaves the view as it was
+    payload = to_json_payload(root, threads, invalid, now=now, locked=False, warnings=warnings, board=name,
+                              activity=activity)
     return payload, render(threads, invalid, surface=a.surface, project=a.project, now=now, locked=False,
-                           warnings=warnings, board=name)
+                           warnings=warnings, board=name, activity=activity)
 
 
 def all_boards(a, now: dt.datetime) -> int:
@@ -879,7 +897,7 @@ def all_boards(a, now: dt.datetime) -> int:
         try:
             if a.sync and not b["locked"]:
                 with snapshot(b["root"]) as remote_root:
-                    p, t = one_board(remote_root, a, b["name"], now)
+                    p, t = one_board(remote_root, a, b["name"], now, git_root=b["root"])
             else:
                 p, t = one_board(b["root"], a, b["name"], now)
         except (ValueError, OSError, subprocess.SubprocessError) as ex:
@@ -930,6 +948,7 @@ def main(argv=None) -> int:
     ap.add_argument("--all-boards", action="store_true", help="every board in the workspace (dashboards)")
     ap.add_argument("--workspace", type=Path, help="--all-boards: the directory holding the checkouts")
     ap.add_argument("--board-name", help=argparse.SUPPRESS)  # carries the name across the --sync re-entry
+    ap.add_argument("--git-root", type=Path, help=argparse.SUPPRESS)  # and the board's own checkout (its history)
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args(argv)
     if a.selftest:
@@ -946,7 +965,7 @@ def main(argv=None) -> int:
         with snapshot(root) as remote_root:
             args = [x for x in (argv if argv is not None else sys.argv[1:]) if x != "--sync"]
             # Re-enter with an explicit temporary root and no network flag.
-            return main(args + ["--root", str(remote_root), "--board-name", name])
+            return main(args + ["--root", str(remote_root), "--board-name", name, "--git-root", str(root)])
 
     if a.template:
         if not a.thread or (not a.restricted and not a.project):
@@ -989,7 +1008,7 @@ def main(argv=None) -> int:
             print(f"🔴 {p}")
         print(f"validated {len(events)} event(s): {'FAIL' if probs else 'OK'}")
         return 1 if probs else 0
-    payload, text = one_board(root, a, name, now)
+    payload, text = one_board(root, a, name, now, git_root=a.git_root)
     if a.json:
         print(json.dumps(payload, ensure_ascii=False, indent=1))
     elif text:
@@ -998,6 +1017,7 @@ def main(argv=None) -> int:
 
 
 if __name__ == "__main__":
+    bc.utf8_stdio()
     try:
         sys.exit(main())
     except (ValueError, OSError, subprocess.SubprocessError) as ex:
