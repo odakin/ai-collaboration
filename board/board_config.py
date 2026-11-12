@@ -32,7 +32,8 @@ board.json (format 1):
   policy stage nor a confirmed policy; `confirmed_words` adds the board's own words that say a policy was confirmed.
   Absent = no notice (the engine's default).
 - `accept_review_form` (optional) — an ordinary `accept` needs the review form (CONTRACT.md#accept-review-form): at
-  least one check the reviewer ran or compared (`--checked`), the submission's questions to the requester sorted
+  least one check the reviewer ran or compared (`--checked`), the conclusion picked again from the submission's own
+  facts (`--verdict '<facts> → <option>'` or `'none: <why>'`), the submission's questions to the requester sorted
   (`--decided` / `--owner-ruling <ground>: …` / `--no-questions`); the engine adds the posts elsewhere that build on
   the request, and the reviewing window's count and compactions. A missing part is refused in one message naming
   `rule`. Absent = an accept needs one `--reference` only (the engine's default).

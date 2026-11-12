@@ -2857,7 +2857,7 @@ class ReviewFormUnit(unittest.TestCase):
     def ns(self, req, **kw):
         import argparse
         base=dict(command='accept',policy='ordinary',session_name='abcd1234 (opus)',checked=[],decided=[],owner_ruling=[],
-                  no_questions=False,leftover=[],request=req['event_id'])
+                  no_questions=False,leftover=[],request=req['event_id'],verdict=['提出が足した 3 点 → 選択肢 (ii)'])
         base.update(kw); return argparse.Namespace(**base)
 
     def form(self, events, **kw):
@@ -2882,6 +2882,10 @@ class ReviewFormUnit(unittest.TestCase):
         self.refused(ev,'ground',checked=['回した x.py → 合う'],owner_ruling=['outbound:   '])
         self.refused(ev,"'in ",checked=['回した x.py → 合う'],no_questions=True,leftover=['maybe: 残りの道具の直し'])
         self.refused(ev,'長すぎる',checked=['回した x.py → 合う '+'x'*4100],no_questions=True)
+        # the conclusion is not re-picked from the submission's facts (measured: every check confirmed facts, none the choice)
+        self.refused(ev,'--verdict',checked=['回した x.py → 合う'],no_questions=True,verdict=[])
+        for bad in ('選択肢 (i)','提出の 3 点 →','→ (ii)','none:','none:   '):
+            self.refused(ev,"'none: <理由>'",checked=['回した x.py → 合う'],no_questions=True,verdict=[bad])
 
     def test_full_form_is_recorded(self):
         ev=list(chain())
@@ -2892,6 +2896,11 @@ class ReviewFormUnit(unittest.TestCase):
                      'review-prior: 0','review-nth: 1','review-compactions: unknown (no transcript on this machine)'):
             self.assertIn(line,d.splitlines())
         self.assertNotIn('review-self',d)
+        self.assertIn('review-verdict: 提出が足した 3 点 → 選択肢 (ii)',d.splitlines())
+        d=self.form(ev,checked=['照らした §2 の数 → 合う'],no_questions=True,
+                    verdict=['none: 依頼は結論を選ばせていない','足したもの無し -> そのまま'])
+        self.assertIn('review-verdict: none: 依頼は結論を選ばせていない',d.splitlines())
+        self.assertIn('review-verdict: 足したもの無し -> そのまま',d.splitlines())
         self.assertIn('review-questions: none',self.form(ev,checked=['照らした §2 の数 → 合う'],no_questions=True).splitlines())
         from unittest import mock
         with mock.patch.object(board,'_compactions',return_value=3):
@@ -3017,11 +3026,13 @@ class AcceptReviewForm(EffortFlag):
         _,acc=self.flow('2026-01-01-rf-b')
         p=self.cli(*acc,ok=False)
         self.assertEqual(p.returncode,1,p.stdout+p.stderr)
-        for s in (self.RULE,'--checked','--no-questions'): self.assertIn(s,p.stderr)
+        for s in (self.RULE,'--checked','--no-questions','--verdict'): self.assertIn(s,p.stderr)
         self.assertEqual(self.accepted(),[])                                              # nothing posted
-        self.cli(*acc,'--checked','回した python3 count.py → 12 件で合う','--no-questions')
+        self.cli(*acc,'--checked','回した python3 count.py → 12 件で合う','--verdict','足したもの 0 件 → 選択肢 (i)',
+                 '--no-questions')
         d=(self.accepted()[0].get('details') or '').splitlines()
         self.assertIn('review-check: 回した python3 count.py → 12 件で合う',d)
+        self.assertIn('review-verdict: 足したもの 0 件 → 選択肢 (i)',d)
         self.assertIn('review-questions: none',d)
         self.assertIn('review-nth: 1',d)
 

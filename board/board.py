@@ -921,6 +921,10 @@ REVIEW_FORM_DOC='CONTRACT.md#accept-review-form'
 # A "check" that only names an artifact (a commit, a file, a link) shows the artifact exists, not that it is right
 # (measured: acceptances whose only evidence was the deliverable's commit passed the one-reference gate).
 _REF_ONLY_RE=re.compile(r'[\w.\-]+@[0-9a-f]{7,40}|[\w.\-~/]+\.[A-Za-z0-9]{1,5}(?:#[\w.\-]+)?|https?://\S+')
+# A conclusion re-picked from the submission's own facts: '<facts> → <option>' or 'none: <why>' (measured: an acceptance
+# whose checks all confirmed the submission's facts passed a conclusion that the submission's own list of added inputs
+# placed in another of the request's options).
+_VERDICT_RE=re.compile(r'(?s)none:\s*\S.*|.*\S\s*(?:→|->)\s*\S.*')
 
 
 def _owner_grounds():
@@ -1046,7 +1050,9 @@ def review_form(a, events, cfg, ev):
     """The accept gate of a board whose board.json sets `accept_review_form` (CONTRACT.md#accept-review-form). Before
     an acceptance is posted: (1) the posts elsewhere that build on this request are printed and written into the
     event; (2) at least one check the reviewer ran or compared is written (`--checked`; naming a commit, a file or a
-    link alone is refused); (3) every question the submission left to the requester is sorted (`--decided` with the
+    link alone is refused); (2b) the conclusion is re-picked from the submission's own facts against the options the
+    request asked for (`--verdict '<facts> → <option>'`, or `'none: <why>'` when the submission chooses no conclusion);
+    (3) every question the submission left to the requester is sorted (`--decided` with the
     answer and reason, or `--owner-ruling <ground>: <question>` with a ground from the closed list), or
     `--no-questions` says there was none; optional `--leftover` lines say whether a follow-up stays inside the
     confirmed policy. Also written: the acceptance's position among the reviewing window's acceptances and revisions,
@@ -1057,6 +1063,7 @@ def review_form(a, events, cfg, ev):
     rule=(spec.get('rule') or '').strip() or f'{bc.CONFIG} の accept_review_form'
     pick=lambda name:[c.strip() for c in (getattr(a,name,None) or []) if c and c.strip()]
     checked,decided,owner,leftover=pick('checked'),pick('decided'),pick('owner_ruling'),pick('leftover')
+    verdict=pick('verdict')
     none_q=bool(getattr(a,'no_questions',False))
     grounds=_owner_grounds()
     problems=[]
@@ -1064,6 +1071,11 @@ def review_form(a, events, cfg, ev):
         problems.append("--checked '<回した command か照らした原典と、 その結果>' が 1 つも無い (確かめを 1 つ以上回す)")
     problems+=[f"--checked「{c[:60]}」 は成果物の commit・file・link を指すだけ = 何を回したか・何と照らしたかと結果を書く"
                for c in checked if _REF_ONLY_RE.fullmatch(c)]
+    if not verdict:
+        problems.append("--verdict '<提出が挙げた事実> → <その事実が当たる選択肢・結論>' が無い (結論を提出の事実から選び直す。"
+                        " 結論を選ばない提出なら --verdict 'none: <理由>')")
+    problems+=[f"--verdict「{v[:60]}」 は '<提出の事実> → <選択肢・結論>' か 'none: <理由>' の形"
+               for v in verdict if not _VERDICT_RE.fullmatch(v)]
     for o in owner:
         g,_,q=o.partition(':')
         if g.strip() not in grounds or not q.strip():
@@ -1094,7 +1106,8 @@ def review_form(a, events, cfg, ev):
           and (((e.get('actor') or {}).get('task') or '').startswith(native)
                or f'review-window: {native[:8]}' in (e.get('details') or '').splitlines())]
     comp=_compactions(native)
-    lines=[*(f'review-check: {c}' for c in checked),*(f'review-decided: {d}' for d in decided),
+    lines=[*(f'review-check: {c}' for c in checked),*(f'review-verdict: {v}' for v in verdict),
+           *(f'review-decided: {d}' for d in decided),
            *(f'review-owner: {o}' for o in owner),*(['review-questions: none'] if none_q else []),
            *(f'review-leftover: {l}' for l in leftover),
            f'review-prior: {len(prior)}'+(' ('+', '.join(e['event_id'] for e,_ in prior[-10:])+')' if prior else ''),
@@ -2430,6 +2443,7 @@ def main():
     ap.add_argument('--deliverable',action='append',default=[]); ap.add_argument('--reference',action='append',default=[])
     # accept on a board with accept_review_form (CONTRACT.md#accept-review-form)
     ap.add_argument('--checked',action='append',default=[],help='accept (review form): a check you ran or compared and its result, e.g. "回した <command> → <要点>" or "<主張> を <path#anchor> と照らした → 合う" (repeatable; a bare commit or file is refused)')
+    ap.add_argument('--verdict',action='append',default=[],help="accept (review form): the conclusion re-picked from the submission's own facts against the request's options: '<facts the submission lists> → <the option or conclusion they lead to>', or 'none: <why>' when the submission chooses no conclusion (repeatable, at least one)")
     ap.add_argument('--decided',action='append',default=[],help="accept (review form): a question the submission left to the requester, decided at review: '<問い> => <答え> (理由)' (repeatable)")
     ap.add_argument('--owner-ruling',action='append',default=[],help="accept (review form): a question that needs the owner's own ruling: '<ground>: <問い>' with a ground from the owner-asks GROUNDS (repeatable)")
     ap.add_argument('--no-questions',action='store_true',help='accept (review form): the submission left no question to the requester')

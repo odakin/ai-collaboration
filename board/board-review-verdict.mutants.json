@@ -1,0 +1,41 @@
+{
+ "_comment": "board.py の受け取りの検収票の --verdict (結論を提出の事実から選び直した 1 行) の試験が、 欄が無いときの拒否と、 形の崩れた欄の拒否を 1 つずつ外した版でそれぞれ落ちるか (unittest の FAIL 行で読む)",
+ "target": "board.py",
+ "run": "python3 test_board.py -v ReviewFormUnit.test_refusals ReviewFormUnit.test_full_form_is_recorded AcceptReviewForm.test_on_refuses_and_records",
+ "fail_marker": "FAIL: ",
+ "pass_marker": "test_",
+ "mutants": [
+  {
+   "name": "--verdict が無い受け取りを断らない",
+   "pairs": [
+    [
+     "    if not verdict:\n        problems.append(\"--verdict '<提出が挙げた事実>",
+     "    if False:\n        problems.append(\"--verdict '<提出が挙げた事実>"
+    ]
+   ],
+   "expect_fail": [
+    "test_refusals",
+    "test_on_refuses_and_records"
+   ],
+   "expect_pass": [
+    "test_full_form_is_recorded"
+   ]
+  },
+  {
+   "name": "--verdict の形 ('<事実> → <選択肢>' か 'none: <理由>') を見ない",
+   "pairs": [
+    [
+     "for v in verdict if not _VERDICT_RE.fullmatch(v)]",
+     "for v in verdict if False]"
+    ]
+   ],
+   "expect_fail": [
+    "test_refusals"
+   ],
+   "expect_pass": [
+    "test_full_form_is_recorded",
+    "test_on_refuses_and_records"
+   ]
+  }
+ ]
+}

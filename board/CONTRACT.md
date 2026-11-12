@@ -523,6 +523,16 @@ A board whose `board.json` sets `accept_review_form` (`{"rule": "<where the rule
   `repo@<hash>`, a file, a link) is refused: an artifact that exists is not a check that it is right (measured:
   acceptances whose only evidence was the deliverable's commit passed the one-reference gate). Aim the check at the
   number or claim the submission's conclusion rests on; a selftest or a quick search alone does not reach it.
+- `--verdict '<the submission's own facts> → <the option or conclusion they lead to>'` (repeatable, at least one), or
+  `--verdict 'none: <why>'` when the submission chooses no conclusion: the conclusion picked again from what the
+  submission itself lists (what it added or used beyond its sources, its conditions, the ranges it did not see),
+  against the words of the options the request asked for and any criterion in the request's notes. When those facts
+  lead to another option than the one the submission chose, return it with `revise`. Read the acceptance's own lines
+  against the conclusion too: a reason given for another question that contradicts the conclusion is the same
+  finding. `--checked` confirms the facts; this line checks the choice made from them (measured: an acceptance whose
+  checks all confirmed the submission's facts passed a conclusion that the submission's own list of added inputs
+  placed in another of the request's options, while a reason written for another question in the same acceptance
+  contradicted that conclusion).
 - Every question the submission leaves to the requester, sorted: `--decided '<question> => <answer> (reason)'`
   (decided at review, under the requester's delegation) or `--owner-ruling '<ground>: <question>'` with a ground from
   the owner-asks closed list ([#owner-asks](#owner-asks): `protected`, `rule`, `outbound`, `choice`, `policy`,
