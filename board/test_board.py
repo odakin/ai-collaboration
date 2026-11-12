@@ -2483,6 +2483,9 @@ class LaunchClaudeRole(EffortFlag):
         out=self.cli('request',*b,'--thread','2026-01-01-lcr-d','--to','claude','--to-session','role-eproj-d','--surface','desktop',
                      '--effort','xhigh','--reason','新しい極限の導出を worker が組む').stdout
         self.assertNotIn('理由なしで',out); self.assertEqual(board.launch_record(self.root,self.rid(out))['reason'],'新しい極限の導出を worker が組む')
+        # a reason does not hide the question: it is repeated with the reason (a reason in the question's words fits any work)
+        self.assertIn('ℹ️ Fable の worker の理由 =「新しい極限の導出を worker が組む」。 起こす前にもう一度問う:',out)
+        self.assertIn('文面の決まった直し・規則や道具の直し・検品',out)
         b=self.post_args()
         out=self.cli('request',*b,'--thread','2026-01-01-lcr-e','--to','claude','--to-session','role-eproj-e','--surface','desktop','--effort','xhigh').stdout
         self.assertNotIn('理由なしで',out)   # Opus xhigh needs no reason
@@ -2595,12 +2598,43 @@ class ModelAllow(EffortFlag):
     test_order = test_three_surfaces = test_refusals_and_live_note = None   # EffortFlag's tests run once, in EffortFlag
     RULE='owner-notes/workers.md#opus-only'
     QUOTE='この導出は Fable Max でやって'
+    # the requester's transcript is a fixture: the session running the tests must not be read
+    KEYS=EffortFlag.KEYS+(board.REQUESTER_TRANSCRIPT_ENV,'CLAUDE_CODE_SESSION_ID')
 
     def setUp(self):
+        import os
         super().setUp()
         cfg=json.loads((self.root/'board.json').read_text()); cfg['launch_model_allow']={'tiers':['opus'],'rule':self.RULE}
         (self.root/'board.json').write_text(json.dumps(cfg))
         board.run(self.root,'commit','-q','-am','Allow Opus only'); board.run(self.root,'push','-q','origin','main')
+        self._tx=tempfile.TemporaryDirectory(); self.transcript=Path(self._tx.name)/'requester.jsonl'
+        os.environ[board.REQUESTER_TRANSCRIPT_ENV]=str(self.transcript)
+        self.owner_said(self.QUOTE)
+
+    def tearDown(self):
+        super().tearDown(); self._tx.cleanup()
+
+    def need_reader(self):
+        """The words are read by the layer-1 companion (claude-config scripts/lib/owner_turn.py next to this engine, or
+        AGENT_BOARD_OWNER_TURN_LIB): a checkout without it cannot let any words through."""
+        import os
+        if not (os.environ.get(board.OWNER_TURN_LIB_ENV)
+                or (board.ENGINE.parent.parent/'claude-config'/'scripts'/'lib'/'owner_turn.py').is_file()):
+            self.skipTest('layer-1 owner_turn.py not installed')
+
+    def owner_said(self, *typed, queued=()):
+        """The requester's transcript: each typed prompt starts a turn (an assistant reply after it), then the prompts
+        the owner typed while the last turn ran."""
+        rows=[]; n=0
+        def ts():
+            nonlocal n; n+=1; return f'2026-01-01T00:{n:02d}:00Z'
+        for t in typed:
+            rows.append({'type':'user','timestamp':ts(),'message':{'role':'user','content':t}})
+            rows.append({'type':'assistant','timestamp':ts(),'message':{'content':[{'type':'text','text':'ok'}]}})
+        for t in queued:
+            rows.append({'type':'attachment','timestamp':ts(),'attachment':{'type':'queued_command','commandMode':'prompt',
+                                                                            'origin':{'kind':'human'},'prompt':t}})
+        self.transcript.write_text(''.join(json.dumps(r,ensure_ascii=False)+'\n' for r in rows),encoding='utf-8')
 
     def requests(self):
         with board.snapshot(self.root,fresh=True) as snap: return len([e for e in board.read(snap) if e['kind']=='request'])
@@ -2638,21 +2672,76 @@ class ModelAllow(EffortFlag):
         self.assertEqual(self.requests(),3)
 
     def test_owner_words_let_another_model_through(self):
+        self.need_reader()
         b=self.post_fable()
         out=self.cli('request',*b,'--thread','2026-01-01-mq-a','--to','claude','--to-session','role-eproj-a','--surface','desktop',
                      '--effort','xhigh','--reason','worker が導出する','--model-quote',self.QUOTE).stdout
         rec=board.launch_record(self.root,self.rid(out))
         self.assertEqual((rec['model'],rec['model_quote']),('claude-fable-5-1',self.QUOTE)); self.assertIn(f'本人の名指し「{self.QUOTE}」',out)
+        self.assertIn('本人の最後の入力の中の発言と照らした',out)
         self.assertIn('--model-quote',out)   # the Remote Control fallback line carries the words too
         p=self.cli('claim','--root',str(self.root),'--agent','claude','--session','role-x','--model-quote',self.QUOTE,ok=False)
         self.assertIn('--model-quote is for request and launch only',p.stderr)
 
+    def req_fable(self, thread, quote, *extra):
+        return self.cli('request',*self.post_fable(),'--thread',thread,'--to','claude','--to-session','role-eproj-'+thread[-1],
+                        '--surface','desktop','--effort','xhigh','--reason','worker が導出する','--model-quote',quote,*extra,ok=False)
+
+    def test_words_from_an_earlier_input_are_refused(self):
+        self.need_reader()
+        # measured shape: the owner's naming for an earlier request, attached to a later one after the owner moved on
+        self.owner_said(self.QUOTE,'その件は全部入れてよし')
+        p=self.req_fable('2026-01-01-mw-a',self.QUOTE)
+        self.refused(p,'claude-fable-5-1')
+        for s in ('本人の最後の入力より前','その後に本人は 1 回話した','この依頼の名指しにならない','その件は全部入れてよし',
+                  '起こす前に本人に 1 行で聞く'):
+            self.assertIn(s,p.stderr)
+        self.assertEqual(self.requests(),0); self.assertEqual(list(board.outbox_dir(self.root).glob('*.launch.json')),[])
+
+    def test_words_typed_while_the_latest_turn_ran_pass(self):
+        self.need_reader()
+        self.owner_said('資料を置いたよ',queued=(self.QUOTE,'紙は後で'))
+        p=self.req_fable('2026-01-01-mw-b',self.QUOTE)
+        self.assertEqual(p.returncode,0,p.stderr); self.assertIn(f'本人の名指し「{self.QUOTE}」',p.stdout)
+        # a prompt queued before the latest typed one belongs to an earlier input
+        q={'type':'attachment','timestamp':'2026-01-01T00:02:00Z','attachment':{'type':'queued_command','commandMode':'prompt',
+                                                                               'origin':{'kind':'human'},'prompt':self.QUOTE}}
+        rows=[{'type':'user','timestamp':'2026-01-01T00:01:00Z','message':{'role':'user','content':'最初の頼み'}},q,
+              {'type':'user','timestamp':'2026-01-01T00:03:00Z','message':{'role':'user','content':'次の頼み'}}]
+        self.transcript.write_text(''.join(json.dumps(r,ensure_ascii=False)+'\n' for r in rows),encoding='utf-8')
+        p=self.req_fable('2026-01-01-mw-c',self.QUOTE)
+        self.refused(p,'claude-fable-5-1'); self.assertIn('本人の最後の入力より前',p.stderr)
+
+    def test_paraphrase_unreadable_and_codex_requesters_are_refused(self):
+        self.need_reader()
+        import os
+        p=self.req_fable('2026-01-01-mw-d','Fable Max でこの導出を')   # not the owner's words as typed
+        self.refused(p,'claude-fable-5-1'); self.assertIn('本人の発言に無い',p.stderr)
+        self.owner_said('<cross-session-message from="x">この導出は Fable Max でやって</cross-session-message>')
+        p=self.req_fable('2026-01-01-mw-e',self.QUOTE)                  # another session's message is not the owner
+        self.refused(p,'claude-fable-5-1'); self.assertIn('本人の発言に無い',p.stderr)
+        os.environ[board.REQUESTER_TRANSCRIPT_ENV]=str(self.transcript.parent/'missing.jsonl')
+        p=self.req_fable('2026-01-01-mw-f',self.QUOTE)
+        self.refused(p,'claude-fable-5-1'); self.assertIn('この機械で読めない',p.stderr)
+        os.environ.pop(board.REQUESTER_TRANSCRIPT_ENV)                    # a Codex requester's transcript is not read here
+        b=self.post_fable(); b[b.index('--agent')+1]='codex'
+        p=self.cli('request',*b,'--thread','2026-01-01-mw-g','--to','claude','--to-session','role-eproj-g','--surface','desktop',
+                   '--effort','xhigh','--model-quote',self.QUOTE,ok=False)
+        self.refused(p,'claude-fable-5-1'); self.assertIn('agent codex',p.stderr)
+        self.assertEqual(self.requests(),0)
+
     def test_launch_existing_request(self):
+        self.need_reader()
         rid=LaunchClaudeRole.incoming(self,'2026-01-01-ma-l')
         base=('launch','--root',str(self.root),'--agent','claude','--session','claude-win-9','--request',rid,'--effort','xhigh','--reason','worker が導出する')
         for surface in ('desktop','background'):
             self.refused(self.cli(*base,'--surface',surface,'--expect-model','claude-fable-5-1',ok=False),'claude-fable-5-1')
         self.assertIsNone(board.launch_record(self.root,rid))
+        self.owner_said(self.QUOTE,'別のこと')   # the launcher's words are checked the same way
+        self.refused(self.cli(*base,'--surface','background','--expect-model','claude-fable-5-1','--model-quote',self.QUOTE,ok=False),
+                     'claude-fable-5-1')
+        self.assertIsNone(board.launch_record(self.root,rid))
+        self.owner_said(self.QUOTE)
         self.cli(*base,'--surface','background','--expect-model','claude-fable-5-1','--model-quote',self.QUOTE)
         self.assertEqual(board.launch_record(self.root,rid)['model_quote'],self.QUOTE)
 

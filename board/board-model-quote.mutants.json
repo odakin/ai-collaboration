@@ -1,0 +1,37 @@
+{
+ "_comment": "board.py の launch_model_allow の門が --model-quote の文を依頼元の会話記録と照らす確かめ (本人の発言そのまま・本人の最後の入力の中・読めない記録は断る) と、 理由があっても Fable の問いの 1 行を出す知らせの試験が、 直しを 1 つずつ外した版でそれぞれ落ちるか (unittest の FAIL 行で読む)",
+ "target": "board.py",
+ "run": "env AGENT_BOARD_OWNER_TURN_LIB={spec_dir}/../../claude-config/scripts/lib/owner_turn.py python3 test_board.py -v ModelAllow.test_owner_words_let_another_model_through ModelAllow.test_words_from_an_earlier_input_are_refused ModelAllow.test_words_typed_while_the_latest_turn_ran_pass ModelAllow.test_paraphrase_unreadable_and_codex_requesters_are_refused ModelAllow.test_launch_existing_request LaunchClaudeRole.test_request_carries_reason_and_warns_without_one",
+ "fail_marker": "FAIL: ",
+ "pass_marker": "test_",
+ "mutants": [
+  {
+   "name": "本人の発言に無い文 (言い換え・別 session の message) を通す",
+   "pairs": [["    if not r['found']:\n", "    if False:\n"]],
+   "expect_fail": ["test_paraphrase_unreadable_and_codex_requesters_are_refused"],
+   "expect_pass": ["test_owner_words_let_another_model_through", "test_words_from_an_earlier_input_are_refused", "test_request_carries_reason_and_warns_without_one"],
+   "requires": ["{spec_dir}/../../claude-config/scripts/lib/owner_turn.py"]
+  },
+  {
+   "name": "本人の最後の入力より前の文 (前の依頼への名指し) を通す",
+   "pairs": [["    if not r['in_latest']:\n", "    if False:\n"]],
+   "expect_fail": ["test_words_from_an_earlier_input_are_refused", "test_words_typed_while_the_latest_turn_ran_pass", "test_launch_existing_request"],
+   "expect_pass": ["test_owner_words_let_another_model_through", "test_paraphrase_unreadable_and_codex_requesters_are_refused", "test_request_carries_reason_and_warns_without_one"],
+   "requires": ["{spec_dir}/../../claude-config/scripts/lib/owner_turn.py"]
+  },
+  {
+   "name": "依頼元の会話記録を読めない (無い記録・Codex の依頼元) ときに、 読めないと言わずに先へ進む",
+   "pairs": [["    if not path or not os.path.isfile(path):\n", "    if False:\n"]],
+   "expect_fail": ["test_paraphrase_unreadable_and_codex_requesters_are_refused"],
+   "expect_pass": ["test_owner_words_let_another_model_through", "test_words_from_an_earlier_input_are_refused"],
+   "requires": ["{spec_dir}/../../claude-config/scripts/lib/owner_turn.py"]
+  },
+  {
+   "name": "理由があると Fable の問いの 1 行を出さない (前の形)",
+   "pairs": [["    if reason:\n        return (f\"ℹ️ {what}", "    if reason: return ''\n    if reason:\n        return (f\"ℹ️ {what}"]],
+   "expect_fail": ["test_request_carries_reason_and_warns_without_one"],
+   "expect_pass": ["test_owner_words_let_another_model_through", "test_words_from_an_earlier_input_are_refused"],
+   "requires": ["{spec_dir}/../../claude-config/scripts/lib/owner_turn.py"]
+  }
+ ]
+}

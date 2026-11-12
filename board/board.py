@@ -1554,12 +1554,47 @@ def model_tier(model):
     return m
 
 
-def check_model_allow(cfg, model, quote):
+REQUESTER_TRANSCRIPT_ENV='AGENT_BOARD_REQUESTER_TRANSCRIPT'   # tests and fixtures: the requester's transcript, instead of finding it
+OWNER_TURN_LIB_ENV='AGENT_BOARD_OWNER_TURN_LIB'               # tests run on a copy of this dir: the companion reader's path
+
+
+def _owner_turn():
+    """Optional companion reader of the owner's prompts (layer-1 claude-config scripts/lib/owner_turn.py, cloned next to
+    this engine). Raises when it is absent."""
+    lib=os.environ.get(OWNER_TURN_LIB_ENV) or ENGINE.parent.parent/'claude-config'/'scripts'/'lib'/'owner_turn.py'
+    spec=importlib.util.spec_from_file_location('owner_turn',lib); ot=importlib.util.module_from_spec(spec); spec.loader.exec_module(ot)
+    return ot
+
+
+def requester_transcript(agent, session):
+    """The transcript of the Claude session that runs this command (the requester), or None when this machine cannot
+    read it (a Codex requester, a requester on another machine, no companion reader). The harness's
+    CLAUDE_CODE_SESSION_ID names the acting session even when --session is a role id; else --session when it is a
+    native id."""
+    if os.environ.get(REQUESTER_TRANSCRIPT_ENV): return os.environ[REQUESTER_TRANSCRIPT_ENV]
+    if agent!='claude': return None
+    try: ot=_owner_turn()
+    except Exception: return None
+    for sid in (os.environ.get('CLAUDE_CODE_SESSION_ID'),None if is_role(session or '') else session):
+        p=ot.transcript_for(sid or '')
+        if p: return p
+    return None
+
+
+def check_model_allow(cfg, model, quote, agent=None, session=None):
     """A Claude role's worker asked for on a model tier that the board's `launch_model_allow` (board.json; absent = every
     tier) does not list is refused in one line naming where the rule is written, before anything is written or posted
     (the same two entry points as the effort floor, so every path meets it). The owner's own words naming that model,
     verbatim (--model-quote), let it through; they go to the launch record. Without a known model nothing is refused
-    (the model = --expect-model, else the owner's default, else the requester's own = launch_settings)."""
+    (the model = --expect-model, else the owner's default, else the requester's own = launch_settings).
+
+    The words are checked against the requester's own transcript (companion owner_turn.py): they must be the owner's
+    typed words, not a paraphrase or another session's message, and they must be in the owner's latest input (the last
+    prompt the owner typed that started a turn, and what the owner typed while that turn ran). Words from before it
+    named an earlier request: measured, a requester attached the owner's naming for an earlier request to a later,
+    fixed-text edit, and the gate let it through because it looked only for some words. A transcript this machine
+    cannot read (a Codex requester, another machine) refuses too: the requester asks the owner from a Claude window,
+    or asks for the listed tier. Every refusal carries the one line to ask the owner before the worker starts."""
     allow=cfg.get('launch_model_allow') or {}
     tiers=[str(t).strip().lower() for t in (allow.get('tiers') or []) if str(t).strip()]
     m=(model or '').strip()
@@ -1567,10 +1602,31 @@ def check_model_allow(cfg, model, quote):
     t=model_tier(m)
     if t in tiers: return
     rule=(allow.get('rule') or '').strip() or f'{bc.CONFIG} の launch_model_allow'
-    if not ' '.join((quote or '').split()):
-        raise ValueError(f"worker の model {m} (tier {t}) はこの掲示板が起こす model ({' / '.join(tiers)}) に無い = 起こさない (規則 = {rule})。"
-                         f" --expect-model {tiers[0]} で出し直す。 本人がこの model を名指したときだけ --model-quote '<本人の発言そのまま>' を付けて通す")
-    print(f"ℹ️ 掲示板が起こす model ({' / '.join(tiers)}) に無い {m} で起こす = 本人の名指し「{' '.join(quote.split())}」 (起動の記録に残す)")
+    q=' '.join((quote or '').split())
+    head=f"worker の model {m} (tier {t}) はこの掲示板が起こす model ({' / '.join(tiers)}) に無い"
+    if not q:
+        raise ValueError(f"{head} = 起こさない (規則 = {rule})。"
+                         f" --expect-model {tiers[0]} で出し直す。 本人がこの依頼でこの model を名指したときだけ --model-quote '<本人の発言そのまま>' を付けて通す")
+    ask=(f" 起こす前に本人に 1 行で聞く (「<仕事> を {m} の子に投げてよいか。 worker が自分で決めて生み出すもの = <…>、"
+         f" {tiers[0]} で足りない理由 = <…>」)、 本人の答えをそのまま --model-quote に付ける。"
+         f" 聞かないなら --expect-model {tiers[0]} で出し直す (規則 = {rule})")
+    path=requester_transcript(agent,session)
+    if not path or not os.path.isfile(path):
+        raise ValueError(f"{head}。 --model-quote の文を照らす依頼元の会話記録をこの機械で読めない (agent {agent or '?'}) = 起こさない。"
+                         " 本人と話している Claude の窓から出す。"+ask)
+    try: r=_owner_turn().find_quote(path,q)
+    except Exception as ex:
+        raise ValueError(f"{head}。 依頼元の会話記録を読めない ({ex.__class__.__name__}) = 起こさない。"+ask)
+    if not r['found']:
+        raise ValueError(f"{head}。 --model-quote の文が依頼元の会話記録の本人の発言に無い"
+                         " (言い換え・要約・別の窓や別 session の発言は通さない) = 起こさない。"+ask)
+    if not r['in_latest']:
+        ago=(f"{r['minutes']} 分前、 " if r.get('minutes') is not None else '')
+        last=' / '.join(r.get('latest') or [])[:120]
+        raise ValueError(f"{head}。 --model-quote の文は本人の最後の入力より前の発言 ({ago}その後に本人は {r['later']} 回話した) ="
+                         f" 前の依頼への名指しで、 この依頼の名指しにならない (同じ正本の続き・同じ種類の仕事も同じ)。 本人の最後の入力 =「{last}」。"+ask)
+    print(f"ℹ️ 掲示板が起こす model ({' / '.join(tiers)}) に無い {m} で起こす = 本人の名指し「{q}」"
+          " (本人の最後の入力の中の発言と照らした。 起動の記録に残す)")
 
 
 # `request --preview` shows the launch it would get without writing it (CONTRACT.md#preview-writes-nothing): the plans
@@ -2197,18 +2253,25 @@ def cmd_launch(a):
 
 
 def premium_note(model, effort, reason):
-    """A role's worker asked for on the top tier or at max effort with no reason: one line when the request is posted
-    or its worker opened (the desktop launch check stops such a start on machines that turn its premium gate on). The
-    board does not judge the work from its words: measured, every word rule missed some of the model choices people
-    made."""
+    """A role's worker asked for on the top tier or at max effort: one line when the request is posted or its worker
+    opened, with or without a reason. Without one it says so (the desktop launch check stops such a start on machines
+    that turn its premium gate on). With one it repeats the reason and the question the reason has to answer: a reason
+    written in the question's own words ("… を worker が判断する") fits any work, so writing it must not hide the
+    question (measured: such a reason passed for an edit whose text was already fixed, and the owner moved the worker
+    down a tier). The board does not judge the work from its words: measured, every word rule missed some of the model
+    choices people made."""
     m=(model or '').lower()
     top='fable' in m or 'mythos' in m
     mx=(effort or '').lower()=='max'
-    if not (top or mx) or reason: return ''
+    if not (top or mx): return ''
     what=' と '.join(x for x in (('Fable' if top else ''),('max' if mx else '')) if x)
-    return (f'⚠️ {what} の worker を理由なしで頼んでいる。 worker 自身が物理の中身 (導出・議論の正否・どう述べるか) を判断し、'
-            ' 生み出す仕事か。 与えられた文や基準に照らして読む仕事なら --expect-model / --effort を一段下げて出し直す。'
-            " 要るなら --reason '<worker が何を導出・判断するか>' を付ける (起動を検査する機械では、 理由が無いと起動の段で止まる)")
+    ask=(' worker 自身が物理の中身 (導出・議論の正否・どう述べるか) を決めて生み出す仕事か。 与えられた文や基準に照らして読む仕事'
+         ' (文面の決まった直し・規則や道具の直し・検品) なら --expect-model / --effort を一段下げて出し直す。')
+    if reason:
+        return (f"ℹ️ {what} の worker の理由 =「{' '.join(reason.split())}」。 起こす前にもう一度問う:"+ask
+                + " 理由が「… を worker が判断する」 の形だけなら、 依頼書で何が決まっていないかを書き直す")
+    return (f'⚠️ {what} の worker を理由なしで頼んでいる。'+ask
+            + " 要るなら --reason '<worker が何を導出・判断するか>' を付ける (起動を検査する機械では、 理由が無いと起動の段で止まる)")
 
 
 def launch_claude_role(a, req, events):
@@ -2230,7 +2293,7 @@ def launch_claude_role(a, req, events):
     st=reduce_workflow(same,view.now_utc()).get('status')
     if st not in ('requested','stale'): raise ValueError(f'この依頼は {st} = 受け手はもう居る (か終わった)。 起こさない')
     check_effort_floor(bc.load(a.root),launch_effort(a.effort),a.effort_quote)
-    check_model_allow(bc.load(a.root),launch_settings(a.expect_model,a.session,a.effort)[0],a.model_quote)
+    check_model_allow(bc.load(a.root),launch_settings(a.expect_model,a.session,a.effort)[0],a.model_quote,a.agent,a.session)
     role=req['assignee']['session_id']
     surface=(a.surface or os.environ.get(LAUNCH_SURFACE_ENV)
              or ('desktop' if os.environ.get('CLAUDE_CODE_ENTRYPOINT')=='claude-desktop' else 'background')).strip()
@@ -2718,7 +2781,7 @@ def main():
     cfg=bc.load(a.root)
     if a.command=='request' and a.to=='claude' and (a.to_session or '').startswith('role-'):
         check_effort_floor(cfg,launch_effort(a.effort),a.effort_quote)   # before the board is fetched or anything is written
-        check_model_allow(cfg,launch_settings(a.expect_model,a.session,a.effort)[0],a.model_quote)
+        check_model_allow(cfg,launch_settings(a.expect_model,a.session,a.effort)[0],a.model_quote,a.agent,a.session)
     if cfg['audience']=='collaborators':
         # A board for one project's collaborators: its project and checkout are the defaults, and the only choice.
         if not a.policy: a.policy='ordinary'

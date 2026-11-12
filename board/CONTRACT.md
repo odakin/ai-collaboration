@@ -844,9 +844,23 @@ python3 board_asks.py digest --root <board> --session S
   refuses, at the same two entry points, a Claude role's worker whose model so resolved (`--expect-model`, else the
   owner's default, else the requester's own model) is on a tier it does not list: one line naming the rule, before
   anything is posted or written. The owner's own words naming that model, verbatim, in `--model-quote` let it through
-  and go to the launch record and the Remote Control fallback line. Use it for a period in which the owner wants every
-  worker on one tier (for example while a model comparison is being scored); a board without the field allows every
-  tier, a worker with no known model and a Codex role are not checked.
+  and go to the launch record and the Remote Control fallback line. The words are checked against the transcript of
+  the session that runs the command (the harness's `CLAUDE_CODE_SESSION_ID`, else a native `--session`; reader =
+  layer-1 `claude-config/scripts/lib/owner_turn.py`): they must be words the owner typed (not a paraphrase and not
+  another session's message), and they must be in the owner's latest input = the last prompt the owner typed that
+  started a turn, plus what the owner typed while that turn ran. Words from before it named an earlier request and are
+  refused, with how long ago they were said and the owner's latest input (measured: a requester attached the owner's
+  naming for an earlier request to a later, fixed-text edit; the gate had looked only for some words). A transcript this
+  machine cannot read (a Codex requester, a requester on another machine, no reader) is refused too. Every refusal
+  carries the one line to ask the owner before the worker starts (what, on which model, what the worker decides that
+  the listed tier would not); the owner's answer is the quote. `launch --request` checks the launcher's words the same
+  way (the request's recorded words are not reused). Use it for a period in which the owner wants every worker on one
+  tier (for example while a model comparison is being scored); a board without the field allows every tier, a worker
+  with no known model and a Codex role are not checked. On the top tier or at max effort, `request` and
+  `launch --request` print one line whether or not `--reason` is given: without a reason it says so, with one it
+  repeats the reason next to the question the reason has to answer (does the worker itself decide and produce the
+  substance, or read against given text or criteria?), because a reason written in the question's own words fits any
+  work.
   On a request or handover to a live session, `--effort` only reports a
   known effort that differs (switching an effort keeps the context, unlike a model); config dir = `AGENT_BOARD_LAUNCH_CONFIG_DIR`
   (the owner's wiring names a logged-in account: measured, a machine's default config dir was not logged in and the

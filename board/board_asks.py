@@ -1129,7 +1129,7 @@ def hook_stop(root, data, path=None):
         here = Path(__file__).resolve()
         msgs.append('本人に答えを求める段に、 掲示板の問いの印 (〔問 H12〕 の形) が付いていない'
                     f' (「{loose[0]}」 ほか)。 問いを立ててから (python3 {here} ask --root <掲示板> --text … --recommend … --ground <理由>)、'
-                    ' 短い追記に「上の問いを台帳に立てた (番号で答えてもらっても、 どの問いかはこちらで読み替える)」 の 1 行と、'
+                    ' 短い追記に「上の問いを台帳に立てた」 の 1 行と、'
                     ' 道具が出した問いの段 (中身が先、 印は後ろ) を貼る。 本人に印や番号で答えるよう求める文は書かない'
                     ' (「上の番号は使わない」 は本人に印を使えと言う文に読まれた = 実測)。'
                     ' 本人の裁定が要らない問いなら、 問わずに決めて報告する追記にする')
@@ -1590,6 +1590,14 @@ def selftest():
             write_tr(('x', f'研究会の出欠を出すか 〔問 {la}〕\n\nどれか 1 つなら「{la} 送って」 と返してください。'))
             u = stop12()
             check('印・番号で答えさせる' in u, f'本人に印を打たせる文を差し戻す {u}')
+            # the line the unlabeled-ask nudge tells the session to add must not be refused by the label-usage check below
+            # (measured: the nudge's suggested line carried 「番号で答えてもらっても…」 and the next check refused it)
+            write_tr(('x', '研究会の出欠を出すか、 決めてください。 おすすめ: 出す'))
+            nudge = hook_stop(None, {'session_id': 's13', 'transcript_path': str(tr)}, path=led) or ''
+            sug = re.search(r'短い追記に「([^」]*)」 の 1 行', nudge)
+            check(bool(sug), f'印の無い問いの段に、 足す 1 行を勧める {nudge[:80]}')
+            write_tr(('x', (sug.group(1) if sug else '') + f'\n\n研究会の出欠を出すか 〔問 {la}〕 おすすめ: 出す'))
+            check('番号で答えさせる' not in stop12(), '勧めどおりの追記は、 印を番号のように使う検査に当たらない')
             write_tr(('x', '違う所があれば、 番号で教えてください。'))
             check('番号で答えさせる' in stop12(), '「番号で教えて」 を差し戻す')
             write_tr(('x', f'答えは「{la} 1 つ目」 か「{la} 2 つ目」 でどうぞ。'))
