@@ -594,7 +594,14 @@ A habitual `2>&1` counts too: the guard reads `>&` as an output redirect, so any
 the file or the candidate with `2>&1` after the pickup counts as writing them, and that window can no longer approve
 on that request (measured). Approve the candidates of the worker's final submission: the board takes one submission
 at a time, so a partial submission made only to get an approval needs a `revise` before the final one can be posted
-(measured). Any other command of the
+(measured). The candidate and the lines it adds are checked across the reviewer's whole transcript, commands from
+before the pickup included, so a long-running reviewer window can lose the ability to approve through unrelated
+earlier work (measured): a glob in an option value of a command that is not a reading form (`--include='*.sh'` in a
+`grep … | head`) counts as naming every candidate whose file name it matches, and an added line of six characters or
+more (a common `import sys`) counts as the reviewer's own when it appears in the text of an earlier command (a
+`python3 -c` string). A candidate whose path ends with the target's repository-relative path makes that relative
+name count before the pickup too, so the worker names candidates flatly (`<repo>__<dir>__<name>`) in a new
+directory (measured). Any other command of the
 reviewer's that names the file, the candidate or a directory above the file must be made of reading commands only
 (the rule text lists them); review against copies made with `cp` to an absolute destination outside the
 repository and the candidate's directory, not links.
