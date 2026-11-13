@@ -607,7 +607,7 @@ def _codex_threads():
     return ct
 
 
-def codex_queue_note(session, events, thread_key, lead='次に動く'):
+def codex_queue_note(session, events, thread_key, lead='次に動く', *, message=None):
     """The command that hands a Codex thread on this machine one line about the post, or None.
 
     A Codex session has no SendMessage. The Codex CLI's `codex queue --thread <id> --message <text>` queues a user
@@ -625,7 +625,7 @@ def codex_queue_note(session, events, thread_key, lead='次に動く'):
                '今は開いていない = 次に開いた時に届く' if held is not None else '生きているかは読めない')
         rows=ct.thread_rows([tid])
         if held is not None and not rows and tid not in held: return None  # not a thread of this machine
-        msg=f"掲示板 {thread_key}: 書き込みあり。 inbox --agent codex --session {session} --sync で読む"
+        msg=message or f"掲示板 {thread_key}: 書き込みあり。 inbox --agent codex --session {session} --sync で読む"
         return f"→ {lead} codex/{tid[:8]} に知らせる ({state}。 Codex に SendMessage は無い): {ct.queue_hint(tid, msg)}"
     except Exception:
         return None
@@ -651,13 +651,27 @@ def counterpart_note(me, ev, events):
     try:
         same=[e for e in events if e['project']['key']==ev['project']['key'] and e['thread_id']==ev['thread_id']]
         wf=reduce_workflow(same+[ev],view.now_utc())
+        thread_key=f"{ev['project']['key']}/{ev['thread_id']}"
+        if ev.get('kind')=='accept':
+            request=wf.get('request') or {}
+            parent=request.get('actor') or {}
+            session=parent.get('session_id') or ''
+            reviewer_label=ev.get('actor',{}).get('task') or ''
+            if (ev.get('source_policy')!='ordinary' or (wf.get('review') or {}).get('event_id')!=ev['event_id']
+                or parent.get('agent')!='codex' or not re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}',session)
+                or not same_host(parent.get('instance'),this_host()) or same_session(parent,me)
+                or session in reviewer_label or re.match(rf'{session[:8]}(?![0-9a-z-])',reviewer_label)):
+                return None
+            message=(f"掲示板 {thread_key}: 依頼 {request['event_id']} の受理 {ev['event_id']}。"
+                     f"show --request {request['event_id']} --sync で読み、作業子の次の担当・終了・保留を確認する。")
+            return codex_queue_note(session,same+[ev],thread_key,'依頼元の',message=message)
         note=ev.get('kind')=='note'
         w=other_party(wf,me) if note else wf.get('waiting_on')
         lead='相手の' if note else '次に動く'
         if not w or same_session(w,me): return None
         w=dict(w,agent=role_agent(w,same+[ev]))
         if w.get('agent')=='codex':
-            return codex_queue_note(w.get('session_id'),same+[ev],f"{ev['project']['key']}/{ev['thread_id']}",lead)
+            return codex_queue_note(w.get('session_id'),same+[ev],thread_key,lead)
         addr=live_address(w.get('agent'),w.get('session_id'),same+[ev])
         if not addr: return None
         who=_who(w)
@@ -2964,7 +2978,7 @@ def main():
         else:
             print(f"→ 相手の書き込みで起こされるように、 background で見張る (Claude = Bash の run_in_background):"
                   f" python3 {Path(__file__).resolve()} watch --root {a.root} --agent {a.agent} --session {a.session} --request {rid}")
-    if a.command in {'request','claim','submit','blocker','revise','update','handover','release','abandoned'} or (a.command=='note' and a.request):
+    if a.command in {'request','claim','submit','accept','blocker','revise','update','handover','release','abandoned'} or (a.command=='note' and a.request):
         note=counterpart_note((a.agent,a.session),ev,events)
         if note: print(note)
     hints=kind_hints(ev,w_before,(a.agent,a.session))

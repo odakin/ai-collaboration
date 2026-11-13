@@ -153,6 +153,35 @@ class CodexCounterpart(unittest.TestCase):
         n=event('note',3,agent='claude',reply=blk)
         note=board.counterpart_note(('claude','claude-session-001'),n,[r,c,blk])
         self.assertIn(f'queue --thread {self.TID}',note); self.assertIn('相手の',note)
+    def test_independent_accept_points_to_the_original_codex_requester(self):
+        r,c,sub=chain()
+        r['actor'].update(agent='codex',session_id=self.TID,instance=f'codex@{board.this_host()}')
+        reviewer='role-example-reviewer'
+        handover=event('handover',3,agent='codex',reply=r)
+        handover['actor']['session_id']=self.TID
+        handover.update(handover_role='reviewer',target={'agent':'codex','session_id':reviewer})
+        receipt=event('accept',4,agent='codex',reply=sub)
+        receipt['actor']['session_id']=reviewer
+        rows=[r,c,sub,handover]
+        note=board.counterpart_note(('codex',reviewer),receipt,rows)
+        self.assertIn(f'queue --thread {self.TID}',note)
+        self.assertIn(f"show --request {r['event_id']} --sync",note)
+        self.assertIn(receipt['event_id'],note)
+        with self.subTest('review was written from the parent under its role'):
+            receipt['actor']['task']=self.TID[:8]+' (fixture)'
+            self.assertIsNone(board.counterpart_note(('codex',reviewer),receipt,rows))
+            receipt['actor']['task']='fixture'
+        with self.subTest('wrong host'):
+            r['actor']['instance']='codex@another-host'
+            self.assertIsNone(board.counterpart_note(('codex',reviewer),receipt,rows))
+            r['actor']['instance']=f'codex@{board.this_host()}'
+        with self.subTest('restricted source'):
+            receipt['source_policy']='encrypted-metadata-only'
+            self.assertIsNone(board.counterpart_note(('codex',reviewer),receipt,rows))
+            receipt['source_policy']='ordinary'
+        with self.subTest('wrong submission'):
+            receipt['reply_to']=c['event_id']
+            self.assertIsNone(board.counterpart_note(('codex',reviewer),receipt,rows))
     def test_unknown_thread_is_silent(self):
         r=self.request_to('01a00000-0000-7000-8000-0000000000bb')   # not in this machine's state, no lock
         self.assertIsNone(board.counterpart_note(('claude','claude-session-001'),r,[]))
