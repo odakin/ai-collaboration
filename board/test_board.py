@@ -138,6 +138,44 @@ class CodexCounterpart(unittest.TestCase):
         ans=event('update',3,agent='claude',reply=blk)
         note=board.counterpart_note(('claude','claude-session-001'),ans,[r,c,blk])
         self.assertIn(f'queue --thread {self.TID}',note); self.assertIn('--session role-example-codex',note)
+    def test_native_worker_assignment_receives_literal_sync_command(self):
+        import shlex
+        r=self.request_to(self.TID)
+        root=Path(self.td.name)/'board with spaces'
+        r['summary']='Payload must not become a shell argument; $(false)'
+        note=board.counterpart_note(('claude','claude-session-001'),r,[],root=root)
+        argv=shlex.split(note.split(': ',1)[1])
+        self.assertEqual(argv[-4:-1],['--thread',self.TID,'--message'])
+        self.assertNotIn(r['summary'],argv[-1])
+        self.assertEqual(shlex.split(argv[-1].split('`')[1]),
+                         ['python3',str((board.ENGINE/'board.py').resolve()),'show','--root',str(root.resolve()),
+                          '--agent','codex','--session',self.TID,'--request',r['event_id'],'--sync'])
+        n=event('note',1,agent='claude',reply=r)
+        note=board.counterpart_note(('claude','claude-session-001'),n,[r],root=root)
+        self.assertIn(r['event_id'],note)
+        self.assertNotIn(n['event_id'],note)
+        unsafe_root=Path(self.td.name)/'board`path'
+        note=board.counterpart_note(('claude','claude-session-001'),r,[],root=unsafe_root)
+        self.assertNotIn('show --root',note)
+    def test_queue_sync_command_does_not_change_role_reviewer_or_restricted_handoff(self):
+        root=Path(self.td.name)/'board'
+        r=self.request_to('role-example-codex'); c=event('claim',1)
+        c['actor'].update(session_id='role-example-codex',task=self.TID[:8]+' (codex-model-x)')
+        n=event('note',2,agent='claude',reply=r)
+        note=board.counterpart_note(('claude','claude-session-001'),n,[r,c],root=root)
+        self.assertIn('--session role-example-codex',note)
+        self.assertNotIn('show --root',note)
+
+        r,c,sub=chain()
+        r['actor'].update(agent='codex',session_id=self.TID)
+        note=board.counterpart_note(('codex','codex-session-001'),sub,[r,c],root=root)
+        self.assertIn(f'queue --thread {self.TID}',note)
+        self.assertNotIn('show --root',note)
+
+        r=self.request_to(self.TID); r['source_policy']='encrypted-metadata-only'
+        note=board.counterpart_note(('claude','claude-session-001'),r,[],root=root)
+        self.assertIn(f'queue --thread {self.TID}',note)
+        self.assertNotIn('show --root',note)
     def test_role_addressed_to_claude_but_claimed_by_codex_reaches_the_codex_thread(self):
         # a role is not one vendor (CONTRACT#role-any-agent): the line follows the vendor that acts under it
         r=event('request',0); r['assignee']={'agent':'claude','session_id':'role-example-partner'}
@@ -184,7 +222,7 @@ class CodexCounterpart(unittest.TestCase):
             self.assertIsNone(board.counterpart_note(('codex',reviewer),receipt,rows))
     def test_unknown_thread_is_silent(self):
         r=self.request_to('01a00000-0000-7000-8000-0000000000bb')   # not in this machine's state, no lock
-        self.assertIsNone(board.counterpart_note(('claude','claude-session-001'),r,[]))
+        self.assertIsNone(board.counterpart_note(('claude','claude-session-001'),r,[],root=Path(self.td.name)))
         self.assertIsNone(board.counterpart_note(('claude','claude-session-001'),self.request_to('codex-session-001'),[]))
     def test_codex_poster_is_not_told_to_sendmessage(self):
         import os

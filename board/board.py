@@ -607,7 +607,7 @@ def _codex_threads():
     return ct
 
 
-def codex_queue_note(session, events, thread_key, lead='次に動く', *, message=None):
+def codex_queue_note(session, events, thread_key, lead='次に動く', *, message=None, root=None, request=None):
     """The command that hands a Codex thread on this machine one line about the post, or None.
 
     A Codex session has no SendMessage. The Codex CLI's `codex queue --thread <id> --message <text>` queues a user
@@ -626,6 +626,11 @@ def codex_queue_note(session, events, thread_key, lead='次に動く', *, messag
         rows=ct.thread_rows([tid])
         if held is not None and not rows and tid not in held: return None  # not a thread of this machine
         msg=message or f"掲示板 {thread_key}: 書き込みあり。 inbox --agent codex --session {session} --sync で読む"
+        if message is None and root is not None and request and session==tid and (rows or (held is not None and tid in held)):
+            command=shlex.join(['python3',str((ENGINE/'board.py').resolve()),'show','--root',str(Path(root).resolve()),
+                                '--agent','codex','--session',tid,'--request',request,'--sync'])
+            if not any(c in command for c in '`\r\n'):
+                msg=f"掲示板 {thread_key}: 割当を同期して読む。まず単独で実行: `{command}`"
         return f"→ {lead} codex/{tid[:8]} に知らせる ({state}。 Codex に SendMessage は無い): {ct.queue_hint(tid, msg)}"
     except Exception:
         return None
@@ -641,7 +646,7 @@ def role_agent(addr, events):
     return acted[-1] if acted else addr.get('agent')
 
 
-def counterpart_note(me, ev, events):
+def counterpart_note(me, ev, events, *, root=None):
     """After a post: one line telling the poster how to reach the session that must act next on this machine
     (post-then-push, CONTRACT#post-then-push): a Claude session's SendMessage address, or for a Codex thread the
     `codex queue` command. A Codex poster has no SendMessage, so a live Claude counterpart is named without asking it to
@@ -671,7 +676,10 @@ def counterpart_note(me, ev, events):
         if not w or same_session(w,me): return None
         w=dict(w,agent=role_agent(w,same+[ev]))
         if w.get('agent')=='codex':
-            return codex_queue_note(w.get('session_id'),same+[ev],thread_key,lead)
+            req=wf.get('request')
+            request=(req['event_id'] if req and req['source_policy']=='ordinary' and not wf['errors']
+                     and wf['status']=='requested' and same_session(w,wf['assigned_to']) else None)
+            return codex_queue_note(w.get('session_id'),same+[ev],thread_key,lead,root=root,request=request)
         addr=live_address(w.get('agent'),w.get('session_id'),same+[ev])
         if not addr: return None
         who=_who(w)
@@ -2979,7 +2987,7 @@ def main():
             print(f"→ 相手の書き込みで起こされるように、 background で見張る (Claude = Bash の run_in_background):"
                   f" python3 {Path(__file__).resolve()} watch --root {a.root} --agent {a.agent} --session {a.session} --request {rid}")
     if a.command in {'request','claim','submit','accept','blocker','revise','update','handover','release','abandoned'} or (a.command=='note' and a.request):
-        note=counterpart_note((a.agent,a.session),ev,events)
+        note=counterpart_note((a.agent,a.session),ev,events,root=a.root)
         if note: print(note)
     hints=kind_hints(ev,w_before,(a.agent,a.session))
     if hints:
