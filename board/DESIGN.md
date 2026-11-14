@@ -190,6 +190,34 @@ its docstring; the contract only points there, so the description has one home.
   the surface and JSON output against the prior implementation and time the startup adapter as well as the viewer,
   since a viewer that eventually returns the correct output can still exceed the hook's time limit.
 
+## <a id="owner-asks"></a>Owner asks: settling a guess
+
+The rules are in [CONTRACT#owner-asks](CONTRACT.md#owner-asks); this section keeps why they have that shape. A guess
+stops the session's effective actions, so a guess that cannot be settled stops them for good (実測: the owner's
+confirmations matched no word the hook knew, for several turns, and the stop's message named a way to settle that the
+code did not take).
+
+- **Settling reads the agent's reading line, not the first line.** The reply often opens with a status or a re-shown
+  ask block, so "the first line that names a candidate" bound the wrong ask (実測 in review); the line that says
+  "…と読みました" is the one the agent is told to write, and two such lines naming different candidates settle nothing.
+- **Confirmation words count only while a guess is pending.** Adding them to the affirmations that answer an ask made
+  a hesitation ("そうですね" followed by "考えさせて") close a single shown ask (実測 in review). Words that also decline
+  (大丈夫) are left out of both.
+- **The answer recorded is the guessed words.** Recording the confirmation ("はい") as the answer lost what the owner
+  answered; the confirmation is kept beside it, and a guess replaced by a newer guess keeps the earlier words.
+- **A label in a line that asks back makes a guess.** A question about an ask and a rhetorical answer naming its label
+  look alike, so neither closes the ask until the reading is confirmed (the owner's ruling, over the first design's
+  "labels bind as before").
+- **An answer given otherwise drops the guess on the record and says so.** Before, any later label or order answer
+  cleared the guess silently, against the rule that every message settling nothing tells the agent.
+- **The messages are built from the words the selftest tries.** A message that tells the agent how to unblock is a
+  promise; keeping the words in one tuple that both the message and the selftest read keeps the promise checked
+  (general form: claude-config `conventions/hook-authoring.md#unblock-message-from-tested-ways`).
+- Rejected: binding by the content words of a candidate (an unrelated instruction sharing a word would bind); a CLI that
+  settles a guess from words the agent copies (the stop exists because the agent's reading is the thing in doubt);
+  splitting a line at 、 to keep the answer half of "1 OK、2 は？" (it also binds "はい、でも 2 は？", which binds nothing
+  today: a lost answer leaves the ask open, a wrong one closes it).
+
 ## Source-of-truth boundary
 
 The board may say "the numerical check found X" while work is in progress; it must not become the only home of X.
