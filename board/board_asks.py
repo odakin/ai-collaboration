@@ -26,11 +26,17 @@ What it is:
   not judge.
 - An **answer** records the owner's words verbatim, the labels it was bound to and how: `label` (the owner wrote a
   label this session showed), `order` (a position in the only ask block of the latest reply), `confirmed` (the owner
-  confirmed the reading the agent stated), or `guess` (no safe binding: candidates listed). An answer that only defers
-  ("H2 は後で") is recorded and leaves the ask open. While a session's latest answer is a guess with an open candidate,
-  the tool check stops effective actions (sending, recording a decision, messaging or starting another session,
-  closing a session); only the owner's next words settle it (the CLI refuses a settling answer while a guess is
-  pending; the binding hook records the owner's words).
+  confirmed the reading the agent stated), or `guess` (no safe binding: candidates listed). A line that asks back or
+  asks to hear something again ("…？", "…聞かせて") is not read as an answer by number, position or affirmation. An
+  answer that only defers ("H2 は後で") is recorded and leaves the ask open. While a session's latest answer is a guess
+  with an open candidate, the tool check stops effective actions (sending, recording a decision, messaging or starting
+  another session, closing a session); only the owner's next words settle it (the CLI refuses a settling answer while
+  a guess is pending; the binding hook records the owner's words): a message that only confirms, after the agent's
+  reading line ("…と読みました") named one candidate, binds it (`confirmed`, the quote = the guessed words, the
+  confirmation kept as `confirm`); "答えではない", or a confirmation of a reading that the words were not an answer,
+  drops the guess (`dismissed`, the asks stay open); an answer by label or order is recorded after a `dismissed` for
+  the guess, and a new guess keeps the earlier words (`earlier`). The ways are named in the messages from
+  SETTLE_AFFIRM / SETTLE_DISMISS, and the selftest tries each one.
 - A **withdraw** closes an ask decided elsewhere. **shown** records which asks a session displayed.
 
 Store: an append-only JSON-lines ledger local to the board checkout and shared by every session on the machine
@@ -89,7 +95,7 @@ GROUNDS = {
     'fact': '本人しか知らない事実',
 }
 JUDGED = ('rule', 'protected')
-BINDINGS = ('label', 'order', 'confirmed', 'guess')
+BINDINGS = ('label', 'order', 'confirmed', 'guess', 'dismissed')
 SETTLED = ('label', 'order', 'confirmed')
 LABEL_RE = re.compile(r'(?<![A-Za-z0-9])([A-Z])(\d{1,5})(?![0-9])')
 BLOCK_RE = re.compile(r'〔問\s*([A-Z]\d{1,5})〕')
@@ -654,11 +660,16 @@ def format_block(results):
 
 
 def answer(root, labels, quote, binding, *, reading='', recorded='', session=None, candidates=None, path=None,
-           from_hook=False, defer=False):
+           from_hook=False, defer=False, confirm='', earlier=None):
     """Record an answer. A settling answer while this session has a pending guess comes only from the binding hook
-    (the owner's words); a hand-written one is refused."""
+    (the owner's words); a hand-written one is refused. `dismissed` (the guess is dropped, its asks stay open: the
+    guessed words were not an answer, or the owner answered otherwise) comes only from the hook. `confirm` = the owner's
+    words that confirmed or dropped a guess (the quote is then the guessed words, the answer itself); `earlier` = the
+    owner's words of the guesses this one replaced, oldest first."""
     if binding not in BINDINGS:
         raise ValueError(f'binding は {BINDINGS} のどれか')
+    if binding == 'dismissed' and not from_hook:
+        raise ValueError('推定を捨てる記録は本人の発言 (hook) だけが書く')
     p = Path(path) if path else ledger_path(root)
     me = _me(session)
     with _locked(p):
@@ -667,14 +678,18 @@ def answer(root, labels, quote, binding, *, reading='', recorded='', session=Non
         unknown = [lb for lb in list(labels) + list(candidates or []) if lb not in st]
         if unknown:
             raise ValueError(f'台帳に無い印: {unknown}')
-        if binding != 'guess' and not labels:
+        if binding not in ('guess', 'dismissed') and not labels:
             raise ValueError('結んだ印が無い (--label)')
         if binding in SETTLED and not from_hook and pending_guess(recs, me, st):
             raise ValueError('結び先の決まらない本人の答えがある間は、 確定の記録は本人の次の発言 (hook) だけが書く。'
                              ' 本人に「〜と読みました。よいですか」 と確かめる')
-        rec = {'type': 'answer', 'labels': list(labels) if binding != 'guess' else [], 'quote': (quote or '')[:MAX_QUOTE],
-               'binding': binding, 'reading': (reading or '')[:MAX_TEXT], 'recorded': recorded,
-               'candidates': list(candidates or []), 'session': me, 'created_at': now_iso()}
+        rec = {'type': 'answer', 'labels': list(labels) if binding not in ('guess', 'dismissed') else [],
+               'quote': (quote or '')[:MAX_QUOTE], 'binding': binding, 'reading': (reading or '')[:MAX_TEXT],
+               'recorded': recorded, 'candidates': list(candidates or []), 'session': me, 'created_at': now_iso()}
+        if confirm:
+            rec['confirm'] = confirm[:MAX_QUOTE]
+        if earlier:
+            rec['earlier'] = [(e or '')[:MAX_QUOTE] for e in earlier][-5:]
         if defer:
             rec['defer'] = True
         _append(p, [rec])
@@ -716,6 +731,50 @@ ALL_WORDS = ('全部', 'ぜんぶ', 'すべて', '全て', '両方', 'どれも'
 AFFIRM_ONLY = re.compile(r'^\s*(はい|うん|ok|okay|おけ|いいよ|いいです|よし|了解|それで(いい|よい|ok)?|おすすめ(で|どおり)?|推しで|'
                          r'(全部|ぜんぶ|すべて|両方)(おすすめ|推し)?で?(いい|ok)?|送って|進めて|当てて|入れて)'
                          r'\s*(で|です|ね|よ|。|！|!|、|お願い(します)?|ください)*\s*$', re.I)
+# Confirming a reading the agent stated (only while a guess is pending; an answer to an ask still needs AFFIRM_ONLY:
+# "そうですね" also opens a hesitation, measured in review as closing a single shown ask). A few words in a row and on
+# separate lines count ("はい、合ってる", "なるほど\nはい"); a filler alone does not. Measured: "よいです！" and "合ってる"
+# stayed bound to nothing, turn after turn. Not 大丈夫: it also declines ("要りますか" "大丈夫です").
+CONFIRM_WORD = (r'(?:はい|うん|ok|okay|おけ|いいよ|いいです|いいね|よい|良い|よし|了解|そう|その(?:とおり|通り)|正しい|それ|'
+                r'問題(?:ない|ありません|なし)|(?:その)?(?:理解|読み)で(?:いい|よい|ok|合って(?:る|ます|います))|'
+                r'合って(?:る|ます|います)|あって(?:る|ます|います)|それで(?:いい|よい|ok)?|おすすめ(?:で|どおり)?|推しで|'
+                r'送って|進めて|当てて|入れて)')
+CONFIRM_FILLER = r'(?:なるほど|ありがとう(?:ございます)?|どうも)'
+CONFIRM_TAIL = r'(?:\s*(?:で|です|だ|ね|よ|。|！|!|、|,|お願い(?:します)?|ください))*'
+CONFIRM_SEQ = re.compile(rf'^\s*(?:(?:{CONFIRM_WORD}|{CONFIRM_FILLER}){CONFIRM_TAIL}\s*)+$', re.I)
+
+
+def is_confirm(text):
+    """The owner's whole message only confirms (one or more confirming words, fillers allowed, any lines)."""
+    t = '、'.join(ln.strip() for ln in unicodedata.normalize('NFKC', text or '').splitlines() if ln.strip())
+    return bool(t) and bool(CONFIRM_SEQ.match(t)) and bool(re.search(CONFIRM_WORD, t, re.I))
+
+
+# A line that asks back or asks to hear something again is not an answer: it is left out of the reading by number,
+# position and affirmation (a label written in it is still read). Measured: a question about one option ("3 は…？")
+# and a request to hear one again ("2 をもう一回聞かせて") were bound as answers, and after a reply with one ask
+# block such a request closed the second ask. A line that mixes an answer and a question ("1 OK、2 は？") binds nothing.
+QUERY_LINE = re.compile(r'(?:[?？]|(?:聞かせて|説明して|教えて|言い直して|聞き直(?:して|したい))'
+                        r'(?:ください|下さい|ほしい|欲しい|くれ(?:る|ない)?|もらえる)?|ですか|ますか|でしょうか|かな|っけ)'
+                        r'[\s。．.！!…笑wｗ)）」』]*$')
+# While a guess is pending: the owner saying that the words were not an answer (not in a question: "まだ答えてない
+# 問いは？" asks something else), and the agent's confirming line reading them as not an answer
+# ("<question> (H12) への答えではない (聞き直しの頼み) と読みました"). Either drops the guess.
+NOT_ANSWER_OWNER = re.compile(r'答え(?:では|じゃ)(?:な|あり)|質問(?:し)?(?:た|てる|ている)だけ|聞い(?:た|てる|ている)だけ')
+NOT_ANSWER_READ = re.compile(r'答え(?:では|じゃ)(?:な|あり)')
+# The agent's reading ("…と読みました"); "<question> のメールを読みました" is a report, not a reading
+READ_LINE = re.compile(r'と読(?:みました|んだ|んでいます)')
+# What may follow a candidate's label in a message that only names which one ("H12 のこと", "H12 の方です")
+LABEL_ONLY_REST = re.compile(r'[\s、。,!！]*(?:(?:の(?:こと|方|ほう)|への答え|へ|に|で|です|だ|だよ|ね|よ)[\s、。,!！]*)*')
+# The ways a pending guess settles, named in the guess messages and tried one by one by the selftest (so the messages
+# never name a way the code does not take: measured, the stop's message said an answer "in content" settles it).
+SETTLE_AFFIRM = ('はい', '合ってる', 'よいです')
+SETTLE_DISMISS = ('答えではない',)
+CONFIRM_HOW = ('候補を 1 つだけ問いの中身で名指し、 印は後ろに添えて確かめる: 答えと読んだら「〈問いの中身〉 (H12) への答えと読みました。よいですか」、'
+               ' 答えでない (問い返し・聞き直しの頼み) と読んだら「〈問いの中身〉 (H12) への答えではない (〈何の頼みか〉) と読みました。よいですか」。')
+SETTLE_HOW = (' 本人の短い肯定 (' + ''.join(f'「{w}」' for w in SETTLE_AFFIRM) + ' など) で、 確かめの 1 行が名指した 1 つに結ぶ'
+              ' (答えではないと読んだ 1 行なら推定を捨てる)。 本人が' + ''.join(f'「{w}」' for w in SETTLE_DISMISS)
+              + ' と言っても推定を捨てる (問いは開いたまま)。 本人に印を打つよう頼まない。')
 DEFER_RE = re.compile(r'後で|あとで|保留|待って|考える|考えさせて|まだ決め|検討する|今度')
 ORDINAL_RE = re.compile(r'^\s*([0-9]{1,2}|[①-⑳])')
 POSITION_RE = re.compile(r'^\s*(上の|下の|前者|後者|最初の|最後の|[一二三四五1-9]つ目|[1-9]番目)')
@@ -764,9 +823,11 @@ def bind(text, shown_now, shown_prev, open_labels, other_numbered_now=False, kno
         if lb in open_set and lb in knownset and lb not in named:
             named.append(lb)
     first = t.strip().splitlines()[0] if t.strip() else ''
-    defer = bool(DEFER_RE.search(first))
     if named:
-        return {'binding': 'label', 'labels': named, 'candidates': [], 'defer': defer}
+        return {'binding': 'label', 'labels': named, 'candidates': [], 'defer': bool(DEFER_RE.search(first))}
+    t = '\n'.join(ln for ln in t.strip().splitlines() if not QUERY_LINE.search(ln))   # asking back is not answering
+    first = t.strip().splitlines()[0] if t.strip() else ''
+    defer = bool(DEFER_RE.search(first))
     now = [lb for lb in shown_now if lb in open_set]
     prev = [lb for lb in shown_prev if lb in open_set and lb not in now]
     wants_all = bool(QTY_ALL_RE.match(first)) or (any(w in first for w in ALL_WORDS) and bool(AFFIRM_ONLY.match(first)))
@@ -1150,6 +1211,64 @@ def label_usage(text, labels, heads):
     return uniq
 
 
+def _confirm_line(w0, cands):
+    """The agent's confirming line in its latest reply and the candidates it names. Ask blocks shown again
+    (〔問 H12〕) are questions, not readings, and are skipped. The confirming line is a line that says what it read
+    ("…と読みました"); when several such lines name candidates, all the candidates they name are returned (two readings
+    settle nothing). A line that only mentions a candidate ("H5 は後で聞きます", "H5 のメールを読みました") is not the
+    reading. With no reading line that names one, the first line that names one stands in; with none, the first
+    reading line (it names no label)."""
+    lines = [ln for ln in prose_only(w0).splitlines() if ln.strip() and not BLOCK_RE.search(ln)]
+    named = [(ln, bare_labels(ln, cands)) for ln in lines]
+    named = [(ln, nm) for ln, nm in named if nm]
+    reads = [(ln, nm) for ln, nm in named if READ_LINE.search(ln)]
+    if reads:
+        return reads[0][0], list(dict.fromkeys(lb for _, nm in reads for lb in nm))
+    if named:
+        return named[0]
+    return next((ln for ln in lines if READ_LINE.search(ln)), ''), []
+
+
+def _settle(g, res, prompt, w0, open_labels):
+    """Read the owner's words while guess g is pending. Returns (res, why, drop):
+    res = `confirmed` (bound to the one candidate the agent's reading line named, or to the only candidate when a
+    reading line names none), `dismissed` (the guessed words were not an answer), or bind()'s own result (an answer by
+    label or order, a new guess, or nothing); why = what to tell the agent when the words settle nothing ('' when
+    there is nothing to say); drop = the owner answered otherwise (by label or order): the guess is dropped on the
+    record before that answer is recorded, and the agent is told."""
+    cands = [lb for lb in (g.get('candidates') or []) if lb in open_labels]
+    t = unicodedata.normalize('NFKC', prompt or '').strip()
+    first = t.splitlines()[0] if t else ''
+    answered = res['binding'] in ('label', 'order')
+    if NOT_ANSWER_OWNER.search(unquoted(first)) and not QUERY_LINE.search(first):
+        if answered:
+            return res, '', True   # "前のは答えじゃない。 H26 は延ばさない": drop the guess, record the answer
+        return {'binding': 'dismissed', 'labels': [], 'candidates': cands, 'defer': False}, '', False
+    if res['binding'] == 'label' and set(res['labels']) & set(cands):
+        rest = LABEL_RE.sub(' ', t)
+        # "H34 です" / "H34 のこと" / "H34 の方" / "H34 で合ってる" only say which one: they confirm the reading
+        if LABEL_ONLY_REST.fullmatch(rest) or is_confirm(re.sub(r'^[\sではがを、。,]*', '', rest)):
+            return dict(res, binding='confirmed'), '', False
+        return res, '', True   # "H34 は延ばさない" is the owner's own answer: it replaces the guess
+    if not is_confirm(t):
+        if answered:
+            return res, '', True
+        if res['binding'] == 'guess':
+            return dict(res, earlier=(g.get('earlier') or []) + [g.get('quote') or '']), '', False
+        return res, '本人の今の発言は、 確かめへの答え (短い肯定か、 答えではないという語) に読めなかった。', False
+    line, named = _confirm_line(w0, cands)
+    if len(named) == 1 or (not named and len(cands) == 1 and line):
+        if NOT_ANSWER_READ.search(unquoted(line)):
+            return {'binding': 'dismissed', 'labels': [], 'candidates': cands, 'defer': False}, '', False
+        return {'binding': 'confirmed', 'labels': named or cands, 'candidates': [], 'defer': False}, '', False
+    if answered:
+        return res, '', True   # an answer to an ask block of the latest reply
+    # the affirmation is not recorded as a new guess (it would replace the guessed words, the answer itself)
+    why = (f'本人は肯定したが、 確かめの行 (「…と読みました」) が候補を 1 つに名指していない (名指した候補 {len(named)} 個)。'
+           if named or line else '本人は肯定したが、 返事に確かめの行 (「…と読みました」) が無い。')
+    return {'binding': 'none', 'labels': [], 'candidates': [], 'defer': False}, why, False
+
+
 def hook_prompt(root, data, path=None):
     """UserPromptSubmit: bind the owner's words, record the answer, return what to tell the agent (or None)."""
     session = data.get('session_id') or _me(None)
@@ -1168,36 +1287,50 @@ def hook_prompt(root, data, path=None):
     now, prev = labels_in(w0), labels_in(w1)
     g = pending_guess(recs, session, st)
     res = bind(prompt, now, prev, open_labels, numbered_outside_blocks(w0), known=known)
+    quote, confirm, earlier, drop = prompt, '', [], False
     if g:
-        cands = [lb for lb in (g.get('candidates') or []) if lb in open_labels]
-        named_by_agent = bare_labels(prose_only(w0), cands)
-        if res['binding'] == 'label' and set(res['labels']) & set(cands):
-            res['binding'] = 'confirmed'
-        elif AFFIRM_ONLY.match(unicodedata.normalize('NFKC', prompt).strip().splitlines()[0]) and len(named_by_agent) == 1:
-            res = {'binding': 'confirmed', 'labels': named_by_agent, 'candidates': [], 'defer': False}
-        elif AFFIRM_ONLY.match(unicodedata.normalize('NFKC', prompt).strip().splitlines()[0]) and len(cands) == 1:
-            res = {'binding': 'confirmed', 'labels': cands, 'candidates': [], 'defer': False}
+        res, why, drop = _settle(g, res, prompt, w0, open_labels)
+        if res['binding'] in ('confirmed', 'dismissed'):
+            quote, confirm = g.get('quote') or '', prompt   # the guessed words are the answer; these confirmed them
+            earlier = g.get('earlier') or []
+        elif res['binding'] == 'guess':
+            earlier = res.get('earlier') or []   # a new guess keeps the words of the one it replaces
+        elif res['binding'] == 'none' and why:
+            c = ', '.join(lb for lb in (g.get('candidates') or []) if lb in open_labels)
+            return (f'🔒 board-asks: 本人の答え「{(g.get("quote") or "")[:60]}」 の推定はまだ解けていない (候補 {c})。 {why}'
+                    ' 送る・決定を記録する・別の session に頼む・session を起こす・畳む操作は止まったまま。 返事の 1 行目で、 '
+                    + CONFIRM_HOW + SETTLE_HOW)
     if res['binding'] == 'none' or (res['binding'] == 'guess' and not res['candidates']):
         return None
-    answer(root, res['labels'], prompt, res['binding'], session=session, candidates=res['candidates'], path=p,
-           from_hook=True, defer=res.get('defer', False))
+    dropped = ''
+    if drop:
+        answer(root, [], g.get('quote') or '', 'dismissed', session=session, path=p, from_hook=True, confirm=prompt,
+               candidates=[lb for lb in (g.get('candidates') or []) if lb in open_labels], earlier=g.get('earlier'),
+               reading='本人が印か並びで別に答えた')
+        dropped = (f'推定「{(g.get("quote") or "")[:60]}」 は、 本人が別に答えたので捨てた (その候補の問いは開いたまま)。 ')
+    answer(root, res['labels'], quote, res['binding'], session=session, candidates=res['candidates'], path=p,
+           from_hook=True, defer=res.get('defer', False), confirm=confirm, earlier=earlier)
+    if res['binding'] == 'dismissed':
+        return (f'board-asks: 本人の語「{quote[:60]}」 は答えでないと確かめた。 推定を捨て、 止めを解いた'
+                ' (問いは開いたまま、 答えとしては記録していない)。 本人の頼み (問い返し・聞き直し) に答える')
     if res['binding'] == 'guess':
         heads = '; '.join(f"{st[lb]['text'][:40]} ({lb})" for lb in res['candidates'][:6])
         extra = ' 返事の中に問いの段のほかにも番号つきの見出し・一覧がある。' if numbered_outside_blocks(w0) else ''
         return (f'🔒 board-asks: 本人の答えの結び先が決まらない (候補: {heads}).{extra}'
-                ' 送る・決定を記録する・別の session に頼む・session を起こす・畳む操作は止まる。'
-                ' 返事の 1 行目で、 候補を 1 つだけ問いの中身で名指し、 印は後ろに添えて「〈問いの中身〉 (H12) と読みました。よいですか」'
-                ' と確かめる (本人が「はい」 か中身か印で答えると解ける。 本人に印を打つよう頼まない)。 読む・調べる・下書きは止めない')
+                ' 送る・決定を記録する・別の session に頼む・session を起こす・畳む操作は止まる。 返事の 1 行目で、 '
+                + CONFIRM_HOW + SETTLE_HOW + ' 読む・調べる・下書きは止めない')
     heads = '; '.join(f"{st[lb]['text'][:40]} ({lb})" for lb in res['labels'])
     with contextlib.suppress(OSError):
         _bound_file(session).write_text(json.dumps(res['labels']))
     if res.get('defer'):
-        return (f'board-asks: 本人の答えは {heads} の先送り (問いは開いたまま)。'
+        return (f'board-asks: {dropped}本人の答えは {heads} の先送り (問いは開いたまま)。'
                 ' 返事の 1 行目に問いの中身を書き、 印は後ろに添える')
     how = {'label': '印で', 'order': '直前の返事の問いの並びで', 'confirmed': '確かめた読みで'}[res['binding']]
-    return (f'board-asks: 本人の答えを {heads} に結んだ ({how})。 返事の 1 行目に結んだ問いの中身を書き、 印は後ろに添える'
-            ' (例: 「〈問いの中身〉 (H12) への答えと読みました」)。'
-            ' 本人の裁定なら、 その問いの key の記録 (TODO の decided など) に本人の語のまま書く')
+    words = (f' 本人の答えの語 =「{quote[:200]}」 (確かめの語「{confirm[:60]}」 は答えでない)。' if res['binding'] == 'confirmed'
+             else '')
+    return (f'board-asks: {dropped}本人の答えを {heads} に結んだ ({how})。{words} 返事の 1 行目に結んだ問いの中身を書き、'
+            ' 印は後ろに添える (例: 「〈問いの中身〉 (H12) への答えと読みました」)。'
+            ' 本人の裁定なら、 その問いの key の記録 (TODO の decided など) に本人の答えの語のまま書く')
 
 
 def hook_pretool(root, data, path=None):
@@ -1214,8 +1347,7 @@ def hook_pretool(root, data, path=None):
         return None
     c = ', '.join(g.get('candidates') or [])
     return (f'🔒 board-asks: 本人の答え「{(g.get("quote") or "")[:60]}」 の結び先が決まっていない (候補 {c}) ので、 {eff} は止めた。'
-            ' 先に 1 行で、 候補を 1 つだけ問いの中身で名指し (印は後ろに添える)、 「〜と読みました。よいですか」 と本人に確かめる。'
-            ' 本人が「はい」 か中身か印で答えると解ける')
+            ' 先に返事の 1 行目で、 ' + CONFIRM_HOW + SETTLE_HOW)
 
 
 def _first_line(text):
@@ -1326,6 +1458,8 @@ def digest(root, session, max_chars=8000, path=None):
     for a in sorted(answered, key=lambda a: _last_settled(a).get('created_at', ''), reverse=True):
         ans = _last_settled(a)
         lines.append(f"✅ {a['text'][:200]} ({a['label']}) → 本人「{(ans.get('quote') or '')[:300]}」"
+                     + (f" (その前の本人の語「{' / '.join(e[:60] for e in ans['earlier'])}」)" if ans.get('earlier') else '')
+                     + (f" (確かめ「{ans['confirm'][:80]}」)" if ans.get('confirm') else '')
                      + (f" 読み: {ans['reading'][:150]}" if ans.get('reading') else ''))
     for a in opened:
         lines.append(f"❓ {a['text'][:200]} ({a['label']}) / おすすめ: {a.get('recommend', '')[:150]}")
@@ -1849,6 +1983,163 @@ def selftest():
                                      f'本人に印で答えるよう頼んでいた (「「{lb_} 送って」 と返して」、 「答えるときは番号でどうぞ」)。')):
                 write_tr(('x', txt))
                 check(stop12() == '', f'中身つきの印・やめる宣言・印の無い答え方・過去の報告は差し戻さない: {txt[:30]}')
+            # asking back is not answering; a pending guess settles in the ways its messages name (measured forms:
+            # a question about one option, a request to hear one again, confirmations "よいです！" "合ってる")
+            check(bind('２をもう一回聞かせて', o2, [], o2)['binding'] == 'none',
+                  '聞き直しの頼みは答えに数えない (問いの段 1 つの後でも 2 つ目の問いを閉じない)')
+            check(bind('３はどういう意味？', ['H1'], [], ['H1'], other_numbered_now=True)['binding'] == 'none',
+                  '選択肢の中身の問い返しは推定にしない')
+            check(bind('1 OK\n2 はどういう意味？', o2, [], o2)['labels'] == ['H1'], '問い返しの行だけを外し、 答えの行は読む')
+            check(bind('H2 はどういう意味？', o2, [], o2)['binding'] == 'label', '印の読みは問い返しの行でも今のまま')
+            for w in ('２をもう一度聞かせてもらえますか', '２はどういう意味ですか', '２は？笑', '２は？）'):
+                check(bind(w, o2, [], o2)['binding'] == 'none', f'問い返しの言い方の幅: {w}')
+            for w in ('合ってる', '合ってます', 'よいです！', 'はい、合ってる', 'そうです', 'その通り', 'それです', '合ってる、ありがとう',
+                      'その理解で合ってる', 'うん、それ', '問題ないです', 'なるほど\nはい', 'OK'):
+                check(is_confirm(w), f'確かめの語: {w!r}')
+            for w in ('大丈夫です', 'なるほど', 'それより先にメールを見て', '合ってる\n少し考えさせて', 'はい？'):
+                check(not is_confirm(w), f'確かめの語でない: {w!r}')
+            for w in ('そうですね\n少し考えさせて', 'そうだね', 'よい', 'いいね\nあとで'):
+                check(bind(w, ['H1'], [], ['H1'])['binding'] == 'none', f'確かめの語は問いへの答えの肯定には数えない: {w!r}')
+            gq = ask(None, [{'text': f'方式の選び方 (案 {i})', 'ground': 'choice'} for i in range(24)], session='g0', path=led)
+            gl = [x['label'] for x in gq]
+            gt = [x['text'] for x in gq]
+            gdeny = lambda s: hook_pretool(None, {'session_id': s, 'tool_name': 'SendMessage', 'tool_input': {}}, path=led)
+            gprompt = lambda s, words: hook_prompt(None, {'session_id': s, 'transcript_path': str(tr), 'prompt': words}, path=led)
+            last_answer = lambda s: [x for x in load(led) if x.get('type') == 'answer' and x.get('session') == s][-1]
+            write_tr(('x', f'### 1. 比べ\n\n{gt[0]} 〔問 {gl[0]}〕\n\n{gt[1]} 〔問 {gl[1]}〕'))
+            check(gprompt('g1', '２をもう一回聞かせて') is None and gdeny('g1') is None, '聞き直しの頼みは推定にせず、 何も止めない')
+            # a guess on a request to hear again (as before the fix): the confirming line reads it as not an answer
+            answer(None, [], '２をもう一回聞かせて', 'guess', session='g1', candidates=[gl[1]], path=led, from_hook=True)
+            write_tr(('x', f'### 1. 比べ\n\n{gt[0]} 〔問 {gl[0]}〕\n\n{gt[1]} 〔問 {gl[1]}〕'),
+                     ('２をもう一回聞かせて', f'{gt[1]} ({gl[1]}) への答えではない (聞き直しの頼み) と読みました。よいですか'))
+            m = gprompt('g1', '合ってる')
+            check(m and '答えでない' in m and gdeny('g1') is None and last_answer('g1')['binding'] == 'dismissed'
+                  and state(load(led))[gl[1]]['status'] == 'open',
+                  f'聞き直しの頼みの推定は、 答えでないと読んだ確かめに「合ってる」 で捨てる (問いは開いたまま) {m}')
+            # an ambiguous answer: confirmed, the guessed words are the answer and the confirmation is kept beside them
+            write_tr(('x', f'### 1. 比べ\n\n{gt[0]} 〔問 {gl[0]}〕\n\n{gt[1]} 〔問 {gl[1]}〕'))
+            check('🔒' in (gprompt('g2', '１はメールで') or ''), '見出しの番号と並ぶ問いの段への「１は…」 は推定')
+            write_tr(('x', f'### 1. 比べ\n\n{gt[0]} 〔問 {gl[0]}〕\n\n{gt[1]} 〔問 {gl[1]}〕'),
+                     ('１はメールで', f'{gt[0]} ({gl[0]}) への答えと読みました。よいですか'))
+            m = gprompt('g2', 'よいです！')
+            ga = _last_settled(state(load(led))[gl[0]])
+            check(m and '確かめた読み' in m and gdeny('g2') is None and ga.get('quote') == '１はメールで'
+                  and ga.get('confirm') == 'よいです！',
+                  f'推定を「よいです！」 で確かめると、 答えは元の語のまま、 確かめの語は別の欄に残る {ga}')
+            check('確かめ「よいです！」' in digest(None, 'g2', path=led), '開始・圧縮後の一覧に確かめの語も出す')
+            # the owner says the words were not an answer
+            answer(None, [], '上の', 'guess', session='g3', candidates=[gl[2], gl[3]], path=led, from_hook=True)
+            write_tr(('x', f'{gt[2]} ({gl[2]}) への答えと読みました。よいですか'))
+            check(gprompt('g3', 'いや、答えではない') and gdeny('g3') is None and last_answer('g3')['binding'] == 'dismissed',
+                  '本人が「答えではない」 と言えば推定を捨てる')
+            # an affirmation the confirming line does not tie to one candidate keeps the guess (and its words)
+            answer(None, [], '前者で', 'guess', session='g4', candidates=[gl[2], gl[3]], path=led, from_hook=True)
+            write_tr(('x', f'{gt[2]} 〔問 {gl[2]}〕\n\n{gt[3]} 〔問 {gl[3]}〕'),   # the blocks before: a bare はい is a new guess
+                     ('前者で', f'{gt[2]} ({gl[2]}) と {gt[3]} ({gl[3]}) のどちらへの答えか、 まだ読めていません。'))
+            m = gprompt('g4', 'はい')
+            check(m and 'まだ解けていない' in m and gdeny('g4') and last_answer('g4')['quote'] == '前者で',
+                  f'肯定だけでは前の推定を置き換えず、 まだ解けていないと伝える {m}')
+            check('まだ解けていない' in (gprompt('g4', 'それより先にメールを見て') or '') and gdeny('g4'),
+                  '確かめに答えていない発言の間も、 推定が残っていると伝える')
+            write_tr(('x', f'{gt[2]} ({gl[2]}) への答えと読みました。よいですか\n\n{gt[3]} ({gl[3]}) は後で聞きます。'))
+            gprompt('g4', 'はい')
+            check(gdeny('g4') is None and last_answer('g4').get('labels') == [gl[2]],
+                  '確かめの文が候補を 2 つ名指せば、 1 行目の名指しに結ぶ')
+            answer(None, [], '上の', 'guess', session='g9', candidates=[gl[3], gl[7]], path=led, from_hook=True)
+            write_tr(('x', f'{gt[3]} 〔問 {gl[3]}〕\n{gt[7]} 〔問 {gl[7]}〕\n\n{gt[7]} ({gl[7]}) で合っていますか'))   # no 「と読みました」
+            gprompt('g9', 'はい')
+            check(gdeny('g9') is None and last_answer('g9').get('labels') == [gl[7]],
+                  '問いの段を貼り直した返事でも、 確かめの行の名指しに結ぶ (段の行は読みでない)')
+            try:
+                answer(None, [], 'x', 'dismissed', session='g5', candidates=[gl[3]], path=led)
+                check(False, '推定を捨てる記録を手で書けない')
+            except ValueError:
+                pass
+            # every way the stop's message names settles a guess (the message is built from the same words)
+            answer(None, [], '上の', 'guess', session='g6', candidates=[gl[3]], path=led, from_hook=True)
+            dm = gdeny('g6') or ''
+            named_ways = set(re.findall(r'「([^「」〈]*)」', dm.split('は止めた。', 1)[-1]))
+            check(named_ways == set(SETTLE_AFFIRM + SETTLE_DISMISS) and '中身か印' not in dm,
+                  f'止めた理由の文が挙げる解き方は、 下で 1 つずつ試す語だけ {sorted(named_ways)}')
+            for i, w in enumerate(SETTLE_AFFIRM):
+                s, lb = f'g7{i}', gl[4 + i]
+                answer(None, [], '上の', 'guess', session=s, candidates=[lb, gl[3]], path=led, from_hook=True)
+                write_tr(('x', f'{gt[4 + i]} ({lb}) への答えと読みました。よいですか'))
+                gprompt(s, w)
+                check(gdeny(s) is None and last_answer(s).get('labels') == [lb], f'止めた理由の文が挙げる語で解ける: {w}')
+            for i, w in enumerate(SETTLE_DISMISS):
+                s = f'g8{i}'
+                answer(None, [], '上の', 'guess', session=s, candidates=[gl[3]], path=led, from_hook=True)
+                write_tr(('x', f'{gt[3]} ({gl[3]}) への答えと読みました。よいですか'))
+                gprompt(s, w)
+                check(gdeny(s) is None and last_answer(s)['binding'] == 'dismissed', f'止めた理由の文が挙げる語で推定を捨てる: {w}')
+            # the forms a review found (synthetic sentences): a candidate's label with the owner's own answer
+            answers_of = lambda s: [x for x in load(led) if x.get('type') == 'answer' and x.get('session') == s]
+            answer(None, [], '上の', 'guess', session='g10', candidates=[gl[8], gl[9]], path=led, from_hook=True)
+            write_tr(('x', f'{gt[8]} ({gl[8]}) への答えと読みました。よいですか'))
+            gprompt('g10', f'{gl[8]} は延ばさない')
+            a10 = answers_of('g10')
+            check(gdeny('g10') is None and a10[-1]['binding'] == 'label' and a10[-1]['quote'] == f'{gl[8]} は延ばさない'
+                  and a10[-2]['binding'] == 'dismissed', '推定の候補の印に本人の答えが続けば、 その語を答えにし、 推定は捨てる')
+            answer(None, [], '上の', 'guess', session='g11', candidates=[gl[10], gl[11]], path=led, from_hook=True)
+            m = gprompt('g11', f'{gl[10]} です')
+            check(gdeny('g11') is None and last_answer('g11')['binding'] == 'confirmed' and last_answer('g11')['quote'] == '上の'
+                  and '本人の答えの語 =「上の」' in (m or ''),
+                  '候補の印だけの確かめは、 推定の語を答えにし、 その語を agent に伝える')
+            answer(None, [], '上の', 'guess', session='g19', candidates=[gl[9], gl[12]], path=led, from_hook=True)
+            gprompt('g19', f'{gl[9]} のこと')
+            check(last_answer('g19')['binding'] == 'confirmed' and last_answer('g19')['quote'] == '上の',
+                  '「〈印〉 のこと」 はどれかを言い直すだけの確かめ')
+            # "not an answer" with an answer to another ask in the same words; and in a question it is not a dismissal
+            answer(None, [], '上の', 'guess', session='g12', candidates=[gl[12]], path=led, from_hook=True)
+            write_tr(('x', f'{gt[13]} 〔問 {gl[13]}〕'))
+            m = gprompt('g12', f'前のは答えじゃない。 {gl[13]} は延ばさない')
+            a12 = answers_of('g12')
+            check(a12[-1]['labels'] == [gl[13]] and a12[-2]['binding'] == 'dismissed' and '捨てた' in (m or ''),
+                  '「答えではない」 と別の問いの答えが並べば、 推定を捨て、 答えも記録する')
+            answer(None, [], '上の', 'guess', session='g13', candidates=[gl[14]], path=led, from_hook=True)
+            m = gprompt('g13', 'まだ答えてない問いはどれ？')
+            check('まだ解けていない' in (m or '') and gdeny('g13'), '「まだ答えてない問い」 では推定を捨てない')
+            m = gprompt('g13', 'どれが答えじゃないの？')
+            check('まだ解けていない' in (m or '') and gdeny('g13'), '問い返しの中の「答えじゃない」 では推定を捨てない')
+            gprompt('g13', '質問しただけ')
+            check(gdeny('g13') is None and last_answer('g13')['binding'] == 'dismissed', '「質問しただけ」 で推定を捨てる')
+            # an answer to another ask drops the guess on the record and says so
+            answer(None, [], '上の', 'guess', session='g14', candidates=[gl[15]], path=led, from_hook=True)
+            write_tr(('x', f'{gt[16]} 〔問 {gl[16]}〕'))
+            m = gprompt('g14', 'はい')
+            a14 = answers_of('g14')
+            check(a14[-1]['labels'] == [gl[16]] and a14[-2]['binding'] == 'dismissed' and '捨てた' in (m or ''),
+                  '推定の間に別の問いに答えれば、 推定を捨てたと記録して伝える')
+            # a new ambiguous answer replaces the guess and keeps the earlier words
+            answer(None, [], '上の', 'guess', session='g15', candidates=[gl[17], gl[18]], path=led, from_hook=True)
+            blocks = f'### 1. 比べ\n\n{gt[17]} 〔問 {gl[17]}〕\n\n{gt[18]} 〔問 {gl[18]}〕'
+            write_tr(('x', blocks))
+            gprompt('g15', '1 です')
+            check(last_answer('g15')['binding'] == 'guess' and last_answer('g15').get('earlier') == ['上の'],
+                  '推定の間の新しい推定は、 前の推定の語を残す')
+            write_tr(('x', blocks), ('1 です', f'{gt[17]} ({gl[17]}) への答えと読みました。よいですか'))
+            m = gprompt('g15', 'はい')
+            a15 = last_answer('g15')
+            check(a15['binding'] == 'confirmed' and a15['quote'] == '1 です' and a15.get('earlier') == ['上の']
+                  and 'その前の本人の語「上の」' in digest(None, 'g15', path=led),
+                  '確かめた答えに、 置き換えた推定の語も残り、 一覧に出る')
+            # a bare affirmation with no reading line does not confirm a single candidate
+            answer(None, [], '上の', 'guess', session='g16', candidates=[gl[19]], path=led, from_hook=True)
+            write_tr(('x', '別の件です。 これで進めます。'))
+            m = gprompt('g16', 'はい')
+            check(gdeny('g16') and '確かめの行' in (m or ''), '確かめの行が無い返事への「はい」 は、 候補が 1 つでも結ばない')
+            # the reading line is the one that says "…と読みました"; a status line naming another candidate is not it
+            answer(None, [], '上の', 'guess', session='g17', candidates=[gl[20], gl[21]], path=led, from_hook=True)
+            write_tr(('x', f'{gt[20]} ({gl[20]}) は後で聞きます。\n{gt[20]} ({gl[20]}) のメールを読みました。\n'
+                           f'{gt[21]} ({gl[21]}) への答えと読みました。よいですか'))
+            gprompt('g17', 'はい')
+            check(gdeny('g17') is None and last_answer('g17').get('labels') == [gl[21]],
+                  '候補を名指す状況の行が先にあっても、 「と読みました」 の行の名指しに結ぶ')
+            answer(None, [], '上の', 'guess', session='g18', candidates=[gl[22], gl[23]], path=led, from_hook=True)
+            write_tr(('x', f'{gt[22]} ({gl[22]}) への答えと読みました。\n{gt[23]} ({gl[23]}) への答えと読みました。'))
+            m = gprompt('g18', 'はい')
+            check(gdeny('g18') and 'まだ解けていない' in (m or ''), '読みの行が別々の候補を名指せば、 肯定では結ばない')
     finally:
         for k, v in saved.items():
             if v is None:

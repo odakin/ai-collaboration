@@ -778,16 +778,44 @@ python3 board_asks.py digest --root <board> --session S
   the requester's review, not asked of the owner one by one.
 - **Binding an answer**: the owner may answer by a label this session showed (upper case: `v3` is a version), or by
   position when the latest reply shows only the ask block and the reply before shows no open ask. A quantity ("2件",
-  "1つだけ") is not a position, and an affirmation binds only as a short answer on its own. Anything else (another
-  numbered list or numbered table row in the reply, open asks in two replies, a position outside the block, two
-  digits followed by more than an affirmation) is a `guess`: the answer is recorded with its candidates, and the
-  session's effective actions (sending, recording a decision, messaging, starting or closing another session, writing
-  the ledger or its markers) stop until the owner's next words settle it. While a guess is pending, only the binding
-  hook records the settling answer; a settling `answer` typed by the agent is refused. A guess whose candidates were
-  all answered or withdrawn elsewhere stops nothing. An answer that only defers ("H2 は後で") is recorded and leaves
-  the ask open. Reading, searching and drafting are not stopped. The first line of the reply names the question it
-  bound by its content, with the label after it ("<question> (H12) への答えと読みました"); a guess is confirmed the
-  same way.
+  "1つだけ") is not a position, and an affirmation binds only as a short answer on its own. A line that asks back or
+  asks to hear something again (it ends with "？" or "?", with 聞かせて・説明して・教えて・言い直して, or with ですか・
+  ますか・でしょうか・かな・っけ; a trailing 笑 or bracket allowed) is not read by number, position or affirmation, and a
+  line that mixes an answer and such a question binds nothing; a label written in it still binds (measured: a question
+  about one option and a request to hear one again were bound as answers, and after a reply with one ask block the
+  request closed the second ask). Anything else (another numbered list or numbered table row in the reply,
+  open asks in two replies, a position outside the block, two digits followed by more than an affirmation) is a
+  `guess`: the answer is recorded with its candidates, and the session's effective actions (sending, recording a
+  decision, messaging, starting or closing another session, writing the ledger or its markers) stop until the owner's
+  next words settle it. An answer that only defers ("H2 は後で") is recorded and leaves the ask open. Reading,
+  searching and drafting are not stopped. The first line of the reply names the question it bound by its content,
+  with the label after it ("<question> (H12) への答えと読みました").
+- **Settling a guess**: the reply's first line names one candidate by its content, the label after it, and says how
+  it read the words: "<question> (H12) への答えと読みました。よいですか", or, for words that were not an answer
+  (asking back, asking to hear again), "<question> (H12) への答えではない (<what was asked>) と読みました。よいですか".
+  The hook takes as the reading the line that says "…と読みました" and names a candidate (ask blocks shown again and
+  lines that only mention a candidate, "H5 は後で聞きます" or "H5 のメールを読みました", are not it; two reading lines
+  naming different candidates settle nothing; with no reading line, the first line that names a candidate stands in).
+  The owner's message that only confirms (はい・合ってる・よいです・その通り・それです・問題ないです and the like,
+  several in a row or on separate lines, fillers such as なるほど allowed; not 大丈夫, which also declines; these
+  confirmation words count only here, not as an answer to an ask) then binds the candidate the reading named
+  (`confirmed`; a single candidate binds only when a reading line exists), or drops the guess when the reading said
+  the words were not an answer (`dismissed`). The owner saying the words were not an answer (答えではない・答えじゃない・
+  質問しただけ・聞いただけ, outside a question) drops it too. A dropped guess records no answer and leaves its asks
+  open. A confirmed guess records the guessed words as the answer and keeps the confirmation beside them (`confirm`),
+  and the hook names the answer words to the agent, so the ledger, the digest and the decision record carry what the
+  owner answered, not "はい" (measured: a confirmation was recorded as the answer, and the real answer had to be added
+  later). The owner writing a candidate's label with nothing but a confirmation ("H12 です") confirms the same way;
+  a label with the owner's own answer ("H12 は延ばさない"), or an answer by label or order to any ask, is recorded as
+  that answer, and the guess is dropped on the record first and the agent told so (it no longer clears silently). A
+  new ambiguous answer replaces the guess and keeps the earlier words (`earlier`); a bare affirmation that no reading
+  ties to one candidate keeps the guess and its words. While a guess is pending, each of the owner's messages that
+  settles nothing tells the agent what is left and how it settles (measured: the agent learned of the stop only when
+  an action was refused, and the owner's confirmations "よいです！" "合ってる" stayed bound to nothing for several
+  turns). Only the binding hook records a settling or dropping answer; one typed by the agent is refused, and no CLI
+  settles a guess from words the agent copies. A guess whose candidates were all answered or withdrawn elsewhere stops
+  nothing. The messages name only the ways the code takes: they are built from the same words the selftest tries one
+  by one.
 - **Asking without a label is sent back once**: a paragraph of the reply that asks the owner and carries no ask label
   is sent back, even beside a labelled one. The addendum says the question is now in the ledger and pastes the tool's
   block (an addendum cannot remove the earlier unlabelled list from the screen). Not counted: drafts in code blocks,

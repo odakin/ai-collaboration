@@ -49,6 +49,12 @@ worker の起動はカードを押す 2 段のまま。 重ければ [DESIGN](bo
 [CONTRACT](board/CONTRACT.md#item-claims)、 採らなかった案は [DESIGN](board/DESIGN.md#item-claims)。
 別の機械への写しは無い = 掲示板の見直しの結論が出てから決める。
 
+## 現在地：本人への問いの台帳の推定の解き方
+
+`board/board_asks.py` は、 問い返し・聞き直しの頼みを答えに読まず、 推定を確かめの短い肯定で結ぶか「答えではない」 で捨てる
+([契約](board/CONTRACT.md#owner-asks) の Settling a guess)。 止めた理由の文が挙げる語は selftest が 1 つずつ試す。
+次 = 実際の推定が 1 往復で解けるかを、 掲示板の台帳の `confirmed`・`dismissed` の記録で見る。 解けない言い方が出たら語を足す。
+
 ## 現在地：Lindblad 観測量の検査
 
 再利用 API と合成 selftest を整備した。次の利用では、

@@ -1,5 +1,5 @@
 {
-  "_comment": "board_asks.py の Stop の網の直し (前の Stop からの文だけを読む・同じ段を 2 度差し戻さない・報告と別の窓への案内と答え方の案内を問いと読まない・差し戻しの続きの扱い・印の使い方の検査・方針の問いの関門) の selftest が、 直した箇所を 1 つずつ外した版でそれぞれ落ちるか",
+  "_comment": "board_asks.py の Stop の網の直し (前の Stop からの文だけを読む・同じ段を 2 度差し戻さない・報告と別の窓への案内と答え方の案内を問いと読まない・差し戻しの続きの扱い・印の使い方の検査・方針の問いの関門・推定の解き方 = 問い返しを答えに数えない・確かめの語・確かめた答えの記録・推定を捨てる道・推定が残る間の知らせ・確かめの行の選び方・別の答えで推定を捨てる記録・置き換えた推定の語) の selftest が、 直した箇所を 1 つずつ外した版でそれぞれ落ちるか",
   "target": "board_asks.py",
   "run": "env BOARD_ASKS_SELFTEST_VERBOSE=1 python3 {} --selftest",
   "fail_marker": "FAIL ",
@@ -259,6 +259,242 @@
       ],
       "expect_pass": [
         "受け取りから出したのでない問いは --not-from-review か、 どこから出たかの key で立つ"
+      ]
+    },
+    {
+      "name": "問い返し・聞き直しの頼みの行も、 番号・位置・肯定として読む (直す前)",
+      "pairs": [
+        [
+          "    t = '\\n'.join(ln for ln in t.strip().splitlines() if not QUERY_LINE.search(ln))   # asking back is not answering\n",
+          ""
+        ]
+      ],
+      "expect_fail": [
+        "聞き直しの頼みは答えに数えない",
+        "選択肢の中身の問い返しは推定にしない",
+        "聞き直しの頼みは推定にせず"
+      ],
+      "expect_pass": [
+        "印の読みは問い返しの行でも今のまま"
+      ]
+    },
+    {
+      "name": "確かめの語 (合ってる) を確かめに数えない",
+      "pairs": [
+        [
+          "r'合って(?:る|ます|います)|あって(?:る|ます|います)|",
+          "r'"
+        ]
+      ],
+      "expect_fail": [
+        "確かめの語: '合ってる'",
+        "止めた理由の文が挙げる語で解ける: 合ってる"
+      ],
+      "expect_pass": [
+        "確かめの語: 'よいです！'"
+      ]
+    },
+    {
+      "name": "確かめた推定の答えを、 確かめの語 (「はい」 など) で記録する (直す前)",
+      "pairs": [
+        [
+          "            quote, confirm = g.get('quote') or '', prompt   # the guessed words",
+          "            quote, confirm = prompt, ''   # the guessed words"
+        ]
+      ],
+      "expect_fail": [
+        "答えは元の語のまま、 確かめの語は別の欄に残る",
+        "開始・圧縮後の一覧に確かめの語も出す"
+      ]
+    },
+    {
+      "name": "本人の「答えではない」 で推定を捨てない",
+      "pairs": [
+        [
+          "    if NOT_ANSWER_OWNER.search(unquoted(first)) and not QUERY_LINE.search(first):\n",
+          "    if False:\n"
+        ]
+      ],
+      "expect_fail": [
+        "本人が「答えではない」 と言えば推定を捨てる",
+        "止めた理由の文が挙げる語で推定を捨てる: 答えではない"
+      ]
+    },
+    {
+      "name": "答えでないと読んだ確かめへの肯定を、 答えとして結ぶ",
+      "pairs": [
+        [
+          "        if NOT_ANSWER_READ.search(unquoted(line)):\n",
+          "        if False:\n"
+        ]
+      ],
+      "expect_fail": [
+        "聞き直しの頼みの推定は、 答えでないと読んだ確かめに「合ってる」 で捨てる"
+      ]
+    },
+    {
+      "name": "確かめの行 (「と読みました」) でなく、 返事全体の名指しを数える (直す前)",
+      "pairs": [
+        [
+          "    if reads:\n        return reads[0][0], list(dict.fromkeys(lb for _, nm in reads for lb in nm))\n",
+          "    if named:\n        return named[0][0], bare_labels(prose_only(w0), cands)\n"
+        ]
+      ],
+      "expect_fail": [
+        "確かめの文が候補を 2 つ名指せば、 1 行目の名指しに結ぶ",
+        "候補を名指す状況の行が先にあっても"
+      ]
+    },
+    {
+      "name": "名指しの決まらない肯定を、 新しい推定として記録する (元の語が消える)",
+      "pairs": [
+        [
+          "    return {'binding': 'none', 'labels': [], 'candidates': [], 'defer': False}, why, False\n",
+          "    return res, why, False\n"
+        ]
+      ],
+      "expect_fail": [
+        "肯定だけでは前の推定を置き換えず"
+      ]
+    },
+    {
+      "name": "推定が残る間、 確かめに答えていない発言では何も伝えない (直す前)",
+      "pairs": [
+        [
+          "        elif res['binding'] == 'none' and why:\n",
+          "        elif False:\n"
+        ]
+      ],
+      "expect_fail": [
+        "確かめに答えていない発言の間も、 推定が残っていると伝える"
+      ]
+    },
+    {
+      "name": "確かめの行を探すとき、 貼り直した問いの段の行も読みとして数える",
+      "pairs": [
+        [
+          "if ln.strip() and not BLOCK_RE.search(ln)]",
+          "if ln.strip()]"
+        ]
+      ],
+      "expect_fail": [
+        "問いの段を貼り直した返事でも、 確かめの行の名指しに結ぶ"
+      ]
+    },
+    {
+      "name": "候補の印に本人の答えが続いても、 推定の語を答えとして確かめにする",
+      "pairs": [
+        [
+          "        return res, '', True   # \"H34 は延ばさない\" is the owner's own answer: it replaces the guess\n",
+          "        return dict(res, binding='confirmed'), '', False\n"
+        ]
+      ],
+      "expect_fail": [
+        "推定の候補の印に本人の答えが続けば"
+      ],
+      "expect_pass": [
+        "候補の印だけの確かめは、 推定の語を答えにし"
+      ]
+    },
+    {
+      "name": "推定の間に別に答えたとき、 推定を捨てた記録を書かない (黙って解ける)",
+      "pairs": [
+        [
+          "    if drop:\n        answer(root, [], g.get('quote')",
+          "    if False:\n        answer(root, [], g.get('quote')"
+        ]
+      ],
+      "expect_fail": [
+        "推定の間に別の問いに答えれば、 推定を捨てたと記録して伝える",
+        "「答えではない」 と別の問いの答えが並べば"
+      ]
+    },
+    {
+      "name": "問い返しの中の「答えじゃない」 でも推定を捨てる",
+      "pairs": [
+        [
+          "    if NOT_ANSWER_OWNER.search(unquoted(first)) and not QUERY_LINE.search(first):\n",
+          "    if NOT_ANSWER_OWNER.search(unquoted(first)):\n"
+        ]
+      ],
+      "expect_fail": [
+        "問い返しの中の「答えじゃない」 では推定を捨てない"
+      ]
+    },
+    {
+      "name": "確かめの行が無くても、 候補が 1 つなら肯定で結ぶ (直す前)",
+      "pairs": [
+        [
+          "(not named and len(cands) == 1 and line)",
+          "(not named and len(cands) == 1)"
+        ]
+      ],
+      "expect_fail": [
+        "確かめの行が無い返事への「はい」 は、 候補が 1 つでも結ばない"
+      ]
+    },
+    {
+      "name": "推定の間の新しい推定で、 前の推定の語を残さない",
+      "pairs": [
+        [
+          "            return dict(res, earlier=(g.get('earlier') or []) + [g.get('quote') or '']), '', False\n",
+          "            return res, '', False\n"
+        ]
+      ],
+      "expect_fail": [
+        "推定の間の新しい推定は、 前の推定の語を残す",
+        "置き換えた推定の語も残り"
+      ]
+    },
+    {
+      "name": "「〜を読みました」 (報告) も確かめの行に数える",
+      "pairs": [
+        [
+          "READ_LINE = re.compile(r'と読(?:みました|んだ|んでいます)')",
+          "READ_LINE = re.compile(r'読(?:みました|んだ|んでいます)')"
+        ]
+      ],
+      "expect_fail": [
+        "候補を名指す状況の行が先にあっても"
+      ]
+    },
+    {
+      "name": "読みの行が 2 つあるとき、 先の行の名指しだけを数える",
+      "pairs": [
+        [
+          "list(dict.fromkeys(lb for _, nm in reads for lb in nm))",
+          "reads[0][1]"
+        ]
+      ],
+      "expect_fail": [
+        "読みの行が別々の候補を名指せば、 肯定では結ばない"
+      ]
+    },
+    {
+      "name": "確かめの語を問いへの答えの肯定にも数える (見直しで見つけた後退)",
+      "pairs": [
+        [
+          "    affirm = bool(AFFIRM_ONLY.match(first))\n",
+          "    affirm = bool(AFFIRM_ONLY.match(first)) or is_confirm(first)\n"
+        ]
+      ],
+      "expect_fail": [
+        "確かめの語は問いへの答えの肯定には数えない"
+      ]
+    },
+    {
+      "name": "候補の印に「のこと」「の方」 だけが続く確かめを、 本人自身の答えとして記録する",
+      "pairs": [
+        [
+          "        if LABEL_ONLY_REST.fullmatch(rest) or is_confirm(",
+          "        if is_confirm("
+        ]
+      ],
+      "expect_fail": [
+        "「〈印〉 のこと」 はどれかを言い直すだけの確かめ"
+      ],
+      "expect_pass": [
+        "推定の候補の印に本人の答えが続けば"
       ]
     }
   ]
