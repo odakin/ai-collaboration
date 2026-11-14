@@ -27,7 +27,8 @@ What it is:
 - An **answer** records the owner's words verbatim, the labels it was bound to and how: `label` (the owner wrote a
   label this session showed), `order` (a position in the only ask block of the latest reply), `confirmed` (the owner
   confirmed the reading the agent stated), or `guess` (no safe binding: candidates listed). A line that asks back or
-  asks to hear something again ("…？", "…聞かせて") is not read as an answer by number, position or affirmation. An
+  asks to hear something again ("…？", "…聞かせて") is not read as an answer by number, position or affirmation, and
+  a label written in it makes a guess with that ask as the candidate instead of binding (owner's ruling). An
   answer that only defers ("H2 は後で") is recorded and leaves the ask open. While a session's latest answer is a guess
   with an open candidate, the tool check stops effective actions (sending, recording a decision, messaging or starting
   another session, closing a session); only the owner's next words settle it (the CLI refuses a settling answer while
@@ -751,7 +752,7 @@ def is_confirm(text):
 
 
 # A line that asks back or asks to hear something again is not an answer: it is left out of the reading by number,
-# position and affirmation (a label written in it is still read). Measured: a question about one option ("3 は…？")
+# position and affirmation, and a label written in it makes a guess, not an answer. Measured: a question about one option ("3 は…？")
 # and a request to hear one again ("2 をもう一回聞かせて") were bound as answers, and after a reply with one ask
 # block such a request closed the second ask. A line that mixes an answer and a question ("1 OK、2 は？") binds nothing.
 QUERY_LINE = re.compile(r'(?:[?？]|(?:聞かせて|説明して|教えて|言い直して|聞き直(?:して|したい))'
@@ -817,11 +818,15 @@ def bind(text, shown_now, shown_prev, open_labels, other_numbered_now=False, kno
     t = unicodedata.normalize('NFKC', text or '')
     open_set = set(open_labels)
     knownset = set(known or []) | set(shown_now) | set(shown_prev)
-    named = []
-    for m in LABEL_RE.finditer(t):   # upper case only: "v3" is a version, not a label (measured)
-        lb = m.group(1) + str(int(m.group(2)))
-        if lb in open_set and lb in knownset and lb not in named:
-            named.append(lb)
+    named, asked = [], []
+    for line in t.splitlines():
+        # a label in a line that asks back ("H12 ってどういう意味？") does not bind: it may be a question about that
+        # ask or a rhetorical answer, so it becomes a guess with that ask as the candidate (owner's ruling)
+        into = asked if QUERY_LINE.search(line) else named
+        for m in LABEL_RE.finditer(line):   # upper case only: "v3" is a version, not a label (measured)
+            lb = m.group(1) + str(int(m.group(2)))
+            if lb in open_set and lb in knownset and lb not in into:
+                into.append(lb)
     first = t.strip().splitlines()[0] if t.strip() else ''
     if named:
         return {'binding': 'label', 'labels': named, 'candidates': [], 'defer': bool(DEFER_RE.search(first))}
@@ -835,6 +840,8 @@ def bind(text, shown_now, shown_prev, open_labels, other_numbered_now=False, kno
     positional = bool(POSITION_RE.match(first))
     affirm = bool(AFFIRM_ONLY.match(first))
     if not (nums or wants_all or positional or affirm):
+        if asked:
+            return {'binding': 'guess', 'labels': [], 'candidates': asked, 'defer': False}
         return {'binding': 'none', 'labels': [], 'candidates': [], 'defer': False}
     if not now and not prev:
         return {'binding': 'none', 'labels': [], 'candidates': [], 'defer': False}
@@ -1990,7 +1997,9 @@ def selftest():
             check(bind('３はどういう意味？', ['H1'], [], ['H1'], other_numbered_now=True)['binding'] == 'none',
                   '選択肢の中身の問い返しは推定にしない')
             check(bind('1 OK\n2 はどういう意味？', o2, [], o2)['labels'] == ['H1'], '問い返しの行だけを外し、 答えの行は読む')
-            check(bind('H2 はどういう意味？', o2, [], o2)['binding'] == 'label', '印の読みは問い返しの行でも今のまま')
+            check(bind('H2 はどういう意味？', o2, [], o2) == {'binding': 'guess', 'labels': [], 'candidates': ['H2'], 'defer': False},
+                  '問い返しの行の印は答えに結ばず、 その問いを候補にした推定にする')
+            check(bind('H2 OK\nH1 はどういう意味？', o2, [], o2)['labels'] == ['H2'], '答えの行の印は読み、 問い返しの行の印は数えない')
             for w in ('２をもう一度聞かせてもらえますか', '２はどういう意味ですか', '２は？笑', '２は？）'):
                 check(bind(w, o2, [], o2)['binding'] == 'none', f'問い返しの言い方の幅: {w}')
             for w in ('合ってる', '合ってます', 'よいです！', 'はい、合ってる', 'そうです', 'その通り', 'それです', '合ってる、ありがとう',
@@ -2090,6 +2099,16 @@ def selftest():
             gprompt('g19', f'{gl[9]} のこと')
             check(last_answer('g19')['binding'] == 'confirmed' and last_answer('g19')['quote'] == '上の',
                   '「〈印〉 のこと」 はどれかを言い直すだけの確かめ')
+            # a question naming an ask's label: a guess on that ask, dropped when the agent reads it as not an answer
+            write_tr(('x', f'{gt[22]} 〔問 {gl[22]}〕'))
+            m = gprompt('g20', f'{gl[22]} ってどういう意味？')
+            check('🔒' in (m or '') and gdeny('g20') and state(load(led))[gl[22]]['status'] == 'open',
+                  '問いの印を名指す問い返しは、 その問いを閉じずに推定にする')
+            write_tr(('x', f'{gt[22]} 〔問 {gl[22]}〕'),
+                     (f'{gl[22]} ってどういう意味？', f'{gt[22]} ({gl[22]}) への答えではない (意味の問い) と読みました。よいですか'))
+            gprompt('g20', 'はい')
+            check(gdeny('g20') is None and last_answer('g20')['binding'] == 'dismissed' and state(load(led))[gl[22]]['status'] == 'open',
+                  '問い返しの推定は、 答えでないと読んだ確かめへの「はい」 で捨てる')
             # "not an answer" with an answer to another ask in the same words; and in a question it is not a dismissal
             answer(None, [], '上の', 'guess', session='g12', candidates=[gl[12]], path=led, from_hook=True)
             write_tr(('x', f'{gt[13]} 〔問 {gl[13]}〕'))

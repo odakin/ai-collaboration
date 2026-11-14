@@ -781,9 +781,10 @@ python3 board_asks.py digest --root <board> --session S
   "1つだけ") is not a position, and an affirmation binds only as a short answer on its own. A line that asks back or
   asks to hear something again (it ends with "？" or "?", with 聞かせて・説明して・教えて・言い直して, or with ですか・
   ますか・でしょうか・かな・っけ; a trailing 笑 or bracket allowed) is not read by number, position or affirmation, and a
-  line that mixes an answer and such a question binds nothing; a label written in it still binds (measured: a question
-  about one option and a request to hear one again were bound as answers, and after a reply with one ask block the
-  request closed the second ask). Anything else (another numbered list or numbered table row in the reply,
+  line that mixes an answer and such a question binds nothing; a label written in such a line does not bind either: the
+  words become a guess with that ask as the candidate, settled below (owner's ruling: a question about an ask and a
+  rhetorical answer look alike) (measured: a question about one option and a request to hear one again were bound as
+  answers, and after a reply with one ask block the request closed the second ask). Anything else (another numbered list or numbered table row in the reply,
   open asks in two replies, a position outside the block, two digits followed by more than an affirmation) is a
   `guess`: the answer is recorded with its candidates, and the session's effective actions (sending, recording a
   decision, messaging, starting or closing another session, writing the ledger or its markers) stop until the owner's
