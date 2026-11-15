@@ -7,8 +7,8 @@ the moved names has to be on the list, not only the ones that were edited.  The 
 dir, so nothing has to be saved before the change and the comparison can be rerun later from the record.
 
 What it does: `git archive <rev>` of the given pathspecs into a temp dir, run each script there and in the working tree
-(each with its own root as cwd, stdout and stderr merged), replace the two roots by <root>, apply the masks, compare the
-text and the exit code.  Exit 0 only when every script has the same text and exit code and exited 0.
+(each with its own root as cwd, stdout and stderr merged), replace the two roots by <root> (each root's own path and its
+real path, the longer first), apply the masks, compare the text and the exit code.  Exit 0 only when every script has the same text and exit code and exited 0.
 
   --link NAME   a directory or file the scripts read that is not in the archive (a nested clone, data): symlinked into
                 the old side, so both sides read the same input
@@ -53,7 +53,9 @@ def run(script: str, root: Path, timeout: int):
 
 
 def normalize(text: str, root: Path, masks) -> str:
-    for form in {str(root), os.path.realpath(root)}:
+    # The longer form first: a temp dir under /var is really /private/var on macOS, so the short form is inside the
+    # long one, and replacing it first leaves "/private<root>" (set order decided it, so the selftest failed by chance).
+    for form in sorted({str(root), os.path.realpath(root)}, key=lambda f: (-len(f), f)):
         text = text.replace(form, "<root>")
     for m in masks:
         text = re.sub(m, "<masked>", text)
@@ -134,6 +136,17 @@ def selftest() -> int:
         check("an input outside the archive is shared with --link", one("reads.py", links=["input"]) == 0)
         check("a file left out of the archive fails without --link (foil)", one("reads.py") == 1)
         check("an extra --mask hides only what it names", one("stamp.py", masks=[r"run \d+"]) == 0 and one("stamp.py") == 1)
+
+        # The same shape as /var -> /private/var, built inside the temp dir so it is tested on every OS.
+        base = Path(os.path.realpath(tmp))
+        short = base / "link"
+        long = Path(f"{base}/m{short}")  # its path ends with the whole short path
+        long.mkdir(parents=True)
+        os.symlink(long, short)
+        root = short / "r"
+        root.mkdir()
+        check("a root whose real path contains it is replaced whole (the longer form first)",
+              normalize(f"{os.path.realpath(root)}/a\n{root}/b\n", root, []) == "<root>/a\n<root>/b\n")
     print("selftest:", "ALL PASS" if not failed else f"FAILED ({len(failed)})")
     return 0 if not failed else 1
 
