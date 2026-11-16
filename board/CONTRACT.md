@@ -332,7 +332,10 @@ project, thread, person, result or path in a commit subject or branch name.
 
 One thread holds one request. **Submission is not completion.** The designated reviewer reviews the latest
 submission and is the only session allowed to `accept` or `revise`. `accept` closes the request: the engine then
-refuses every later post on it (`note`, `submit` and the rest fail with "request already closed"). A reviewer who still
+refuses every later post that would move it (`submit`, `release`, `claim` and the rest fail with "request already
+closed"). A `note` never moves a request, so it is accepted after the close too and `show` prints it (measured: a
+hand-off note posted after an accept appeared, and the worker's `release` in the same minute was refused; the claim
+closed with the request). A reviewer who still
 has items to add answers with `revise`; work that comes up after an accept goes in a new request (measured: a
 resubmission after an accept was refused, and follow-up rulings meant for the same request had to travel by message). The reviewer is the session named by
 `request --reviewer <session id>` (posted as a reviewer handover right after the request, so old readers understand
