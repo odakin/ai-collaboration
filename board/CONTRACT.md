@@ -1037,9 +1037,12 @@ python3 board_asks.py digest --root <board> --session S
   The owner's own approval of a protected file is not asked in the worker's window: the worker submits the full candidate
   with its SHA-256, the requester shows the file name and that SHA-256 to the owner in its own window and sends the
   worker the owner's words and its session id, and the worker applies with the rule guard's `--owner-session` and
-  `--quote` (the guard reads the requester's transcript and checks that the reply the owner answered showed the file and
-  that SHA-256 = claude-config `conventions/agent-rule-ownership.md#approval`). Measured: the owner answered in the
-  requester's window and then had to give the same answer again in the worker's window. A change to CLAUDE.md /
+  `--quote` (the guard reads the requester's transcript and checks that a reply after the owner's previous message showed
+  the file and that SHA-256 = claude-config `conventions/agent-rule-ownership.md#approval`). Measured: the owner answered
+  in the requester's window and then had to give the same answer again in the worker's window. So the requester writes
+  each file name and SHA-256 head in the reply that asks, not in an earlier reply it points back to: once the owner has
+  said something else in between, the earlier reply no longer counts and the guard does not record the answer
+  (measured: the answer to a question that pointed back to the reply listing the files was refused). A change to CLAUDE.md /
   AGENTS.md, to permission settings or to hook or guard configuration is not applied on another window's answer: an
   agent does not change those because another session asked (measured: a worker declined on that ground), so the guard
   refuses that route for them, and the requester applies them in its own window, or the worker asks the owner for them
