@@ -80,7 +80,7 @@ CONFIG = 'board.json'
 GITCRYPT_MAGIC = b'\x00GITCRYPT'
 AUDIENCES = {'owner', 'collaborators'}
 ENCRYPTIONS = {'git-crypt', 'none'}
-FIELDS = {'board_format', 'name', 'audience', 'encryption', 'branch', 'sources', 'readable', 'labels', 'description', 'launch_effort_floor', 'launch_model_allow', 'policy_stage_check', 'accept_review_form'}
+FIELDS = {'board_format', 'name', 'audience', 'encryption', 'branch', 'sources', 'readable', 'labels', 'description', 'launch_effort_floor', 'launch_model_allow', 'policy_stage_check', 'accept_review_form', 'request_desk'}
 EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')   # a worker's reasoning effort, lowest first
 KEY_RE = re.compile(r'[a-z0-9][a-z0-9-]{1,63}')
 
@@ -166,6 +166,16 @@ def validate(cfg: dict) -> dict:
     arf = cfg.get('accept_review_form')
     if arf is not None and not (isinstance(arf, dict) and set(arf) <= {'rule'} and isinstance(arf.get('rule', ''), str)):
         problems.append('accept_review_form is {"rule": "<where the rule is written>"}')
+    desk = cfg.get('request_desk')
+    if desk is not None:
+        if not (isinstance(desk, dict) and set(desk) <= {'command', 'rule'} and isinstance(desk.get('command'), list)
+                and desk['command'] and all(isinstance(c, str) and c.strip() for c in desk['command'])
+                and isinstance(desk.get('rule', ''), str)):
+            problems.append('request_desk is {"command": ["<python script, relative to the board directory>", "<argument>", ...],'
+                            ' "rule": "<where the rule is written>"}')
+        elif cfg.get('audience') != 'owner':
+            # the engine runs the command on the requester's machine: a collaborators board's board.json is written by others
+            problems.append('request_desk is for owner boards (the engine runs its command on the requester\'s machine)')
     if problems:
         raise ValueError(f'{CONFIG}: ' + '; '.join(problems))
     return {'branch': 'main', 'labels': {}, **cfg}

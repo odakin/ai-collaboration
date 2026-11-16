@@ -3238,6 +3238,98 @@ class AcceptReviewForm(EffortFlag):
         self.assertIn('review-self: yes',(last.get('details') or '').splitlines())
 
 
+class RequestDesk(EffortFlag):
+    """A board whose board.json names a request desk (CONTRACT.md#request-desk) runs it before a request is built, also
+    when the engine is called directly: the desk gets the command line after `--`, the board directory and the mark that
+    keeps its own posts from running it again, and only the reviewer default and the separate-reviewer mark it returns
+    are applied. Without the field, with the off switch, or when the desk fails, the request is posted as before.
+    validate refuses a malformed field and the field on a collaborators board."""
+    test_order = test_three_surfaces = test_refusals_and_live_note = None   # EffortFlag's tests run once, in EffortFlag
+    DESK=('import json, os, sys\n'
+          'log = os.path.join(os.path.dirname(os.path.abspath(__file__)), "desk.log")\n'
+          'with open(log, "a") as f:\n'
+          '    f.write(json.dumps({"argv": sys.argv[1:], "root": os.environ.get("AGENT_BOARD_ROOT"),'
+          ' "off": os.environ.get("AGENT_BOARD_REQUEST_DESK")}) + "\\n")\n'
+          'if os.environ.get("DESK_FAIL"): sys.exit(1)\n'
+          'print("ℹ️ desk note", file=sys.stderr)\n'
+          'print(json.dumps({"env": {"AGENT_BOARD_DEFAULT_REVIEWER": "role-eproj-desk-reviewer",'
+          ' "AGENT_BOARD_REVIEWER_SEPARATE": "1", "AGENT_BOARD_LAUNCH_MODEL": "other"}}))\n')
+
+    def setUp(self):
+        super().setUp()
+        import os
+        self.desk=self.base/'desk.py'; self.desk.write_text(self.DESK); self.log=self.base/'desk.log'
+        self.saved_off=os.environ.pop(board.REQUEST_DESK_ENV,None)
+
+    def tearDown(self):
+        import os
+        os.environ.pop(board.REQUEST_DESK_ENV,None); os.environ.pop('DESK_FAIL',None)
+        if self.saved_off is not None: os.environ[board.REQUEST_DESK_ENV]=self.saved_off
+        super().tearDown()
+
+    def turn_on(self):
+        cfg=json.loads((self.root/'board.json').read_text())
+        cfg['request_desk']={'command':['../desk.py','board-desk'],'rule':'owner-notes/review.md#desk'}
+        (self.root/'board.json').write_text(json.dumps(cfg))
+        board.run(self.root,'commit','-q','-am','Name the request desk'); board.run(self.root,'push','-q','origin','main')
+
+    def post(self, thread, *extra, ok=True):
+        p=self.cli('request',*self.post_args(),'--thread',thread,'--to','codex','--to-session','codex-w-9',*extra,ok=ok)
+        with board.snapshot(self.root,fresh=True) as snap: evs=board.read(snap)
+        rid=self.rid(p.stdout)
+        return p,next(e for e in evs if e['event_id']==rid),[e for e in evs if e['kind']=='handover' and e.get('request_id')==rid]
+
+    def calls(self):
+        return [json.loads(l) for l in self.log.read_text().splitlines()] if self.log.exists() else []
+
+    def test_off_by_default(self):
+        _,req,hand=self.post('2026-01-01-desk-a')
+        self.assertEqual(self.calls(),[]); self.assertEqual(hand,[])
+        self.assertNotIn(board.SEPARATE_REVIEWER_LINE,req.get('details') or '')
+
+    def test_on_applies_only_the_reviewer_keys(self):
+        self.turn_on()
+        p,req,hand=self.post('2026-01-01-desk-b')
+        (c,)=self.calls()
+        self.assertEqual(c['argv'][:3],['board-desk','--','request'])        # the request's own command line after `--`
+        self.assertIn('--thread',c['argv']); self.assertEqual(c['off'],'0')    # its own posts do not run it again
+        self.assertEqual(Path(c['root']),self.root.resolve())
+        self.assertIn('desk note',p.stderr)                                    # the desk's lines reach the requester
+        self.assertEqual([h['target']['session_id'] for h in hand],['role-eproj-desk-reviewer'])
+        self.assertIn(board.SEPARATE_REVIEWER_LINE,(req.get('details') or '').splitlines())
+        self.assertEqual(board.DESK_ENV_KEYS,(board.DEFAULT_REVIEWER_ENV,board.SEPARATE_REVIEWER_ENV))
+
+    def test_explicit_reviewer_wins(self):
+        self.turn_on()
+        _,_,hand=self.post('2026-01-01-desk-c','--reviewer','role-eproj-named')
+        self.assertEqual([h['target']['session_id'] for h in hand],['role-eproj-named'])
+
+    def test_off_switch_and_failure_post_as_before(self):
+        import os
+        self.turn_on()
+        os.environ[board.REQUEST_DESK_ENV]='0'
+        _,req,hand=self.post('2026-01-01-desk-d')
+        self.assertEqual(self.calls(),[]); self.assertEqual(hand,[])
+        os.environ.pop(board.REQUEST_DESK_ENV); os.environ['DESK_FAIL']='1'
+        p,req,hand=self.post('2026-01-01-desk-e')
+        self.assertEqual(len(self.calls()),1); self.assertEqual(hand,[])
+        self.assertIn('request_desk を回せなかった',p.stderr)
+        self.assertNotIn(board.SEPARATE_REVIEWER_LINE,req.get('details') or '')
+        os.environ.pop('DESK_FAIL'); self.desk.unlink()
+        p,_,hand=self.post('2026-01-01-desk-f')
+        self.assertIn('request_desk の script が無い',p.stderr); self.assertEqual(hand,[])
+
+    def test_validate(self):
+        import board_config as bc
+        base={'board_format':1,'audience':'owner','encryption':'git-crypt'}
+        good={'command':['../x/desk.py','board-desk'],'rule':'x.md#y'}
+        self.assertEqual(bc.validate({**base,'request_desk':good})['request_desk'],good)
+        for bad in ({'command':[]},{'command':'desk.py'},{'command':['']},{'command':['d.py'],'other':1},{'command':['d.py'],'rule':2},'on'):
+            with self.assertRaisesRegex(ValueError,'request_desk'): bc.validate({**base,'request_desk':bad})
+        collab={'board_format':1,'audience':'collaborators','encryption':'none','sources':['eproj']}
+        with self.assertRaisesRegex(ValueError,'request_desk is for owner boards'): bc.validate({**collab,'request_desk':good})
+
+
 class EditApprovalUnit(unittest.TestCase):
     """approve-edit (CONTRACT.md#edit-approval) judged on its own: a full approval writes the fields the rule guard
     checks (the base version and the candidate's SHA-256 computed here) and the look-back's before → after for a change

@@ -30,6 +30,7 @@ GIT_TIMEOUT=int(os.environ.get('AGENT_BOARD_GIT_TIMEOUT','120'))  # seconds per 
 NOTIFY_POLL_S=2     # watch: how often the local last-push note is looked at between remote checks
 DEFAULT_REVIEWER_ENV='AGENT_BOARD_DEFAULT_REVIEWER'   # request: reviewer session id when --reviewer is absent; <project> expands
 SEPARATE_REVIEWER_ENV='AGENT_BOARD_REVIEWER_SEPARATE'  # request: `1` = the requesting window may not accept it (owner wiring for a window that has a separate reviewer); CONTRACT.md#separate-reviewer
+REQUEST_DESK_ENV='AGENT_BOARD_REQUEST_DESK'      # request: `0` = do not run the board's request desk (board.json request_desk); set for the desk's own posts; CONTRACT.md#request-desk
 SEPARATE_REVIEWER_LINE='review-separate: yes'          # written into such a request's details; accept reads it there, not in its own environment
 LAUNCH_CONFIG_DIR_ENV='AGENT_BOARD_LAUNCH_CONFIG_DIR'  # request to a role: the CLI config dir the worker runs under (a logged-in account); owner wiring
 LAUNCH_MODEL_ENV='AGENT_BOARD_LAUNCH_MODEL'            # request to a role: default --model (else --expect-model, else the requester's own model)
@@ -2368,6 +2369,43 @@ def launch(argv, env, cwd=None):
     return (p.stdout or '').strip()
 
 
+DESK_ENV_KEYS=(DEFAULT_REVIEWER_ENV,SEPARATE_REVIEWER_ENV)   # the only variables a request desk may set
+
+
+def run_request_desk(a, cfg, argv=None):
+    """An owner board's request desk (board.json `request_desk`, CONTRACT.md#request-desk): a Python script the board's
+    owner names, run before a request is built, that may set the request's default reviewer and the separate-reviewer
+    mark (DESK_ENV_KEYS, read from the last stdout line `{"env": {...}}`). It runs whether the requester called a
+    forwarder or this engine directly: measured, a requester that called the engine directly skipped a forwarder's
+    desk, and the requesting window stayed the reviewer of its request. Owner boards only (a collaborators board's
+    board.json is written by others; validate refuses the field there). The desk gets the request's command line after
+    `--`, the board directory in AGENT_BOARD_ROOT and REQUEST_DESK_ENV=0 (a desk that posts requests of its own does
+    not run itself again). Fail-open: no script, a failure or unreadable output leaves the request as before, with one
+    line on stderr. Returns the variables it set."""
+    spec=cfg.get('request_desk')
+    if not spec or cfg.get('audience')!='owner' or os.environ.get(REQUEST_DESK_ENV,'').strip()=='0': return {}
+    cmd=list(spec.get('command') or [])
+    root=Path(a.root).resolve()
+    script=root/cmd[0]
+    if not script.is_file():
+        print(f'ℹ️ {bc.CONFIG} の request_desk の script が無い ({script}) = この依頼に desk の既定 (検収役) を当てていない',file=sys.stderr)
+        return {}
+    env=dict(os.environ,**{REQUEST_DESK_ENV:'0','AGENT_BOARD_ROOT':str(root)})
+    try:
+        p=subprocess.run([sys.executable,str(script),*cmd[1:],'--',*(sys.argv[1:] if argv is None else argv)],
+                         stdout=subprocess.PIPE,text=True,timeout=240,env=env)
+        lines=(p.stdout or '').strip().splitlines()
+        if p.returncode or not lines: raise ValueError(f'exit {p.returncode}, {len(lines)} stdout lines')
+        got=json.loads(lines[-1]).get('env')
+        if not isinstance(got,dict): raise ValueError('env is not an object')
+    except Exception as exc:
+        print(f'ℹ️ {bc.CONFIG} の request_desk を回せなかった ({type(exc).__name__}) = この依頼に desk の既定 (検収役) を当てていない',file=sys.stderr)
+        return {}
+    got={k:str(v) for k,v in got.items() if k in DESK_ENV_KEYS}
+    os.environ.update(got)
+    return got
+
+
 def reviewer_for(a, cfg):
     """The reviewer session id of a request: --reviewer, else the environment default (owner boards, ordinary
     posts; `<project>` expands to the project key), else None (the requester stays the reviewer)."""
@@ -2808,6 +2846,7 @@ def main():
     if a.command=='request' and a.to=='claude' and (a.to_session or '').startswith('role-'):
         check_effort_floor(cfg,launch_effort(a.effort),a.effort_quote)   # before the board is fetched or anything is written
         check_model_allow(cfg,launch_settings(a.expect_model,a.session,a.effort)[0],a.model_quote,a.agent,a.session)
+    if a.command=='request': run_request_desk(a,cfg)   # after the refusals above: a refused request raises nothing
     if cfg['audience']=='collaborators':
         # A board for one project's collaborators: its project and checkout are the defaults, and the only choice.
         if not a.policy: a.policy='ordinary'

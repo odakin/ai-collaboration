@@ -582,6 +582,21 @@ window's environment, so it holds for a window that lost the wiring. Measured: a
 while its reviewer was not raised, under a default that told the requester to receive; the warning on such an accept
 never fired (the session-name check above).
 
+### <a id="request-desk"></a>The board's request desk (owner boards)
+
+An owner board may name a desk in its `board.json`: `"request_desk": {"command": ["<python script, relative to the
+board directory>", "<argument>", ...], "rule": "<where the rule is written>"}`. Before a `request` is built (after the
+effort and model refusals, so a refused request runs nothing), the engine runs the script with the request's own
+command line after `--`, the board directory in `AGENT_BOARD_ROOT` and `AGENT_BOARD_REQUEST_DESK=0` (so a desk that
+posts requests of its own does not run itself again). The desk's last stdout line is `{"env": {...}}`; the engine
+applies only `AGENT_BOARD_DEFAULT_REVIEWER` and `AGENT_BOARD_REVIEWER_SEPARATE` from it (an explicit `--reviewer` still
+wins), and the desk's stderr reaches the requester. A missing script, a non-zero exit or unreadable output leaves the
+request as it would be without the desk, with one line. `AGENT_BOARD_REQUEST_DESK=0` in the requester's environment
+skips the desk. The engine refuses the field on a collaborators board: the command would run on the requester's
+machine, and that board's `board.json` is written by others. This is where an owner's per-window reviewer wiring
+belongs rather than in a forwarder in front of the engine: measured, a requester that called the engine directly
+skipped the forwarder's desk, and the requesting window stayed the reviewer of its own request.
+
 ### <a id="edit-approval"></a>The reviewer's approval of a protected edit (approve-edit)
 
 Where the board's owner has delegated approvals of protected files (rule documents, hooks, tools and settings that the
