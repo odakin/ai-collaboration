@@ -17,6 +17,7 @@ import sys
 import tempfile
 import time
 from board_workflow import KINDS, COARSE, LABELS, reduce_workflow, same_session, is_role, address_label
+from board_workflow import timestamp as wf_timestamp
 import board_config as bc
 import board_transport as bt
 
@@ -1376,8 +1377,64 @@ def cmd_edit_approvals(a):
             print(f"    前「{r['before']}」 → 後「{r['after']}」 (検収係の理由: {r['relax_why']})")
 
 
+NEWER_KINDS=('note','submit','blocker','update')   # what the review side must have read before it takes a submission
+
+
+def newer_since_submission(events, req, sub_id, poster):
+    """Posts in the request's thread written after the submission `sub_id` by someone other than `poster`
+    (note・submit・blocker・update), oldest first. Engine marks (a pickup or start note, a touch) are left out.
+    CONTRACT.md#accept-ack-newer: measured, a review desk's note withdrawing its go-ahead was already on the board when
+    the requester accepted, and the requester read the thread through a filter that dropped the line above."""
+    sub=next((e for e in events if e.get('event_id')==sub_id),None)
+    if sub is None: return []
+    t=wf_timestamp(sub['created_at']); key=(req['project']['key'],req['thread_id'])
+    out=[]
+    for e in events:
+        if e.get('event_id')==sub_id or e.get('kind') not in NEWER_KINDS: continue
+        if ((e.get('project') or {}).get('key'),e.get('thread_id'))!=key: continue
+        if same_session(_actor(e),poster): continue
+        if e.get('touches') or (isinstance(e.get('summary'),str) and e['summary'].startswith(view.TOOL_NOTE_PREFIXES)): continue
+        try:
+            if wf_timestamp(e['created_at'])<=t: continue
+        except (KeyError, ValueError, TypeError):
+            continue
+        out.append(e)
+    return sorted(out,key=lambda e:e['created_at'])
+
+
+def ack_newer_lines(a, events, req):
+    """accept / revise: refuse unless --ack-newer names exactly the posts written after the submission by someone else
+    (the same check send_mail.py --ack-newer makes for a thread). Returns the lines kept in the event's details: each
+    acknowledged post's id, kind, author and summary, so the record says what the reviewer had read."""
+    poster={'agent':a.agent,'session_id':a.session}
+    newer=newer_since_submission(events,req,a.reply_to,poster)
+    want=[e['event_id'] for e in newer]
+    given=list(dict.fromkeys(getattr(a,'ack_newer',None) or []))
+    if set(given)!=set(want):
+        missing=[e for e in newer if e['event_id'] not in given]
+        extra=[g for g in given if g not in want]
+        lines=[f"{a.command} refused: the thread has posts written after the submission {a.reply_to} by someone else."
+               " Read each (show --request "+a.request+"), then name every one with --ack-newer <event id>"
+               " (repeatable) and post again."]
+        for e in missing:
+            who=address_label(_actor(e))
+            lines.append(f"  not named: {e['event_id']} ({e['kind']}, {who}): {str(e.get('summary') or '')[:300]}")
+        for g in extra:
+            lines.append(f"  named but not a post after the submission by someone else: {g}")
+        if not want:
+            lines=[f"{a.command} refused: --ack-newer names {', '.join(extra)}, but no one else posted after the submission"
+                   f" {a.reply_to}; leave --ack-newer off"]
+        raise ValueError('\n'.join(lines))
+    out=[]
+    for e in newer:
+        who=(e.get('actor') or {}).get('session_id') or '?'
+        out.append(f"ack-newer: {e['event_id']} ({e['kind']}, {who}): {str(e.get('summary') or '')[:160]}")
+    return out
+
+
 def event_from(a, events):
     restricted=a.policy=='encrypted-metadata-only'
+    ack_lines=[]
     if a.command=='request' or (a.command=='note' and not a.request):
         if not restricted and a.project != a.source.resolve().name.replace('_', '-'): raise ValueError('project must equal source checkout basename (underscores written as hyphens)')
         if restricted and not a.thread:
@@ -1399,6 +1456,7 @@ def event_from(a, events):
             subs=[e for e in events if e.get('request_id')==a.request and e['kind']=='submit']
             latest=max(subs,key=lambda e:e['created_at'])['event_id'] if subs else None
             raise ValueError(f'{a.command} needs --reply-to <the submission you checked>'+(f': the latest submission is {latest}' if latest else ': no submission yet'))
+        ack_lines=ack_newer_lines(a,events,req) if a.command in ('accept','revise') else []
         if a.command in ('submit','release') and not a.reply_to:
             # Same for the worker side (measured: "$: missing reply_to" alone, then the request id was tried and refused).
             claims=[e for e in events if e.get('request_id')==a.request and e['kind']=='claim']
@@ -1449,6 +1507,8 @@ def event_from(a, events):
                 ev['details']='\n'.join(x for x in (ev.get('details'),policy_stage_details(a)) if x)
             if separate_reviewer():
                 ev['details']='\n'.join(x for x in (ev.get('details'),SEPARATE_REVIEWER_LINE) if x)
+    if kind in ('accept','revise') and ack_lines:
+        ev['details']='\n'.join(x for x in (ev.get('details'),*ack_lines) if x)[:4000]   # schema maxLength
     if kind=='handover':
         if not a.to or not a.to_session or not a.role: raise ValueError('handover needs --to, --to-session, --role')
         ev.update(target={'agent':a.to,'session_id':a.to_session},handover_role=a.role)
@@ -2622,6 +2682,9 @@ def main():
     ap.add_argument('--owner-ruling',action='append',default=[],help="accept (review form): a question that needs the owner's own ruling: '<ground>: <問い>' with a ground from the owner-asks GROUNDS (repeatable)")
     ap.add_argument('--no-questions',action='store_true',help='accept (review form): the submission left no question to the requester')
     ap.add_argument('--leftover',action='append',default=[],help="accept (review form): a follow-up of the submission's out-of-scope rest: 'in <where the confirmed policy is>: <rest>' or 'out: <rest>' (repeatable)")
+    ap.add_argument('--ack-newer',action='append',default=[],help='accept / revise: an event id written after the submission'
+                    ' by someone else (a note, update, blocker or submit) that you read before taking the submission; name every'
+                    ' one (repeatable), or the post is refused with the list (CONTRACT.md#accept-ack-newer)')
     ap.add_argument('--self-review',help="accept: the requesting window accepts a request marked for a separate reviewer"
                     " (CONTRACT.md#separate-reviewer): why the reviewer's window cannot take it, and the reviewer window started again")
     ap.add_argument('--spec-local',help='request / launch to a role: the spec file on the requester\'s side, named only in the'
@@ -2953,7 +3016,7 @@ def main():
                 ev['details']=edit_approval_details(a,events,cfg,ev)
                 ev['reply_to']=ev.get('reply_to') or re.search(r'^submit: (\S+)$',ev['details'],re.M).group(1)
             if ev['kind']=='accept' and a.policy=='ordinary' and cfg.get('accept_review_form'):
-                ev['details']=review_form(a,events,cfg,ev)
+                ev['details']='\n'.join(x for x in (review_form(a,events,cfg,ev),ev.get('details')) if x)[:4000]
             elif ev['kind']=='accept' and a.policy=='ordinary':
                 selfl=self_review_line(a,events)   # the separate-reviewer refusal holds on a board without the form too
                 if selfl: ev['details']='\n'.join(x for x in (ev.get('details'),selfl) if x)

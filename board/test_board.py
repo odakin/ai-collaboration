@@ -703,6 +703,44 @@ class Note(unittest.TestCase):
         self.assertIn(f"the latest submission is {sub['event_id']}",str(cm.exception))
         a.reply_to=sub['event_id']
         self.assertEqual(board.event_from(a,[r,c,sub])['reply_to'],sub['event_id'])
+    def _review_args(self, kind, r, sub, ack=()):
+        import argparse
+        return argparse.Namespace(command=kind,policy='ordinary',source=Path('/nonexistent/example'),project=None,thread=None,
+            repo=None,request=r['event_id'],summary='checked',acceptance=None,agent='claude',session='claude-session-001',
+            session_name=None,instance=None,event_id=None,reply_to=sub['event_id'],lease_hours=12,
+            reference=['results/independent-review.md'],deliverable=[],to=None,to_session=None,role=None,ack_newer=list(ack))
+    def test_accept_names_every_post_written_after_the_submission(self):
+        # CONTRACT.md#accept-ack-newer. Measured: a review desk's note withdrawing its go-ahead was already on the board
+        # when the requester accepted; the requester read the thread through a filter that dropped it.
+        r,c,sub=chain()
+        before=event('note',1,agent='other'); before['actor']['session_id']='other-session-009'; before['summary']='Before the submission.'
+        desk=event('note',3,agent='other'); desk['actor']['session_id']='other-session-009'; desk['summary']='Withdraw the go-ahead: line 3 is wrong.'
+        mine=event('note',4,agent='claude'); mine['summary']="The reviewer's own note."
+        pick=event('note',5,agent='other'); pick['actor']['session_id']='other-session-009'; pick['summary']='引き受けた: 検収する'
+        touch=event('note',6,agent='codex'); touch['summary']='触る: example/x.py'; touch['touches']=['example/x.py']
+        worker=event('update',7,agent='codex'); worker['summary']='Correction: the second file is results/b.md.'
+        evs=[r,before,c,sub,desk,mine,pick,touch,worker]
+        for kind in ('accept','revise'):
+            with self.assertRaises(ValueError) as cm: board.event_from(self._review_args(kind,r,sub),evs)
+            msg=str(cm.exception)
+            self.assertIn(desk['event_id'],msg); self.assertIn('Withdraw the go-ahead',msg); self.assertIn(worker['event_id'],msg)
+            for e in (before,mine,pick,touch): self.assertNotIn(e['event_id'],msg)
+            with self.assertRaises(ValueError) as cm2: board.event_from(self._review_args(kind,r,sub,[desk['event_id']]),evs)
+            self.assertIn(worker['event_id'],str(cm2.exception)); self.assertNotIn('not named: '+desk['event_id'],str(cm2.exception))
+            ev=board.event_from(self._review_args(kind,r,sub,[desk['event_id'],worker['event_id']]),evs)
+            self.assertIn(f"ack-newer: {desk['event_id']} (note, other-session-009): Withdraw the go-ahead",ev['details'])
+            self.assertIn(f"ack-newer: {worker['event_id']} (update, codex-session-001)",ev['details'])
+            self.assertEqual(errors(ev,SCHEMA),[])
+        with self.assertRaises(ValueError) as cm3:
+            board.event_from(self._review_args('accept',r,sub,[desk['event_id'],worker['event_id'],before['event_id']]),evs)
+        self.assertIn('named but not a post after the submission by someone else: '+before['event_id'],str(cm3.exception))
+    def test_accept_with_no_newer_post_needs_no_ack(self):
+        r,c,sub=chain()
+        mine=event('note',3,agent='claude'); mine['summary']="The reviewer's own note."
+        ev=board.event_from(self._review_args('accept',r,sub),[r,c,sub,mine])
+        self.assertNotIn('ack-newer',ev.get('details') or '')
+        with self.assertRaises(ValueError) as cm: board.event_from(self._review_args('accept',r,sub,['20990101T000000Z-x-000001']),[r,c,sub])
+        self.assertIn('leave --ack-newer off',str(cm.exception))
     def test_submit_without_reply_to_names_the_current_claim(self):
         # The worker side of the test above: a bare "$: missing reply_to", then the request id was tried and refused (measured).
         import argparse

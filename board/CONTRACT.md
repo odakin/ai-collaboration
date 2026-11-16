@@ -516,6 +516,18 @@ detector and its selftest = [`board_acceptance.py`](board_acceptance.py) (a text
 `python3 board_acceptance.py --check '<acceptance>'`). Only `--acceptance` is read: a summary that discusses page
 counts is not flagged.
 
+### <a id="accept-ack-newer"></a>Posts written after the submission (accept / revise)
+
+`accept` and `revise` list the posts in the request's thread written after the submission named by `--reply-to` by
+someone other than the reviewing session (`note`, `update`, `blocker`, `submit`; the engine's own marks = a start or
+pickup note and a touch are left out). When there are any, the post is refused with each one's id, kind, author and
+summary until `--ack-newer <event id>` names every one of them (repeatable); naming a post that is not one of them is
+refused too. The acknowledged posts are kept as `ack-newer:` lines in the event's `details`, so the record says what
+the reviewer had read. The same check guards a mail reply (`send_mail.py --ack-newer`). Measured: a review desk's
+note withdrawing its go-ahead was already on the board when the requester accepted, because the requester
+read the thread through a filter that dropped the line above the submission; the request could not be reopened and
+was posted again. The engine lists the posts at the moment of receipt, so how the thread was read does not matter.
+
 ### <a id="accept-review-form"></a>The review form of an acceptance
 
 A board whose `board.json` sets `accept_review_form` (`{"rule": "<where the rule is written>"}`) refuses an ordinary
@@ -764,7 +776,7 @@ answered questions into a one-line "done" (measured).
 ```sh
 python3 board_asks.py ask    --root <board> --about '<what it is about>' [--effect '<what changes>'] --text '<question>' --recommend '<answer>' --ground <why the owner> [--prior-term <word>... --prior '<earlier decisions, amounts, promises and where>'] [--key todo:<repo>:<id>] [--evidence <repo>@<rev>:<path>] [--reword '<what changed>']
 python3 board_asks.py answer --root <board> --label H12 --quote '<owner words>' --binding label|order|confirmed|guess [--reading '<one line>']
-python3 board_asks.py list   --root <board> [--open] [--session S]
+python3 board_asks.py list   --root <board> [--open] [--session S] [--label H12 ...] [--block]
 python3 board_asks.py digest --root <board> --session S
 ```
 
@@ -886,6 +898,14 @@ python3 board_asks.py digest --root <board> --session S
   without the content of their questions ("H3・H12・H13 は…"), or puts a label at the head of a line is sent back with
   a request to restate only those sentences by content. Quotes are cited, not used, and are not counted (one form is
   still read as used: forms listed in parentheses after a past-tense report, measured).
+- **An approval ask re-listed without its file names and heads is sent back once**: when a reply names an open ask
+  of ground `rule` or `protected` (bare, in a block, or in a range such as `H91〜H93`) whose text carries a candidate's
+  SHA-256 head (8+ hex characters with a letter), the reply must also show each file name and each head (8
+  characters) the ask's text carries. The rule guard records the owner's answer as an approval only when the reply
+  just before it shows them ([agent-rule-ownership.md#approval](../../claude-config/conventions/agent-rule-ownership.md#approval)),
+  and a reply that re-listed waiting approval asks in one summary line left the owner's answers unrecordable
+  (measured). `list --block` (with `--label` to pick asks) prints the asks as the owner reads them, whole; the
+  addendum pastes that block. Plain `list` prints an approval ask's text whole too.
 - **What the Stop check reads**: only the text written since the previous Stop (the desktop app writes a
   `stop_hook_summary` record after every Stop's hooks; without one, the text since the owner's last words), and a
   paragraph or sentence sent back once is never sent back again (its key is kept per session). The first version

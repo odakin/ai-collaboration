@@ -1535,6 +1535,53 @@ def _seen(sf):
         return []
 
 
+_HEAD_TOKEN = re.compile(r'(?<![0-9A-Za-z])[0-9a-f]{8,64}(?![0-9A-Za-z])')
+_FILE_TOKEN = re.compile(r'[\w./~-]*[\w-]\.(?:py|sh|md|json|jsonl|txt|ya?ml|toml|js|ts|tex|rules|conf)(?![\w])')
+
+
+def approval_parts(text):
+    """An approval ask's file names and candidate SHA-256 heads (hex of 8+ characters with a letter in it), as written in
+    the ask. Empty heads = not an ask the guard approves by file and head."""
+    t = unicodedata.normalize('NFKC', text or '')
+    heads = [h for h in dict.fromkeys(_HEAD_TOKEN.findall(t)) if re.search('[a-f]', h)]
+    names = list(dict.fromkeys(os.path.basename(m) for m in _FILE_TOKEN.findall(t)))
+    return names, heads
+
+
+def mentioned_labels(text, labels):
+    """Which of these labels the text names: bare or block form, and ranges ("H193〜H195", "H193-195")."""
+    t = unicodedata.normalize('NFKC', text or '')
+    out = list(bare_labels(t, labels))
+    for m in re.finditer(r'(?<![A-Za-z0-9])([A-Za-z]+)(\d+)\s*〕?\s*[〜~-]\s*(?:〔問\s*)?(?:\1)?(\d+)(?![0-9])', t):
+        lo, hi = int(m.group(2)), int(m.group(3))
+        if lo < hi <= lo + 50:
+            for k in range(lo, hi + 1):
+                lb = f'{m.group(1)}{k}'
+                if lb in labels and lb not in out:
+                    out.append(lb)
+    return out
+
+
+def approval_gaps(text, st):
+    """[(label, [missing names and heads])] for each open approval ask (ground rule / protected, with candidate heads in
+    its text) the reply names without the file names and heads its text carries. The guard records the owner's answer
+    as an approval only when the reply just before it shows each file's name and the head of the candidate's SHA-256
+    (claude-config conventions/agent-rule-ownership.md#approval); measured: the asks carried both,
+    the reply re-listing them summed them up in one line, and the owner's answers could not be recorded."""
+    t = unicodedata.normalize('NFKC', text or '')
+    tl = t.lower()
+    open_judged = [lb for lb, a in st.items() if a.get('status') == 'open' and a.get('ground') in JUDGED]
+    gaps = []
+    for lb in mentioned_labels(t, open_judged):
+        names, heads = approval_parts(st[lb].get('text', ''))
+        if not heads:
+            continue
+        miss = [n for n in names if n not in t] + [h[:8] for h in heads if h[:8] not in tl]
+        if miss:
+            gaps.append((lb, miss))
+    return gaps
+
+
 def hook_stop(root, data, path=None):
     """Stop: record the ask labels the reply printed; send back once (a) a reply that asks the owner in a paragraph
     without an ask label, (b) a reply after a bound answer whose first line does not name the bound label, (c) a reply
@@ -1612,6 +1659,19 @@ def hook_stop(root, data, path=None):
                     ' 本人に印や番号を打たせない (答え方を示すなら「送って」「推しで」 のような中身を知らなくても言える語で)。'
                     ' 該当の文だけを、 問いの中身で言い直す短い追記にする (前の返事は出し直さない。 正本 ='
                     ' claude-config/conventions/concise-output.md#decision-questions の「作業側の符号だけで聞かない」)')
+    gaps = []
+    for lb, miss in approval_gaps(text, st):
+        k = _key('approval', lb + ',' + ','.join(miss))
+        if k not in seen and k not in new:
+            new.append(k)
+            gaps.append((lb, miss))
+    if gaps:
+        here = Path(__file__).resolve()
+        shown = '、 '.join(f'{st[lb]["text"][:40]}… ({lb}) に {" ".join(m)}' for lb, m in gaps[:3])
+        msgs.append(f'守られた file の承認を待つ問いを返事に出したのに、 その問いの file の名と候補の SHA-256 の頭が同じ返事に無い'
+                    f' ({shown})。 このままでは本人が答えても承認として記録できない (守りの道具は、 答えの直前の返事に file ごとの名と'
+                    f' 頭があるときだけ答えを承認と読む)。 python3 {here} list --block --label <印> が出す問いの段を要約せずに貼る'
+                    ' 短い追記にする (CONTRACT.md#owner-asks)')
     if not msgs:
         return None
     with contextlib.suppress(OSError):
@@ -1704,6 +1764,9 @@ def main(argv=None):
     ap.add_argument('--recorded', default='')
     ap.add_argument('--reason', default='')
     ap.add_argument('--open', action='store_true')
+    ap.add_argument('--block', action='store_true',
+                    help='list: 問いを本人が読む段のまま出す (何の話か・変えると・問い 〔問 H12〕・前の記録・おすすめ、 要約しない)。'
+                         ' 答え待ちの問いを並べ直す返事にはこの段を貼る (承認の問いは file の名と候補の頭を持つ)')
     ap.add_argument('--json', action='store_true')
     ap.add_argument('--max-chars', type=int, default=8000)
     ap.add_argument('--selftest', action='store_true')
@@ -1751,6 +1814,8 @@ def main(argv=None):
             recs = load(ledger_path(a.root))
             st = state(recs)
             rows = [st[lb] for lb in a.label if lb in st] if a.cmd == 'show' else list(st.values())
+            if a.cmd == 'list' and a.label:
+                rows = [r for r in rows if r['label'] in a.label]
             if a.open:
                 rows = [r for r in rows if r['status'] == 'open']
             if a.session:
@@ -1758,9 +1823,16 @@ def main(argv=None):
                 rows = [r for r in rows if r['label'] in mine]
             if a.json or a.cmd == 'show':
                 _print(rows)
+            elif a.block:
+                # the asks as the owner reads them (about -> effect -> question 〔問 H12〕 -> prior -> recommendation), whole:
+                # an approval ask keeps each file's name and the candidate's head, which the guard looks for in the reply
+                # (CONTRACT.md#owner-asks; measured: a one-line summary of three approval asks dropped both)
+                print(format_block([dict(r, status='made', message='') for r in rows]))
             else:
                 for r in rows:
-                    print(f"{r['label']:6} {r['status']:9} {r.get('ground', ''):9} {r['text'][:80]}")
+                    # an approval ask is printed whole (its file names and heads are what the reply must show)
+                    print(f"{r['label']:6} {r['status']:9} {r.get('ground', ''):9} "
+                          f"{r['text'] if r.get('ground') in JUDGED else r['text'][:80]}")
             return 0
         if a.cmd == 'digest':
             print(digest(a.root, _me(a.session), a.max_chars))
@@ -2172,6 +2244,44 @@ def selftest():
             check('番号で答えさせる' in stop12(), '「番号で教えて」 を差し戻す')
             write_tr(('x', f'答えは「{la} 1 つ目」 か「{la} 2 つ目」 でどうぞ。'))
             check('番号で答えさせる' in stop12(), '序数の答え方を差し戻す')
+            # approval asks re-listed without their file names and heads (measured: the owner's answers could not be recorded)
+            ap_recs = [{'type': 'ask', 'label': f'H9{k}', 'ground': 'rule', 'session': 'sap', 'created_at': now_iso(),
+                        'text': f'守りの道具 x-guard{k}.py の候補 (SHA-256 の頭 {h}) を当てるか'}
+                       for k, h in ((1, '7b0162c3a1cc329c'), (2, '0123abcd4567ef89'), (3, 'deadbeef00112233'))]
+            ap_recs.append({'type': 'ask', 'label': 'H94', 'ground': 'rule', 'session': 'sap', 'created_at': now_iso(),
+                            'text': '規則の文書の言い直しを、 この窓で当ててよいか (候補なし)'})
+            _append(led, ap_recs)
+            stap = lambda sid: hook_stop(None, {'session_id': sid, 'transcript_path': str(tr)}, path=led) or ''  # noqa: E731
+            write_tr(('x', '答え待ち: 守りの道具と規則の文書の直し 3 つ 〔問 H91〕〜〔問 H93〕 も待っています。'))
+            g = stap('sap1')
+            check('SHA-256 の頭' in g and '7b0162c3' in g and 'x-guard2.py' in g and 'list --block' in g,
+                  f'承認の問いを名と頭なしで並べ直した返事を差し戻す (範囲の印も読む) {g[:120]}')
+            check(stap('sap1') == '', '同じ返事を重ねて差し戻さない')
+            write_tr(('x', 'H91〜H93 は答え待ちです。'))
+            check('x-guard3.py' in stap('sap2'), '印の範囲 (H91〜H93) の真ん中の問いも見る')
+            write_tr(('x', '守りの道具 x-guard1.py の候補 (SHA-256 の頭 7b0162c3a1cc) を当てるか 〔問 H91〕'))
+            check(stap('sap3') == '', 'file の名と頭 8 字以上を書いた返事は差し戻さない')
+            write_tr(('x', '規則の文書の言い直しを、 この窓で当ててよいか (候補なし) 〔問 H94〕'))
+            check('SHA-256' not in stap('sap4'), '頭を持たない問い = この網の外')
+            _append(led, [{'type': 'answer', 'labels': ['H92'], 'quote': '当てて', 'binding': 'label', 'session': 'sap',
+                           'created_at': now_iso()}])
+            write_tr(('x', '〔問 H92〕 は答えをもらいました。'))
+            check('SHA-256' not in stap('sap5'), '答えの済んだ問いを名指しても差し戻さない')
+            check(sorted(mentioned_labels('H91-93 と H5', ['H91', 'H92', 'H93', 'H5'])) == ['H5', 'H91', 'H92', 'H93'],
+                  '印の範囲 (H91-93) を読む')
+            check(approval_parts('CLAUDE.md §6 の 1 文 (頭 20261116) と scripts/a.py (頭 7b0162c3)') == (['CLAUDE.md', 'a.py'], ['7b0162c3']),
+                  '数字だけの 8 字 (日付) は頭に数えない')
+            import io
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                os.environ['BOARD_ASKS_LEDGER'] = str(led)
+                try:
+                    main(['list', '--block', '--label', 'H91', '--label', 'H92'])
+                finally:
+                    os.environ.pop('BOARD_ASKS_LEDGER', None)
+            lst = buf.getvalue()
+            check('7b0162c3a1cc329c' in lst and '〔問 H91〕' in lst and 'H93' not in lst,
+                  f'list --block --label = 問いの段を名と頭ごと出す {lst[:80]}')
             write_tr(('x', f'{la}・{lb_} は、 検収係が決めます。'))
             check('中身の無い印の並び' in stop12(), '中身の無い印の並びを差し戻す')
             write_tr(('x', f'- **{la}** 研究会の出欠を出すか\n'))
