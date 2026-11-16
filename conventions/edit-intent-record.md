@@ -125,6 +125,13 @@ INFO (FAIL にしない): net 削除 ≥ 10 行の hunk に ID が付いてい�
 
 受領側 (著者 session) の読み方: **裁量の節から**読む。 次に 削除。 対応表は ID 順に眺めて「決定 1 つに対して何 hunk 動いたか」 を見る。 89 hunk なら 10 分。
 
+<a id="uncommitted-candidates"></a>**原稿の repo に commit しない候補の記録** (候補は著者の裁定の前で、 原稿の守りの gate がどの `.tex` も原稿と読むので commit しない、 という場合): 検査は base と head を git の commit で読むので、 候補だけの入れ子の git を作る。
+
+- 候補の dir を原稿の repo の `.gitignore` に入れ、 その dir で `git init` する。 file は原稿と同じ名前 (例 `paper.tex`) 1 本にし、 基準 → 候補 1 → 候補 2 … を commit で積む。 sidecar の frontmatter は `repo: <その dir>`・`file: paper.tex`・`base` / `head` = 入れ子の commit。
+- author・committer と日付を固定して commit する (`GIT_AUTHOR_DATE` など) = 同じ入力なら同じ hash になり、 組み直しても前の sidecar が通る (実測: 候補を足すたびに入れ子の git を作り直しても、 前の段の hash は変わらなかった)。 入れ子の git の commit は guard の pre-commit を通らないので、 候補を作る script は原稿を書かない (候補の file は ignore した dir の中だけ)。
+- 候補を作る script を原稿の repo に commit する (候補の作り方そのものが記録になる)。 文案から当てるなら、 文案の LaTeX の塊は一意の語で引いて写し、 「今 → 案」 の置き換えは文案にその文が引用されていることを assert する = 写す途中の書き換えが機械で止まる。
+- ⚠️ 入れ子の git は作業 tree にだけある (push しない) = 新しい clone では sidecar の検査が commit を見つけられずに落ちる。 そこでは候補を作る script を先に回して入れ子の git を作り直す (同じ hash ができる)。 記録 (REPORT) にこの 1 行を書く。
+
 ## <a id="requester-spec-line"></a>5. 依頼側 — spec に入れる 3 行
 
 AI に改稿の実装を依頼する spec (spawn spec / board request / 別ベンダー宛 AGENTS) には次を入れる。
