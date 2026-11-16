@@ -55,6 +55,12 @@ worker の起動はカードを押す 2 段のまま。 重ければ [DESIGN](bo
 ([契約](board/CONTRACT.md#owner-asks) の Settling a guess)。 止めた理由の文が挙げる語は selftest が 1 つずつ試す。
 次 = 実際の推定が 1 往復で解けるかを、 掲示板の台帳の `confirmed`・`dismissed` の記録で見る。 解けない言い方が出たら語を足す。
 
+## 現在地：本人への問いの「何の話か」 と前の記録
+
+`board/board_asks.py` の `ask` は、 全部の問いに何の話かの 1 文 (`--about`、 作業側の語は断る) を求め、 選ぶ問いと送る問いに前の記録の欄 (`--prior-term` / `--prior`) を求める ([契約](board/CONTRACT.md#owner-asks))。
+掲示板の設定の `ask_prior_search` が名指す検索を引いた語で回し、 当たりに額・決定の語があるのに「無し」 と書いた問いは問う側に知らせる。
+次 = 実際の問いで、 作業側の語の断りが言い換えを強いすぎないか・知らせが当たりすぎないかを、 台帳の問いで見る。
+
 ## 現在地：Lindblad 観測量の検査
 
 再利用 API と合成 selftest を整備した。次の利用では、
