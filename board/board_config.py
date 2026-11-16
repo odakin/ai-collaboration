@@ -80,7 +80,7 @@ CONFIG = 'board.json'
 GITCRYPT_MAGIC = b'\x00GITCRYPT'
 AUDIENCES = {'owner', 'collaborators'}
 ENCRYPTIONS = {'git-crypt', 'none'}
-FIELDS = {'board_format', 'name', 'audience', 'encryption', 'branch', 'sources', 'readable', 'labels', 'description', 'launch_effort_floor', 'launch_model_allow', 'policy_stage_check', 'accept_review_form', 'request_desk'}
+FIELDS = {'board_format', 'name', 'audience', 'encryption', 'branch', 'sources', 'readable', 'labels', 'description', 'launch_effort_floor', 'launch_model_allow', 'policy_stage_check', 'accept_review_form', 'request_desk', 'ask_prior_search'}
 EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')   # a worker's reasoning effort, lowest first
 KEY_RE = re.compile(r'[a-z0-9][a-z0-9-]{1,63}')
 
@@ -176,6 +176,22 @@ def validate(cfg: dict) -> dict:
         elif cfg.get('audience') != 'owner':
             # the engine runs the command on the requester's machine: a collaborators board's board.json is written by others
             problems.append('request_desk is for owner boards (the engine runs its command on the requester\'s machine)')
+    aps = cfg.get('ask_prior_search')
+    if aps is not None:
+        hit = aps.get('hit_line', '') if isinstance(aps, dict) else ''
+        try:
+            re.compile(hit or '')
+            hit_ok = isinstance(hit, str)
+        except (re.error, TypeError):
+            hit_ok = False
+        if not (isinstance(aps, dict) and set(aps) <= {'command', 'hit_line', 'rule'} and isinstance(aps.get('command'), list)
+                and aps['command'] and all(isinstance(c, str) and c.strip() for c in aps['command'])
+                and hit_ok and isinstance(aps.get('rule', ''), str)):
+            problems.append('ask_prior_search is {"command": ["<script, relative to the board directory>", "<argument>", ...],'
+                            ' "hit_line": "<regex of a hit line>", "rule": "<where the rule is written>"}')
+        elif cfg.get('audience') != 'owner':
+            # board_asks.py runs the command on the asking machine: a collaborators board's board.json is written by others
+            problems.append('ask_prior_search is for owner boards (board_asks.py runs its command on the asking machine)')
     if problems:
         raise ValueError(f'{CONFIG}: ' + '; '.join(problems))
     return {'branch': 'main', 'labels': {}, **cfg}

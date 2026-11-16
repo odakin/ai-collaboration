@@ -746,7 +746,7 @@ bound to the wrong item, and the agent acts on it in the same turn (measured). A
 answered questions into a one-line "done" (measured).
 
 ```sh
-python3 board_asks.py ask    --root <board> --text '<question>' --recommend '<answer>' --ground <why the owner> [--key todo:<repo>:<id>] [--evidence <repo>@<rev>:<path>] [--reword '<what changed>']
+python3 board_asks.py ask    --root <board> --about '<what it is about>' [--effect '<what changes>'] --text '<question>' --recommend '<answer>' --ground <why the owner> [--prior-term <word>... --prior '<earlier decisions, amounts, promises and where>'] [--key todo:<repo>:<id>] [--evidence <repo>@<rev>:<path>] [--reword '<what changed>']
 python3 board_asks.py answer --root <board> --label H12 --quote '<owner words>' --binding label|order|confirmed|guess [--reading '<one line>']
 python3 board_asks.py list   --root <board> [--open] [--session S]
 python3 board_asks.py digest --root <board> --session S
@@ -764,6 +764,26 @@ python3 board_asks.py digest --root <board> --session S
   question is refused (split the key per question). The letter comes from the hook's configuration and is kept next to the
   ledger for asks typed by hand; without one it is `Q` (a host name's first letter collides with chip names such as
   `M5`, measured).
+- **What it is about, then what changes, then the question**: every new ask carries `--about`, one sentence on where
+  the matter came from (who, when, which case) in the owner's words, without file names, paths, flags, English
+  identifiers, commit heads or labels (the engine refuses those), and may carry `--effect` (what changes if the owner
+  decides it). The block is composed in that order, then the question and its label (measured: questions that named a
+  ledger file or a case without its origin were answered "what is this?"). A reword
+  keeps the ask's earlier `--about` unless it gives a new one; an ask made before the field existed needs one when it is
+  reworded.
+- **The prior record** (grounds `choice` and `outbound`): before the recommended answer is written, the matter's
+  record is searched once with its subject's words, and the ask carries the words (`--prior-term`) and one line of the
+  earlier decisions (whose words, which day), the earlier quote's amount and the promises to the other side, with where
+  they are (`--prior`; when there are none, `無し (見た範囲 = …)`). If the recommended answer changes an earlier
+  decision, the line says so. The owner's block shows it under the question. An owner board may name the search in
+  board.json (`ask_prior_search: {"command": [<script relative to the board>, <argument>...], "hit_line": <regex of a
+  hit line, default grep's "path:line:">, "rule": <where the rule is written>}`; owner boards only, because the engine
+  runs it on the asking machine): the engine runs it with the words appended, shows the hits to the asking side on
+  stderr (not in the owner's block), keeps the words and the number of hits on the ask, and says so when the hits carry
+  amounts or decisions while the line says none. Fail-open with a note (no field, a missing script, an error). Measured:
+  a recommended answer was built from the newest mails, went out, and contradicted an earlier decision and quote that
+  one search would have shown (general form = claude-config
+  `conventions/actor-attribution.md#prior-record-before-recommending`).
 - **A gate before asking**: every ask names its ground (a protected part of the owner's document, a rule change that
   needs a ruling, an outbound message, the owner's own choice, a policy check before implementation, a fact only the
   owner knows). A change named by `--evidence` is judged by a validator (`BOARD_ASKS_VALIDATOR`) whatever the ground:

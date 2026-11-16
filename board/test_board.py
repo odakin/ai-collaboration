@@ -3348,6 +3348,17 @@ class RequestDesk(EffortFlag):
         collab={'board_format':1,'audience':'collaborators','encryption':'none','sources':['eproj']}
         with self.assertRaisesRegex(ValueError,'request_desk is for owner boards'): bc.validate({**collab,'request_desk':good})
 
+    def test_validate_ask_prior_search(self):
+        # board_asks.py runs the named search with the asked words (CONTRACT.md#owner-asks, the prior record)
+        import board_config as bc
+        base={'board_format':1,'audience':'owner','encryption':'git-crypt'}
+        good={'command':['../x/lookup.py'],'hit_line':r'^[^\s:]+:\d+:','rule':'x.md#y'}
+        self.assertEqual(bc.validate({**base,'ask_prior_search':good})['ask_prior_search'],good)
+        for bad in ({'command':[]},{'command':'lookup.py'},{'command':['l.py'],'hit_line':'('},{'command':['l.py'],'other':1},'on'):
+            with self.assertRaisesRegex(ValueError,'ask_prior_search'): bc.validate({**base,'ask_prior_search':bad})
+        collab={'board_format':1,'audience':'collaborators','encryption':'none','sources':['eproj']}
+        with self.assertRaisesRegex(ValueError,'ask_prior_search is for owner boards'): bc.validate({**collab,'ask_prior_search':good})
+
 
 class EditApprovalUnit(unittest.TestCase):
     """approve-edit (CONTRACT.md#edit-approval) judged on its own: a full approval writes the fields the rule guard

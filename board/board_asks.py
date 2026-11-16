@@ -38,6 +38,18 @@ What it is:
   drops the guess (`dismissed`, the asks stay open); an answer by label or order is recorded after a `dismissed` for
   the guess, and a new guess keeps the earlier words (`earlier`). The ways are named in the messages from
   SETTLE_AFFIRM / SETTLE_DISMISS, and the selftest tries each one.
+- Every new ask says **what it is about** (`--about`: one sentence on where the matter came from = who, when, which
+  case, in the owner's words: no file names, paths, flags, English identifiers, commit heads or labels) and may say
+  **what changes** if the owner decides it (`--effect`); the block is composed in that order, then the question.
+  Measured: questions without their origin were answered "what is this?".
+- An ask whose ground is in PRIOR_GROUNDS (a choice, an outbound send) carries the **prior record**: the words searched
+  (`--prior-term`, one or more) and one line of the earlier decisions, amounts and promises on the matter with where
+  they are (`--prior`, or "無し (見た範囲 = …)"). An owner board may name a search (board.json `ask_prior_search` =
+  `{"command": [<script relative to the board>, <argument>...], "hit_line": <regex>, "rule": …}`, run with the words
+  appended); the engine runs it, shows the hits to the asking side (stderr), records the words and the number of hits,
+  and says so when hits carry amounts or decisions while the prior record says none. Fail-open (no field, a missing
+  script, an error: the ask is made with a note). Measured: a recommended answer was built from the newest mails only,
+  went out, and contradicted an earlier decision and quote that one search found.
 - A **withdraw** closes an ask decided elsewhere. **shown** records which asks a session displayed.
 
 Store: an append-only JSON-lines ledger local to the board checkout and shared by every session on the machine
@@ -48,7 +60,9 @@ passes it and the engine keeps it next to the ledger (`<ledger>.prefix`), so an 
 without either, Q.
 
 CLI:
-    python3 board_asks.py ask      --root <board> --text '<question>' --recommend '<answer>' --ground <g> [--key K]...
+    python3 board_asks.py ask      --root <board> --about '<what it is about>' [--effect '<what changes>']
+                                   --text '<question>' --recommend '<answer>' --ground <g> [--key K]...
+                                   [--prior-term <word>... --prior '<earlier decisions, amounts, promises and where>']
                                    [--evidence <repo>@<rev>:<path>] [--applied] [--denied '<guard's reason>']
                                    [--reask '<what changed>'] [--reword '<what changed>'] [--project P] [--json]
     python3 board_asks.py answer   --root <board> --label H12 [--label …] --quote '<owner words>' --binding label|order|confirmed|guess
@@ -96,6 +110,28 @@ GROUNDS = {
     'fact': '本人しか知らない事実',
 }
 JUDGED = ('rule', 'protected')
+# Asks whose recommended answer can undo an earlier decision, amount or promise: they carry the prior record (the
+# words searched and one line of what was found, with where). Measured: a recommended answer built from the newest
+# mails only, with the earlier decision and quote on other records, went out as mails that contradicted it.
+PRIOR_GROUNDS = ('choice', 'outbound')
+MAX_ABOUT = 200
+PRIOR_SEARCH_TIMEOUT = 60
+PRIOR_SHOW_LINES = 30
+PRIOR_HIT_DEFAULT = r'^[^\s:]+:\d+:'          # grep's "path:line:" form (the hit, not its context lines)
+PRIOR_NONE_RE = re.compile(r'^\s*[（(]?\s*(?:無し|なし|none)', re.I)
+PRIOR_WEIGHTY_RE = re.compile(r'(?:US\$|USD|\$)\s?\d|\d[\d,.]*\s?(?:ドル|円|万円|\$|USD|EUR|€)|決定|決め|承認|それでよい|合意|約束'
+                              r'|\bdecided\b|\bagreed\b|\bpromised\b', re.I)
+# work-side words the owner cannot read in "what this is about" (measured: questions that named a ledger file, an
+# English identifier or a case without its origin were answered "what is this?")
+ABOUT_WORKSIDE = (
+    (re.compile(r'(?<![A-Za-z0-9_.~-])~?/?[A-Za-z0-9_.~-]*[A-Za-z][A-Za-z0-9_.~-]*/[A-Za-z0-9_./-]*[A-Za-z]'), 'path'),
+    (re.compile(r'[A-Za-z0-9_-]+\.(?:py|md|ya?ml|json|jsonl|sh|tex|txt|pdf|js|mjs|csv|xlsx|docx)(?![A-Za-z0-9])', re.I), 'file の名'),
+    (re.compile(r'(?<![0-9A-Za-z])(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}(?![0-9A-Za-z])'), 'commit の頭'),
+    (re.compile(r'(?<![\w-])--?[a-z][\w-]*'), 'flag'),
+    (re.compile(r'(?<![A-Za-z0-9])[a-z][a-z0-9]*(?:[_-][a-z0-9]+)+(?![A-Za-z0-9])'), '英語の識別子'),
+    (re.compile(r'(?<![A-Za-z0-9])[a-z]+[A-Z][A-Za-z0-9]*'), '英語の識別子'),
+    (re.compile(r'(?<![A-Za-z0-9])[A-Z]\d{1,5}(?![0-9])'), '問いの印'),
+)
 BINDINGS = ('label', 'order', 'confirmed', 'guess', 'dismissed')
 SETTLED = ('label', 'order', 'confirmed')
 LABEL_RE = re.compile(r'(?<![A-Za-z0-9])([A-Z])(\d{1,5})(?![0-9])')
@@ -219,8 +255,9 @@ def state(recs):
             if a is not None and a['status'] == 'open':
                 a.setdefault('rewords', []).append({'from': a['text'], 'reason': r.get('reason', ''), 'created_at': r.get('created_at', '')})
                 a['text'] = r.get('text') or a['text']
-                if r.get('recommend'):
-                    a['recommend'] = r['recommend']
+                for k in ('recommend', 'about', 'effect', 'prior', 'prior_terms', 'prior_hits'):
+                    if r.get(k):
+                        a[k] = r[k]
     return asks
 
 
@@ -493,6 +530,100 @@ def _norm(t):
     return re.sub(r'\s+', '', unicodedata.normalize('NFKC', t or ''))
 
 
+# ---------- what the question is about / the prior record ----------
+
+def about_problem(about, text=''):
+    """'' when `about` can stand first in the owner's block: one sentence that says where the matter came from (who,
+    when, which case), without file names, paths, flags, English identifiers, commit heads or question labels."""
+    a = (about or '').strip()
+    if not a:
+        return ('何の話か (--about) が要る = どこから来た話か (誰・いつ・何の件) の 1 文。 本人はこの 1 文を最初に読み、'
+                ' 次に「変えると何が変わるか」 (--effect)、 最後に問い (--text) を読む')
+    if len(a) > MAX_ABOUT:
+        return f'何の話か (--about) は 1 文 ({MAX_ABOUT} 字まで、 今 {len(a)} 字)'
+    if len([s for s in re.split(r'[。！？!?]', a) if s.strip()]) > 1:
+        return '何の話か (--about) は 1 文 (句点で 2 文以上に分かれている)'
+    if text and _norm(a) == _norm(text):
+        return '何の話か (--about) が問いの文と同じ = どこから来た話かを書く (問いは --text)'
+    for rx, what in ABOUT_WORKSIDE:
+        m = rx.search(a)
+        if m:
+            return (f'何の話か (--about) に作業側の語 ({what}「{m.group(0)}」) がある = 本人の語で、 相手・時期・件の名で書く'
+                    ' (file の名・path・英語の識別子・commit の頭・問いの印は書かない)')
+    return ''
+
+
+def prior_problem(ground, prior, terms):
+    """'' when an ask on a PRIOR_GROUNDS ground carries its prior record: the words searched and one line of the
+    earlier decisions, amounts and promises with where they are (or "無し (見た範囲 = …)")."""
+    if ground not in PRIOR_GROUNDS:
+        return ''
+    terms = [t for t in (terms or []) if (t or '').strip()]
+    p = (prior or '').strip()
+    if not terms or not p:
+        return (f'理由 {ground} の問いには前の記録が要る: 同じ件の主題の語で記録を 1 回引き (--prior-term <語>、 複数可)、'
+                ' 前の決定 (誰の発言か・日付)・前の見積の額・相手との約束を出どころつきで 1 行に (--prior)。'
+                ' 推す答えが前の決定を変えるならそう書く。 無ければ --prior \'無し (見た範囲 = …)\'')
+    if len(p) > MAX_TEXT:
+        return f'前の記録 (--prior) は 1 行 ({MAX_TEXT} 字まで、 今 {len(p)} 字)'
+    if PRIOR_NONE_RE.match(p) and '範囲' not in p:
+        return '前の記録が無いときは見た範囲を書く (--prior \'無し (見た範囲 = …)\')'
+    return ''
+
+
+def prior_search(root, terms):
+    """Run the board's prior-record search (board.json `ask_prior_search`) with the searched words.
+    -> {configured, ok, hits, weighty, lines, note}. Fail-open: no board.json, no field, a missing script, an error or a
+    timeout leaves the ask as it is, with a note for the asking side (the owner's block does not show it)."""
+    out = {'configured': False, 'ok': False, 'hits': None, 'weighty': 0, 'lines': [], 'note': ''}
+    if not root:
+        out['note'] = '掲示板の root が渡されず前の記録の検索を回していない = 引いた語だけを残した'
+        return out
+    try:
+        sys.path.insert(0, str(HERE))
+        import board_config as bc
+        cfg = bc.load(root)
+    except Exception as exc:   # not a board / locked / bad JSON
+        out['note'] = f'掲示板の設定を読めず前の記録の検索を回していない ({type(exc).__name__})'
+        return out
+    spec = cfg.get('ask_prior_search')
+    if not spec or cfg.get('audience') != 'owner':
+        out['note'] = 'この掲示板は前の記録の検索 (board.json の ask_prior_search) を名指していない = 引いた語だけを残した'
+        return out
+    out['configured'] = True
+    cmd = list(spec.get('command') or [])
+    rootp = Path(root).expanduser().resolve()
+    script = rootp / cmd[0]
+    if not script.is_file():
+        out['note'] = f'前の記録の検索の script が無い ({script}) = 検索を回していない'
+        return out
+    argv = ([sys.executable] if script.suffix == '.py' else []) + [str(script), *cmd[1:], *terms]
+    try:
+        p = subprocess.run(argv, capture_output=True, text=True, timeout=PRIOR_SEARCH_TIMEOUT, cwd=str(rootp))
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        out['note'] = f'前の記録の検索を回せなかった ({type(exc).__name__}) = 当たりを見ていない'
+        return out
+    if p.returncode not in (0, 1):
+        out['note'] = f'前の記録の検索が exit {p.returncode} で終わった = 当たりを見ていない'
+        return out
+    hit_re = re.compile(spec.get('hit_line') or PRIOR_HIT_DEFAULT)
+    lines = (p.stdout or '').splitlines()
+    hits = [ln for ln in lines if hit_re.search(ln)]
+    out.update(ok=True, hits=len(hits), weighty=sum(1 for ln in hits if PRIOR_WEIGHTY_RE.search(ln)),
+               lines=hits[:PRIOR_SHOW_LINES])
+    return out
+
+
+def prior_note(prior, found):
+    """The asking side's line after the search (stderr / JSON, not the owner's block)."""
+    if not found.get('ok'):
+        return found.get('note') or ''
+    if found['weighty'] and PRIOR_NONE_RE.match(prior or ''):
+        return (f'⚠️ 前の記録を「無し」 としたが、 当たり {found["hits"]} 行のうち {found["weighty"]} 行に額・決定の語がある ='
+                ' 当たりを読み、 前の決定・額・約束なら問いを --reword で言い直して --prior に書く')
+    return f'前の記録の検索: 当たり {found["hits"]} 行 (額・決定の語のある行 {found["weighty"]})'
+
+
 # ---------- operations ----------
 
 def _me(session):
@@ -544,12 +675,23 @@ def _decide(root, st, it, me):
     if same:
         if _norm(same['text']) == _norm(text):
             return 'reused', {'status': 'reused', 'label': same['label'], 'text': same['text'], 'recommend': same.get('recommend', ''),
+                              'ground': same.get('ground', ''), 'about': same.get('about', ''), 'effect': same.get('effect', ''),
+                              'prior': same.get('prior', ''),
                               'message': '同じ問い (同じ key・同じ文) が開いている = 新しく立てずにその印で問う'}
         if it.get('reword'):
             # the same question in other words keeps its label (measured: re-asking under a new label changed the
-            # owner's handle for the same matter twice in one morning)
-            return 'reworded', {'status': 'reworded', 'label': same['label'], 'text': text,
+            # owner's handle for the same matter twice in one morning). A reword is shown to the owner again, so it
+            # carries what the question is about and, on PRIOR_GROUNDS, the prior record (its own or the ask's)
+            about = (it.get('about') or same.get('about') or '').strip()
+            prior = (it.get('prior') or same.get('prior') or '').strip()
+            terms = [t for t in (it.get('prior_terms') or same.get('prior_terms') or []) if t]
+            prob = about_problem(about, text) or prior_problem(same.get('ground'), prior, terms)
+            if prob:
+                return 'refused', {'status': 'refused', 'text': text, 'label': same['label'], 'message': prob}
+            return 'reworded', {'status': 'reworded', 'label': same['label'], 'text': text, 'ground': same.get('ground', ''),
                                 'recommend': (it.get('recommend') or same.get('recommend') or '').strip()[:MAX_TEXT],
+                                'about': about, 'effect': (it.get('effect') or same.get('effect') or '').strip()[:MAX_TEXT],
+                                'prior': prior, 'prior_terms': terms,
                                 'reason': it['reword'], 'message': f'言い直した (同じ印のまま。 変えたこと: {it["reword"][:120]})'}
         return 'refused', {'status': 'refused', 'text': text, 'label': same['label'], 'message': (
             f'同じ key の問い 「{same["text"][:80]}」 〔問 {same["label"]}〕 が開いている。'
@@ -579,6 +721,9 @@ def _decide(root, st, it, me):
                     ' 検収係の受け取りから出す問いには --key request:<依頼 id> を付ける (受け取りが本人のものと分類した問いだけが立つ)。'
                     ' 受け取りから出したのでない問いなら、 どこから出たかの key (todo:<repo>:<id> / plan:<path>#<item> / session:<id>)'
                     ' か --not-from-review \'<1 行>\' を付ける')}
+    prob = about_problem(it.get('about'), text) or prior_problem(it.get('ground'), it.get('prior'), it.get('prior_terms'))
+    if prob:
+        return 'refused', {'status': 'refused', 'text': text, 'message': prob}
     note = it.get('_note') or ''
     if it.get('ground') != 'policy' and re.search(r'方針|\bpolicy\b', text, re.I) and '--ground policy' not in note:
         note = ' '.join(x for x in (note, '⚠️ 方針の確認なら --ground policy (1 つの作業に 1 回、 依頼の worker からは立てない)') if x)
@@ -595,6 +740,10 @@ def ask(root, items, *, session=None, agent='claude', project='', path=None, val
     st0 = state(load(p))
     for it in items:
         kind, payload = _decide(root, st0, it, me)
+        if kind in ('ask', 'reworded') and payload.get('ground') in PRIOR_GROUNDS:
+            found = prior_search(root, payload.get('prior_terms') or [])
+            payload = dict(payload, prior_hits=found['hits'], prior_weighty=found['weighty'],
+                           prior_lines=found['lines'], prior_note=prior_note(payload.get('prior'), found))
         if kind == 'ask':
             ok, msg = gate(payload.get('ground'), payload.get('evidence'), applied=bool(payload.get('applied')),
                            validator=validator, session=me, denied=payload.get('denied') or '', root=root)
@@ -620,6 +769,9 @@ def ask(root, items, *, session=None, agent='claude', project='', path=None, val
                 continue
             if kind == 'reworded':
                 new.append({'type': 'reword', 'label': payload['label'], 'text': payload['text'], 'recommend': payload['recommend'],
+                            'about': payload.get('about', ''), 'effect': payload.get('effect', ''),
+                            'prior': payload.get('prior', ''), 'prior_terms': payload.get('prior_terms') or [],
+                            'prior_hits': payload.get('prior_hits'),
                             'reason': payload['reason'][:MAX_TEXT], 'session': me, 'created_at': now_iso()})
                 new.append({'type': 'shown', 'labels': [payload['label']], 'session': me, 'created_at': now_iso()})
                 out.append(payload)
@@ -635,9 +787,16 @@ def ask(root, items, *, session=None, agent='claude', project='', path=None, val
                    'ground': payload['ground'], 'keys': payload['keys'], 'evidence': payload.get('evidence') or '',
                    'applied': bool(payload.get('applied')), 'reask': payload.get('reask') or '', 'gate': msg,
                    'denied': (payload.get('denied') or '')[:MAX_TEXT],
+                   'about': (payload.get('about') or '').strip(), 'effect': (payload.get('effect') or '').strip()[:MAX_TEXT],
                    'session': me, 'agent': agent, 'project': project, 'created_at': now_iso()}
+            if payload['ground'] in PRIOR_GROUNDS:
+                rec.update(prior=(payload.get('prior') or '').strip(),
+                           prior_terms=[t for t in (payload.get('prior_terms') or []) if t],
+                           prior_hits=payload.get('prior_hits'), prior_weighty=payload.get('prior_weighty'))
             new.append(rec)
-            out.append({'status': 'made', 'label': label, 'text': rec['text'], 'recommend': rec['recommend'], 'message': msg})
+            out.append({'status': 'made', 'label': label, 'text': rec['text'], 'recommend': rec['recommend'], 'message': msg,
+                        'ground': rec['ground'], 'about': rec['about'], 'effect': rec['effect'], 'prior': rec.get('prior', ''),
+                        'prior_note': payload.get('prior_note', ''), 'prior_lines': payload.get('prior_lines') or []})
         _append(p, new)
     return out
 
@@ -647,8 +806,16 @@ def format_block(results):
     for r in results:
         if r['status'] in ('made', 'reused', 'reworded'):
             # the content first and the label after it: the owner reads the question, the label is only a handle
-            # (measured: a label at the head of the line was then used like a number, "H3・H12・H13 は…")
+            # (measured: a label at the head of the line was then used like a number, "H3・H12・H13 は…").
+            # Order = what this is about -> what changes -> what to decide (measured: questions without where they came
+            # from were answered "what is this?"), then the prior record and the recommendation
+            if r.get('about'):
+                lines.append(r['about'])
+            if r.get('effect'):
+                lines.append(f"　変えると: {r['effect']}")
             lines.append(f"{r['text']} 〔問 {r['label']}〕")
+            if r.get('prior'):
+                lines.append(f"　前の記録: {r['prior']}")
             if r.get('recommend'):
                 lines.append(f"　おすすめ: {r['recommend']}")
             if '⚠️' in r.get('message', '') or '別の問い' in r.get('message', '') or r['status'] == 'reworded':
@@ -1421,7 +1588,9 @@ def hook_stop(root, data, path=None):
     if loose:
         here = Path(__file__).resolve()
         msgs.append('本人に答えを求める段に、 掲示板の問いの印 (〔問 H12〕 の形) が付いていない'
-                    f' (「{loose[0]}」 ほか)。 問いを立ててから (python3 {here} ask --root <掲示板> --text … --recommend … --ground <理由>)、'
+                    f' (「{loose[0]}」 ほか)。 問いを立ててから (python3 {here} ask --root <掲示板> --about \'<何の話か 1 文>\''
+                    ' --effect \'<変えると何が変わるか>\' --text … --recommend … --ground <理由>、'
+                    f' 理由が {" か ".join(PRIOR_GROUNDS)} なら --prior-term <引いた語> --prior \'<前の決定・額・約束と出どころ>\')、'
                     ' 短い追記に「上の問いを台帳に立てた」 の 1 行と、'
                     ' 道具が出した問いの段 (中身が先、 印は後ろ) を貼る。 本人に印や番号で答えるよう求める文は書かない'
                     ' (「上の番号は使わない」 は本人に印を使えと言う文に読まれた = 実測)。'
@@ -1469,7 +1638,9 @@ def digest(root, session, max_chars=8000, path=None):
                      + (f" (確かめ「{ans['confirm'][:80]}」)" if ans.get('confirm') else '')
                      + (f" 読み: {ans['reading'][:150]}" if ans.get('reading') else ''))
     for a in opened:
-        lines.append(f"❓ {a['text'][:200]} ({a['label']}) / おすすめ: {a.get('recommend', '')[:150]}")
+        lines.append(f"❓ {(a['about'][:120] + ' → ') if a.get('about') else ''}{a['text'][:200]} ({a['label']})"
+                     + (f" / 前の記録: {a['prior'][:150]}" if a.get('prior') else '')
+                     + f" / おすすめ: {a.get('recommend', '')[:150]}")
     out, n = [], 0
     for i, ln in enumerate(lines):
         if n + len(ln) > max_chars:
@@ -1511,6 +1682,15 @@ def main(argv=None):
     ap.add_argument('--ground', action='append', default=[])
     ap.add_argument('--key', action='append', default=[], help='one question only (with several --text, call once per question)')
     ap.add_argument('--evidence', action='append', default=[])
+    ap.add_argument('--about', action='append', default=[],
+                    help='何の話か = どこから来た話か (誰・いつ・何の件) の 1 文。 問い 1 つに 1 つ (全部の問いに要る)。'
+                         ' file の名・path・英語の識別子・commit の頭・問いの印は書かない')
+    ap.add_argument('--effect', action='append', default=[], help='変えると何が変わるか (問い 1 つに 1 つ、 任意)')
+    ap.add_argument('--prior', action='append', default=[],
+                    help=f'前の記録 = 前の決定 (誰・日付)・前の見積の額・相手との約束を出どころつきで 1 行。 理由が {"/".join(PRIOR_GROUNDS)}'
+                         ' の問いに要る。 無ければ \'無し (見た範囲 = …)\'')
+    ap.add_argument('--prior-term', action='append', default=[],
+                    help='前の記録を引いた主題の語 (複数可、 全部の問いに共通)。 掲示板が名指す検索をこの語で回す')
     ap.add_argument('--applied', action='store_true')
     ap.add_argument('--reask', default='', help='同じ問いに本人の答えが既にあっても問い直す理由 (何が変わったか)')
     ap.add_argument('--reword', default='', help='開いた問いを同じ印のまま言い直す (同じ key、 何を変えたか)')
@@ -1540,13 +1720,24 @@ def main(argv=None):
                 raise ValueError('--text を 1 つ以上。 --ground は 1 つ (全部に同じ) か --text と同じ数、 --recommend は --text と同じ数')
             if n > 1 and a.key:
                 raise ValueError('key は問い 1 つずつに付ける (--text を 1 つにして呼び分ける)')
+            if any(len(v) not in (0, n) for v in (a.about, a.effect, a.prior)):
+                raise ValueError('--about / --effect / --prior は問い 1 つに 1 つ (--text と同じ数。 --effect は無くてもよい)')
             items = [{'text': t, 'recommend': a.recommend[i] if a.recommend else '',
                       'ground': a.ground[i] if len(a.ground) == n else a.ground[0], 'keys': a.key,
                       'evidence': (a.evidence[i] if len(a.evidence) == n else (a.evidence[0] if a.evidence else '')),
+                      'about': a.about[i] if a.about else '', 'effect': a.effect[i] if a.effect else '',
+                      'prior': a.prior[i] if a.prior else '', 'prior_terms': a.prior_term,
                       'applied': a.applied, 'reask': a.reask, 'denied': a.denied, 'reword': a.reword,
                       'not_from_review': a.not_from_review} for i, t in enumerate(a.text)]
             res = ask(a.root, items, session=a.session, agent=a.agent, project=a.project)
             _print(res) if a.json else print(format_block(res))
+            if not a.json:
+                # the asking side's notes on the prior-record search (stderr: the block on stdout is what the owner reads)
+                for r in res:
+                    if r.get('prior_note'):
+                        print(f"〔問 {r.get('label', '?')}〕 {r['prior_note']}", file=sys.stderr)
+                        for ln in r.get('prior_lines') or []:
+                            print(f'　{ln[:200]}', file=sys.stderr)
             return 0 if any(r['status'] in ('made', 'reused', 'reworded') for r in res) else 3
         if a.cmd == 'answer':
             _print(answer(a.root, a.label, a.quote, a.binding, reading=a.reading, recorded=a.recorded, session=a.session))
@@ -1608,6 +1799,13 @@ def main(argv=None):
 def selftest():
     ok = True
     verbose = bool(os.environ.get('BOARD_ASKS_SELFTEST_VERBOSE'))   # PASS lines too (board_asks.mutants.json reads them)
+    real_ask = globals()['ask']
+
+    def ask(root, items, **kw):
+        # the cases older than the about / prior-record fields fill them (those fields have their own cases below,
+        # which call real_ask)
+        return real_ask(root, [dict({'about': '試験のための話', 'prior': '無し (見た範囲 = 試験の台帳)',
+                                     'prior_terms': ['試験']}, **it) for it in items], **kw)
 
     def check(cond, msg):
         nonlocal ok
@@ -2159,6 +2357,96 @@ def selftest():
             write_tr(('x', f'{gt[22]} ({gl[22]}) への答えと読みました。\n{gt[23]} ({gl[23]}) への答えと読みました。'))
             m = gprompt('g18', 'はい')
             check(gdeny('g18') and 'まだ解けていない' in (m or ''), '読みの行が別々の候補を名指せば、 肯定では結ばない')
+        # ---- what the question is about, and the prior record (2026-11-16) ----
+        def io_run(fn, argv):
+            import io
+            o, e = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(o), contextlib.redirect_stderr(e):
+                try:
+                    code = fn(argv)
+                except SystemExit as x:
+                    code = x.code
+            return (code, o.getvalue()), e.getvalue()
+
+        with tempfile.TemporaryDirectory() as td:
+            led = Path(td) / 'asks.jsonl'
+            os.environ['BOARD_ASKS_PREFIX'] = 'P'
+            good = '先月に貸し会場から届いた机の手配の案内 (1 台 800 円/日) の件'
+            check(about_problem(good) == '', f'何の話か: 日付・額・斜線の入った本人の語の 1 文は通す ({about_problem(good)})')
+            for bad, what in (('', '要る'), ('odakin-prefs/plans/x.md の件', 'path'), ('send_mail の件', '識別子'),
+                              ('問い H12 の言い直し', '印'), ('版 c0ffee12 の件', 'commit'), ('board.json の欄の件', 'file'),
+                              ('会場の件。 業者の件。', '1 文'), ('--ack-newer の件', 'flag')):
+                check(what in about_problem(bad), f'何の話か: 「{bad}」 は {what} で断る ({about_problem(bad)})')
+            check('問いの文と同じ' in about_problem('業者の机を断るか', '業者の机を断るか'), '何の話か: 問いの文と同じなら断る')
+            r = real_ask(None, [{'text': '事実を一つ聞く', 'ground': 'fact'}], session='p1', path=led)
+            check(r[0]['status'] == 'refused' and '何の話か' in r[0]['message'], '何の話かの無い問いは、 理由が何でも立てない')
+            r = real_ask(None, [{'text': '机を誰に頼むか', 'ground': 'choice', 'about': good}], session='p1', path=led)
+            check(r[0]['status'] == 'refused' and '前の記録' in r[0]['message'] and '--prior-term' in r[0]['message'],
+                  '選ぶ問いに前の記録が無ければ立てず、 引く語と 1 行を求める')
+            r = real_ask(None, [{'text': '机を誰に頼むか', 'ground': 'outbound', 'about': good, 'prior_terms': ['机'],
+                                 'prior': '無し'}], session='p1', path=led)
+            check(r[0]['status'] == 'refused' and '見た範囲' in r[0]['message'], '前の記録が「無し」 なら見た範囲を求める')
+            r = real_ask(None, [{'text': '事実を一つ聞く', 'ground': 'fact', 'about': good}], session='p1', path=led)
+            check(r[0]['status'] == 'made', '事実の問いは前の記録なしで立つ (選ぶ問いと送る問いだけに求める)')
+            r = real_ask(None, [{'text': '会場の机を誰に頼むか', 'ground': 'choice', 'keys': ['todo:x:p1'], 'about': good,
+                                 'effect': '会場と業者のどちらに払うかが決まる', 'prior_terms': ['机の手配', 'desk rental'],
+                                 'prior': '2/3 本人「会場の机で」 (会議の台帳)、 2/4 1 台 900 円 (会場の TODO)', 'recommend': '業者'}],
+                         session='p1', path=led)
+            blk = format_block(r).splitlines()
+            check(r[0]['status'] == 'made' and blk[0] == good and blk[1].startswith('　変えると:') and '〔問 P' in blk[2]
+                  and blk[3].startswith('　前の記録:') and blk[4].startswith('　おすすめ:'),
+                  f'問いの段 = 何の話か → 変えると → 問い → 前の記録 → おすすめ の順 {blk}')
+            rec = [x for x in load(led) if x.get('type') == 'ask'][-1]
+            check(rec.get('about') == good and rec.get('prior_terms') == ['机の手配', 'desk rental'] and rec.get('prior')
+                  and rec.get('prior_hits') is None, '台帳に何の話か・引いた語・前の記録が残る (検索の名指しが無ければ当たりの数は空)')
+            check('引いた語だけを残した' in (r[0].get('prior_note') or ''), '検索を名指さない (掲示板の無い) 問いでは、 問う側にその旨を 1 行')
+            lb = r[0]['label']
+            r2 = real_ask(None, [{'text': '会場の机を誰に頼むか', 'ground': 'choice', 'keys': ['todo:x:p1']}], session='p2', path=led)
+            check(r2[0]['status'] == 'reused' and format_block(r2).splitlines()[0] == good, '出し直しの段にも何の話かが先に出る')
+            r3 = real_ask(None, [{'text': '会場の机と椅子を誰に頼むか', 'ground': 'choice', 'keys': ['todo:x:p1'],
+                                  'reword': '机と椅子に分けた'}], session='p2', path=led)
+            check(r3[0]['status'] == 'reworded' and r3[0]['label'] == lb and r3[0].get('about') == good and r3[0].get('prior'),
+                  '言い直しは前の何の話か・前の記録を引き継ぐ')
+            check(state(load(led))[lb]['text'] == '会場の机と椅子を誰に頼むか' and state(load(led))[lb].get('about') == good,
+                  '言い直しの後も台帳の問いに何の話かが残る')
+            # an ask made before the fields existed: a reword shown to the owner again needs what it is about
+            _append(led, [{'type': 'ask', 'label': 'P90', 'text': '古い問い', 'ground': 'fact', 'keys': ['todo:x:old'],
+                           'session': 'p0', 'created_at': now_iso()}])
+            r4 = real_ask(None, [{'text': '古い問いの言い直し', 'ground': 'fact', 'keys': ['todo:x:old'], 'reword': '語を変えた'}],
+                          session='p2', path=led)
+            check(r4[0]['status'] == 'refused' and '何の話か' in r4[0]['message'], '欄の無い古い問いの言い直しには何の話かを求める')
+            # a board that names a search: the engine runs it with the words, counts the hits and says when the prior
+            # record is "none" while hits carry amounts or decisions
+            board = Path(td) / 'board'
+            board.mkdir()
+            (board / 'search.py').write_text(
+                'import sys\nprint("x/inbox.yaml-1-  summary: |")\n'
+                'print("x/inbox.yaml:2:    desk rental USD 12 per day " + " ".join(sys.argv[1:]))\n'
+                'print("x/todo.yaml:9:    別件の行")\n')
+            (board / 'board.json').write_text(json.dumps({'board_format': 1, 'audience': 'owner', 'encryption': 'none',
+                                                          'ask_prior_search': {'command': ['search.py'], 'rule': 'r'}}))
+            r5 = real_ask(str(board), [{'text': '机の便を送るか', 'ground': 'outbound', 'about': good, 'prior_terms': ['机'],
+                                        'prior': '無し (見た範囲 = 受信の台帳)'}], session='p3', path=led)
+            rec = [x for x in load(led) if x.get('type') == 'ask'][-1]
+            check(r5[0]['status'] == 'made' and rec.get('prior_hits') == 2 and rec.get('prior_weighty') == 1,
+                  f'検索の当たり (path:行: の行) を数え、 額・決定の語の行も数えて台帳に残す {rec.get("prior_hits")} {rec.get("prior_weighty")}')
+            check('⚠️' in (r5[0].get('prior_note') or '') and any('机' in ln for ln in r5[0].get('prior_lines') or []),
+                  '前の記録が「無し」 で額の当たりがあれば、 問う側に知らせ、 引いた語で回した当たりを見せる')
+            check('⚠️' not in format_block(r5), '検索の知らせは本人の段に出さない (問う側だけ)')
+            (board / 'search.py').unlink()
+            r6 = real_ask(str(board), [{'text': '別の便を送るか', 'ground': 'outbound', 'about': good, 'prior_terms': ['机'],
+                                        'prior': '2/3 本人「会場の机で」'}], session='p3', path=led)
+            check(r6[0]['status'] == 'made' and 'script が無い' in (r6[0].get('prior_note') or ''),
+                  '検索の script が無くても問いは立ち (fail-open)、 問う側にその旨')
+            # the CLI: --about is required, and the per-question flags come one per --text
+            os.environ['BOARD_ASKS_LEDGER'] = str(led)
+            out, err = io_run(main, ['ask', '--root', td, '--text', 'CLI の問い', '--ground', 'fact'])
+            check(out[0] == 3 and '何の話か' in out[1], f'CLI: --about の無い問いは exit 3 で立てない {out}')
+            out, err = io_run(main, ['ask', '--root', td, '--text', 'CLI の問い', '--ground', 'fact', '--about', good])
+            check(out[0] == 0 and out[1].splitlines()[0] == good, f'CLI: --about があれば立ち、 段の 1 行目が何の話か {out}')
+            out, err = io_run(main, ['ask', '--root', td, '--text', '一', '--text', '二', '--ground', 'fact', '--about', good])
+            check(out[0] == 1 and '問い 1 つに 1 つ' in err, 'CLI: 問いが 2 つで --about が 1 つなら引数の誤り')
+            os.environ.pop('BOARD_ASKS_LEDGER', None)
     finally:
         for k, v in saved.items():
             if v is None:
