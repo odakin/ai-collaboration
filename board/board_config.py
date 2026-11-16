@@ -80,7 +80,7 @@ CONFIG = 'board.json'
 GITCRYPT_MAGIC = b'\x00GITCRYPT'
 AUDIENCES = {'owner', 'collaborators'}
 ENCRYPTIONS = {'git-crypt', 'none'}
-FIELDS = {'board_format', 'name', 'audience', 'encryption', 'branch', 'sources', 'readable', 'labels', 'description', 'launch_effort_floor', 'launch_model_allow', 'policy_stage_check', 'accept_review_form', 'request_desk', 'ask_prior_search'}
+FIELDS = {'board_format', 'name', 'audience', 'encryption', 'branch', 'sources', 'readable', 'labels', 'description', 'launch_effort_floor', 'launch_model_allow', 'policy_stage_check', 'accept_review_form', 'request_desk', 'ask_prior_search', 'title_fallback'}
 EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')   # a worker's reasoning effort, lowest first
 KEY_RE = re.compile(r'[a-z0-9][a-z0-9-]{1,63}')
 
@@ -192,6 +192,20 @@ def validate(cfg: dict) -> dict:
         elif cfg.get('audience') != 'owner':
             # board_asks.py runs the command on the asking machine: a collaborators board's board.json is written by others
             problems.append('ask_prior_search is for owner boards (board_asks.py runs its command on the asking machine)')
+    tf = cfg.get('title_fallback')
+    if tf is not None:
+        pats = tf.get('patterns') if isinstance(tf, dict) else None
+        ok = isinstance(tf, dict) and set(tf) <= {'patterns', 'rule'} and isinstance(tf.get('rule', ''), str) \
+            and isinstance(pats, list) and bool(pats) and all(isinstance(p, str) and p for p in pats)
+        if ok:
+            try:
+                for p in pats:
+                    re.compile(p)
+            except re.error:
+                ok = False
+        if not ok:
+            # the engine drops the summary's first clause from a worker's title when it matches one (CONTRACT.md#title-fallback)
+            problems.append('title_fallback is {"patterns": ["<regex on the summary\'s first clause>", ...], "rule": "<where the rule is written>"}')
     if problems:
         raise ValueError(f'{CONFIG}: ' + '; '.join(problems))
     return {'branch': 'main', 'labels': {}, **cfg}

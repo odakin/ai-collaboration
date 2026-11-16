@@ -597,6 +597,18 @@ machine, and that board's `board.json` is written by others. This is where an ow
 belongs rather than in a forwarder in front of the engine: measured, a requester that called the engine directly
 skipped the forwarder's desk, and the requesting window stayed the reviewer of its own request.
 
+### <a id="title-fallback"></a>The board's title fallback
+
+A board may list patterns in its `board.json`: `"title_fallback": {"patterns": ["<regex>", ...], "rule": "<where the
+rule is written>"}`. When the first clause of a request's summary (the default task part of a worker's window title,
+above) matches one of them, the engine uses the role's name instead, as it does for a restricted request. The patterns
+name what reads as a window or a role rather than the work (measured: a summary that began with the requesting
+window's own name gave the worker that name, and the requester started the worker although the printed arguments
+showed the title). The board's owner writes the words, so the engine holds no vocabulary of its own. `request` and
+`launch` print the title on its own line before the `start_session` arguments; `--title` still wins. `validate`
+refuses a field that is not a non-empty list of regular expressions with an optional `rule`. Without the field the
+title is the first clause, as before.
+
 ### <a id="edit-approval"></a>The reviewer's approval of a protected edit (approve-edit)
 
 Where the board's owner has delegated approvals of protected files (rule documents, hooks, tools and settings that the
@@ -1012,7 +1024,8 @@ python3 board_asks.py digest --root <board> --session S
   and effort, a title with the task first and the model last (the app's list cuts titles from the left, measured; the
   task = `--title`, else the summary's first clause, which ends at the first `。` `:` `：` `(` or `（` — a summary that
   opens with where the work came from, another window's name followed by its id in parentheses, named the worker's
-  window after that other window, measured, so open the summary with the work itself — and for a restricted request the role, whose summary is the
+  window after that other window, measured, so open the summary with the work itself; a first clause that matches the board's
+  [`title_fallback`](#title-fallback) patterns gives the role's name instead — and for a restricted request the role, whose summary is the
   engine's fixed text = one title for every restricted window, and the duplicate-spawn guard stopped the second worker
   sent to another role, measured), and
   the hand-off text with a step 0 = compare the app's record of this window with the asked model and effort

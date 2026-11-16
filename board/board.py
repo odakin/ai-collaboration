@@ -1810,13 +1810,37 @@ def remote_control_fallback(root, request_id, session, model, effort, worktree=F
             ' 依頼元と同じ account に載る = 依頼元が Remote Control に載っているときだけ使う):\n  '+line)
 
 
-def summary_title(summary, policy):
+def title_fallback(root):
+    """The board's `title_fallback` patterns (board.json, CONTRACT.md#title-fallback), compiled; [] when the board has
+    none or the board.json cannot be read. A summary whose first clause matches one names a window or a role rather
+    than the work (measured: a summary that began with the requesting window's own name gave the worker that name, and
+    the worker sat in the app's list under a title that read as the requester's window)."""
+    try: spec=bc.load(root).get('title_fallback')
+    except Exception: return []
+    out=[]
+    for p in (spec.get('patterns') if isinstance(spec,dict) else None) or []:
+        try: out.append(re.compile(p))
+        except (re.error,TypeError): pass
+    return out
+
+
+def summary_title(summary, policy, fallback=()):
     """The worker window's title taken from the request's summary (its first clause), or '' for a restricted request:
     there the engine writes one fixed summary for every request ("Work requested."), so every window got the same title
     and the duplicate-spawn guard stopped the second worker sent to another role (measured). The caller then falls back
-    to the role, which the event already carries (assignee), so the title shows nothing the board does not."""
+    to the role, which the event already carries (assignee), so the title shows nothing the board does not. Also ''
+    when the first clause matches one of the board's fallback patterns (title_fallback): the caller then uses the role."""
     if policy=='encrypted-metadata-only': return ''
-    return re.split(r'[。:：(（]',summary or '')[0].strip()
+    head=re.split(r'[。:：(（]',summary or '')[0].strip()
+    return '' if any(p.search(head) for p in fallback) else head
+
+
+def title_line(args):
+    """The one line that says the worker window's title before the start_session arguments (measured: the requester
+    read the arguments, saw the title differ from the template, and started the worker anyway; the title then read as
+    the requester's own window in the app's list)."""
+    t=(args or {}).get('title') or ''
+    return f'  窓の題 = {t} (要約の最初の句から。 仕事の名でなければ request / launch の --title で名指す)'
 
 
 def desktop_plan(root, role, request_id, spec, expect, session, title=None, project=None, summary=None, detach=False, policy=None, effort=None, reason=None, worktree=False, source=None, effort_quote=None, model_quote=None):
@@ -1834,7 +1858,7 @@ def desktop_plan(root, role, request_id, spec, expect, session, title=None, proj
     name=role[len('role-'):] if role.startswith('role-') else role
     if project and name.startswith(project+'-'): name=name[len(project)+1:]
     name=re.sub(r'[^a-z0-9-]+','-',name.lower()).strip('-')[:24].strip('-') or 'worker'
-    head=(title or summary_title(summary,policy) or name).strip()
+    head=(title or summary_title(summary,policy,title_fallback(root)) or name).strip()
     head=head if len(head)<=40 else head[:39]+'…'
     label=model_label(model,effort)
     args={'initiation':'user_asked','context':'fresh','title':head+(' · '+label if label else ''),'name':name,'use_worktree':bool(worktree),
@@ -1978,6 +2002,7 @@ def announce_launch(a, ev, audience):
         want=' / '.join(x for x in (args.get('model'),('effort '+args['effort']) if args.get('effort') else '') if x)
         cap=effort_cap_note(args.get('effort'))   # said before the arguments: the start lowers it without a word
         if cap: print(cap.strip())
+        print(title_line(args))
         print(f'→ 受け手を desktop app の session として起こす (本人の左の一覧に出る)。 起こすのは依頼元の Claude の start_session'
               f' (この shell からは起こせない)。 引数 = {spath} (全文が下):\n  '+json.dumps(args,ensure_ascii=False))
         print(f'  起こした後: python3 {sm_cli} <返りの local_…> で app の記録が {want or "頼んだ値"} かを読む。'
@@ -2196,7 +2221,7 @@ def codex_announce(a, ev, audience):
               ' 依頼元の shell でそのまま (理由は CODEX_EXEC_REASON で起動の検査に渡る):\n  '+codex_headless_line(a.root,rid,f,hpath))
         return None
     argv,line,hpath=codex_plan(a.root,a.to_session,rid,spec,f,project=a.project,policy=a.policy,source=a.source,
-                               title=f.get('title') or summary_title(ev.get('summary'),a.policy) or None)
+                               title=f.get('title') or summary_title(ev.get('summary'),a.policy,title_fallback(a.root)) or None)
     extra=f' / 作業 dir の外に書く dir {", ".join(f["writable-root"])}' if f.get('writable-root') else ''
     print('→ 受け手を Codex アプリに出る形で起こす (thread を作って起動文を予約し、 アプリに開かせる = アプリが走らせる。'
           f' model {f.get("model") or "既定"} / effort {f.get("effort") or "既定"} / cwd {f["cwd"]}{extra} / 機械 {f["host"]} を固定):\n  {line}')
@@ -2295,7 +2320,7 @@ def cmd_launch(a):
     a.policy=req['source_policy']; a.project=req['project']['key']
     spec=handoff_spec(a,req,launch_record(a.root,a.request))
     argv,line,_=codex_plan(a.root,asg['session_id'],a.request,spec,f,project=a.project,policy=a.policy,source=getattr(a,'source',None),
-                           title=f.get('title') or summary_title(req.get('summary'),a.policy) or None)
+                           title=f.get('title') or summary_title(req.get('summary'),a.policy,title_fallback(a.root)) or None)
     print('→ 起こす: '+line)
     run_codex_launch(a,a.request,argv,dict(os.environ))
 
@@ -2360,6 +2385,7 @@ def launch_claude_role(a, req, events):
         spath=write_outbox(a.root,a.request+'.start_session.json',json.dumps(args,ensure_ascii=False,indent=1))
         cap=effort_cap_note(args.get('effort'))   # said before the arguments: the start lowers it without a word
         if cap: print(cap.strip())
+        print(title_line(args))
         print(f'→ 既にある依頼 {a.request} の worker を desktop app の session として起こす引数 (掲示板には何も書いていない)。'
               ' 起こすのはこの session の start_session (本人が押す card なら initiation だけ own_initiative に替える)。'
               f' 引数 = {spath} (全文が下):\n  '+json.dumps(args,ensure_ascii=False))

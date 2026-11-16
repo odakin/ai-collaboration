@@ -1500,6 +1500,42 @@ class CollaboratorBoards(unittest.TestCase):
                 else: os.environ[k]=v
 
 
+class TitleFallback(unittest.TestCase):
+    """A board's title_fallback patterns (board.json, CONTRACT.md#title-fallback) drop a summary's first clause from the
+    worker's window title when it names a window or a role instead of the work; the window then takes the role's name.
+    Without the field the title is the first clause as before. validate refuses a malformed field."""
+    CFG={'board_format':1,'audience':'owner','encryption':'none'}
+    def board_with(self,extra):
+        td=tempfile.TemporaryDirectory(); self.addCleanup(td.cleanup)
+        root=Path(td.name); (root/'board.json').write_text(json.dumps({**self.CFG,**extra}))
+        subprocess.run(['git','init','-q',str(root)],check=True)   # the launch arguments go to the repository's outbox
+        return root
+    def test_first_clause_that_names_a_window_falls_back_to_the_role(self):
+        root=self.board_with({'title_fallback':{'patterns':['window$'],'rule':'docs/x.md'}})
+        pats=board.title_fallback(root)
+        self.assertEqual(board.summary_title('Reviewer window (abc1) looks over the day: more',None,pats),'')
+        self.assertEqual(board.summary_title('Fix the parser (two cases): details',None,pats),'Fix the parser')
+        args,_=board.desktop_plan(root,'role-proj-day-review','20260101T000000Z-claude-abcdef','(the request itself)',
+                                  'opus','sess-1',project='proj',summary='Reviewer window (abc1) looks over the day')
+        self.assertTrue(args['title'].startswith('day-review'),args['title'])
+        args,_=board.desktop_plan(root,'role-proj-day-review','20260101T000000Z-claude-abcdef','(the request itself)',
+                                  'opus','sess-1',project='proj',summary='Fix the parser (two cases)')
+        self.assertTrue(args['title'].startswith('Fix the parser'),args['title'])
+        self.assertIn('窓の題 = '+args['title'],board.title_line(args))
+    def test_without_the_field_the_title_is_the_first_clause(self):
+        root=self.board_with({})
+        self.assertEqual(board.title_fallback(root),[])
+        args,_=board.desktop_plan(root,'role-proj-day-review','20260101T000000Z-claude-abcdef','(the request itself)',
+                                  'opus','sess-1',project='proj',summary='Reviewer window (abc1) looks over the day')
+        self.assertTrue(args['title'].startswith('Reviewer window'),args['title'])
+        self.assertEqual(board.title_fallback(Path('/nonexistent-board-dir')),[])     # unreadable board: as before
+    def test_validate_refuses_a_malformed_field(self):
+        import board_config as bcm
+        for bad in ({'patterns':'window$'},{'patterns':[]},{'patterns':['(']},{'patterns':['x'],'other':1},{'patterns':[1]}):
+            with self.assertRaises(ValueError,msg=repr(bad)): bcm.validate({**self.CFG,'title_fallback':bad})
+        bcm.validate({**self.CFG,'title_fallback':{'patterns':['window$','役$'],'rule':'docs/x.md'}})
+
+
 class VanishingPathHints(unittest.TestCase):
     """A post that points under the desktop app's notes folder for a session family gets one warning line (the folder
     is removed when the family is archived); the post itself is not stopped."""
