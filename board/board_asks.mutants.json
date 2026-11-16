@@ -512,6 +512,36 @@
       "expect_pass": [
         "印で答えた"
       ]
+    },
+    {
+      "name": "前の記録に前提の 1 句が無くても問う側に警告しない",
+      "pairs": [
+        [
+          "    premise = prior_premise_note(prior)\n",
+          "    premise = ''\n"
+        ]
+      ],
+      "expect_fail": [
+        "前の決定を並べて前提の 1 句が無ければ"
+      ],
+      "expect_pass": [
+        "前提の 1 句がある前の記録には警告しない"
+      ]
+    },
+    {
+      "name": "前提の 1 句がある前の記録にも警告する",
+      "pairs": [
+        [
+          "    if not p or PRIOR_NONE_RE.match(p) or PRIOR_PREMISE_RE.search(p):\n",
+          "    if not p or PRIOR_NONE_RE.match(p):\n"
+        ]
+      ],
+      "expect_fail": [
+        "前提の 1 句がある前の記録には警告しない"
+      ],
+      "expect_pass": [
+        "前の決定を並べて前提の 1 句が無ければ"
+      ]
     }
   ]
 }

@@ -1,0 +1,39 @@
+{
+ "_comment": "board.py の受け取りの検収票の --decided の理由が前の決定の参照だけで前提の語が無いときの警告 (止めない、 記録に数を残す) の試験が、 検出を外した版と前提の語の除外を外した版でそれぞれ落ちるか (unittest の FAIL 行で読む)",
+ "target": "board.py",
+ "run": "python3 test_board.py -v ReviewFormUnit.test_precedent_reason_without_premise_warns ReviewFormUnit.test_full_form_is_recorded",
+ "fail_marker": "FAIL: ",
+ "pass_marker": "test_",
+ "mutants": [
+  {
+   "name": "前の決定の参照だけの理由に警告しない",
+   "pairs": [
+    [
+     "    unshown=precedent_without_premise(decided)\n",
+     "    unshown=[]\n"
+    ]
+   ],
+   "expect_fail": [
+    "test_precedent_reason_without_premise_warns"
+   ],
+   "expect_pass": [
+    "test_full_form_is_recorded"
+   ]
+  },
+  {
+   "name": "前提の語を書いた理由にも警告する",
+   "pairs": [
+    [
+     " and not _PREMISE_RE.search(d.partition('=>')[2])]",
+     "]"
+    ]
+   ],
+   "expect_fail": [
+    "test_precedent_reason_without_premise_warns"
+   ],
+   "expect_pass": [
+    "test_full_form_is_recorded"
+   ]
+  }
+ ]
+}

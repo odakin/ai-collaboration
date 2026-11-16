@@ -970,6 +970,21 @@ _REF_ONLY_RE=re.compile(r'[\w.\-]+@[0-9a-f]{7,40}|[\w.\-~/]+\.[A-Za-z0-9]{1,5}(?
 # whose checks all confirmed the submission's facts passed a conclusion that the submission's own list of added inputs
 # placed in another of the request's options).
 _VERDICT_RE=re.compile(r'(?s)none:\s*\S.*|.*\S\s*(?:→|->)\s*\S.*')
+# A question decided at review whose reason only points at an earlier decision ("〜の裁定どおり", a ledger item number,
+# "前例") with no word for that decision's premise: warned, never refused (claude-config conventions/actor-attribution.md
+# #premise-before-rank; measured: an acceptance kept a placement "as the ledger's ruling" after a later draft had removed
+# its reason). Calibrated on an owner board's past acceptances: a few percent of the decided lines warn, the measured
+# case among them, and the line that decided it again with the premise does not. The count goes into the event so that
+# the threshold can be revisited.
+_PRECEDENT_RE=re.compile(r'(?<!推す)(?:裁定|決定|判断|判定|答え|決め|台帳|依頼書|前例|基準)[^()（）=、。]{0,8}?(?:どおり|通り)'
+                         r'|(?:裁定|決定|判断)[^()（）]{0,80}?決めて(?:いる|いた)|台帳\s*[A-Z]{1,2}\d'
+                         r'|\b[A-Z]{1,2}\d+(?:\s*の\s*\d+)?\s*(?:どおり|通り)|前例')
+_PREMISE_RE=re.compile(r'前提|成り立|趣旨|still holds?|premise',re.I)
+
+
+def precedent_without_premise(decided):
+    """The --decided lines whose reason (after '=>') rests on an earlier decision without saying its premise holds."""
+    return [d for d in decided if _PRECEDENT_RE.search(d.partition('=>')[2]) and not _PREMISE_RE.search(d.partition('=>')[2])]
 
 
 def _owner_grounds():
@@ -1134,6 +1149,11 @@ def review_form(a, events, cfg, ev):
                for l in leftover if not re.match(r'(?:in|out)\b',l)]
     if problems:
         raise ValueError(f'accept の検収票が足りない (規則 = {rule}、 書き方 = {REVIEW_FORM_DOC}):\n  - '+'\n  - '.join(problems))
+    unshown=precedent_without_premise(decided)
+    for d in unshown:
+        print(f"⚠️ --decided「{d[:80]}」 の理由が前の決定の参照だけ = その決定の前提 (理由) が提出の後の状態でも成り立つかを 1 句で書く"
+              " (示せなければ --owner-ruling fact: <問い> に回す)。 警告だけで、 受け取りは止めない"
+              " (claude-config conventions/actor-attribution.md#premise-before-rank)",file=sys.stderr)
     req=next(e for e in events if e['event_id']==a.request and e['kind']=='request')
     subs=[e for e in events if e.get('request_id')==a.request and e['kind']=='submit']
     try: ws=bc.workspace(a.root) if getattr(a,'root',None) else None
@@ -1153,6 +1173,7 @@ def review_form(a, events, cfg, ev):
     comp=_compactions(native)
     lines=[*(f'review-check: {c}' for c in checked),*(f'review-verdict: {v}' for v in verdict),
            *(f'review-decided: {d}' for d in decided),
+           *([f'review-premise-unshown: {len(unshown)}'] if unshown else []),
            *(f'review-owner: {o}' for o in owner),*(['review-questions: none'] if none_q else []),
            *(f'review-leftover: {l}' for l in leftover),
            f'review-prior: {len(prior)}'+(' ('+', '.join(e['event_id'] for e,_ in prior[-10:])+')' if prior else ''),

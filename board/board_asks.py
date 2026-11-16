@@ -49,7 +49,9 @@ What it is:
   appended); the engine runs it, shows the hits to the asking side (stderr), records the words and the number of hits,
   and says so when hits carry amounts or decisions while the prior record says none. Fail-open (no field, a missing
   script, an error: the ask is made with a note). Measured: a recommended answer was built from the newest mails only,
-  went out, and contradicted an earlier decision and quote that one search found.
+  went out, and contradicted an earlier decision and quote that one search found. A prior record that names something
+  without a word for the earlier decision's premise (its reason, whether it still holds) gets a warning on the asking
+  side; the ask still stands (`prior_premise_note`, claude-config conventions/actor-attribution.md 17).
 - A **withdraw** closes an ask decided elsewhere. **shown** records which asks a session displayed.
 
 Store: an append-only JSON-lines ledger local to the board checkout and shared by every session on the machine
@@ -121,6 +123,8 @@ PRIOR_HIT_DEFAULT = r'^[^\s:]+:\d+:'          # grep's "path:line:" form (the hi
 PRIOR_NONE_RE = re.compile(r'^\s*[（(]?\s*(?:無し|なし|none)', re.I)
 PRIOR_WEIGHTY_RE = re.compile(r'(?:US\$|USD|\$)\s?\d|\d[\d,.]*\s?(?:ドル|円|万円|\$|USD|EUR|€)|決定|決め|承認|それでよい|合意|約束'
                               r'|\bdecided\b|\bagreed\b|\bpromised\b', re.I)
+# the words that carry the premise of an earlier decision in the prior record (its reason, and whether it still holds)
+PRIOR_PREMISE_RE = re.compile(r'前提|理由|成り立|確かめられない|\bpremise\b|\breason\b|\bstill holds?\b', re.I)
 # work-side words the owner cannot read in "what this is about" (measured: questions that named a ledger file, an
 # English identifier or a case without its origin were answered "what is this?")
 ABOUT_WORKSIDE = (
@@ -614,14 +618,30 @@ def prior_search(root, terms):
     return out
 
 
+def prior_premise_note(prior):
+    """'' unless the prior record names something (not "none") without a word for the premise of the earlier decision.
+    A warning only, the ask still stands (claude-config conventions/actor-attribution.md 17 and #premise-before-rank:
+    an earlier decision is listed with its reason and whether that reason still holds; stopping would fill the field
+    with a token "premise: still holds", so the count is watched first)."""
+    p = (prior or '').strip()
+    if not p or PRIOR_NONE_RE.match(p) or PRIOR_PREMISE_RE.search(p):
+        return ''
+    return ('⚠️ 前の記録に前の決定があるなら、 その理由 (前提) と今も成り立つかを 1 句添える'
+            ' (--reword で --prior に「前提 = …、 今も成り立つ / 成り立たない / 確かめられない」)。'
+            ' 額・約束だけなら要らない。 警告だけで、 問いは立てた')
+
+
 def prior_note(prior, found):
     """The asking side's line after the search (stderr / JSON, not the owner's block)."""
+    premise = prior_premise_note(prior)
     if not found.get('ok'):
-        return found.get('note') or ''
-    if found['weighty'] and PRIOR_NONE_RE.match(prior or ''):
-        return (f'⚠️ 前の記録を「無し」 としたが、 当たり {found["hits"]} 行のうち {found["weighty"]} 行に額・決定の語がある ='
+        base = found.get('note') or ''
+    elif found['weighty'] and PRIOR_NONE_RE.match(prior or ''):
+        base = (f'⚠️ 前の記録を「無し」 としたが、 当たり {found["hits"]} 行のうち {found["weighty"]} 行に額・決定の語がある ='
                 ' 当たりを読み、 前の決定・額・約束なら問いを --reword で言い直して --prior に書く')
-    return f'前の記録の検索: 当たり {found["hits"]} 行 (額・決定の語のある行 {found["weighty"]})'
+    else:
+        base = f'前の記録の検索: 当たり {found["hits"]} 行 (額・決定の語のある行 {found["weighty"]})'
+    return ' '.join(x for x in (base, premise) if x)
 
 
 # ---------- operations ----------
@@ -2548,6 +2568,17 @@ def selftest():
                                         'prior': '2/3 本人「会場の机で」'}], session='p3', path=led)
             check(r6[0]['status'] == 'made' and 'script が無い' in (r6[0].get('prior_note') or ''),
                   '検索の script が無くても問いは立ち (fail-open)、 問う側にその旨')
+            # the premise of an earlier decision (actor-attribution 17): a warning to the asking side, never a refusal
+            check('前提' in (r6[0].get('prior_note') or '') and '⚠️' not in format_block(r6),
+                  '前の決定を並べて前提の 1 句が無ければ、 問う側に警告 (本人の段には出さない)')
+            r7 = real_ask(str(board), [{'text': '三つ目の便を送るか', 'ground': 'outbound', 'about': good,
+                                        'prior_terms': ['机'],
+                                        'prior': '2/3 本人「会場の机で」 (前提 = 会場が机を貸す、 今も成り立つ)'}],
+                          session='p3', path=led)
+            check(r7[0]['status'] == 'made' and '前提) と今も' not in (r7[0].get('prior_note') or ''),
+                  '前提の 1 句がある前の記録には警告しない')
+            check(prior_premise_note('無し (見た範囲 = 台帳)') == '' and prior_premise_note('') == '',
+                  '前の記録が無し・空なら前提の警告は出さない')
             # the CLI: --about is required, and the per-question flags come one per --text
             os.environ['BOARD_ASKS_LEDGER'] = str(led)
             out, err = io_run(main, ['ask', '--root', td, '--text', 'CLI の問い', '--ground', 'fact'])

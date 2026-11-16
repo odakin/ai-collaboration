@@ -3139,6 +3139,25 @@ class ReviewFormUnit(unittest.TestCase):
         for bad in ('選択肢 (i)','提出の 3 点 →','→ (ii)','none:','none:   '):
             self.refused(ev,"'none: <理由>'",checked=['回した x.py → 合う'],no_questions=True,verdict=[bad])
 
+    def test_precedent_reason_without_premise_warns(self):
+        # a question closed "as the earlier decision says" with no word for that decision's premise: a warning and a
+        # count in the event, never a refusal (claude-config conventions/actor-attribution.md#premise-before-rank)
+        import contextlib, io
+        ev=list(chain())
+        bare='机の置き場を替えるか => 今のまま (台帳 D7 の 2 = 本人の裁定が会場の机と決めている)'
+        with_premise='椅子の数を替えるか => 今のまま (依頼元の判断どおり。 その前提 = 参加者の数は変わっておらず今も成り立つ)'
+        err=io.StringIO()
+        with contextlib.redirect_stderr(err):
+            d=self.form(ev,checked=['回した count.py → 合う'],decided=[bare,with_premise,'A か B => A (中身の理由)'])
+        self.assertIn('review-premise-unshown: 1',d.splitlines())
+        self.assertIn('前の決定の参照だけ',err.getvalue()); self.assertIn('机の置き場',err.getvalue())
+        self.assertNotIn('椅子の数',err.getvalue())
+        err=io.StringIO()
+        with contextlib.redirect_stderr(err):
+            d=self.form(ev,checked=['回した count.py → 合う'],decided=[with_premise,'X => Y (推す答えどおり、 何も変えない)'])
+        self.assertNotIn('review-premise-unshown',d)
+        self.assertNotIn('前の決定の参照だけ',err.getvalue())
+
     def test_full_form_is_recorded(self):
         ev=list(chain())
         d=self.form(ev,checked=['回した python3 count.py → 12 件で数が合う'],decided=['A か B => A (中身の理由)'],

@@ -552,7 +552,12 @@ A board whose `board.json` sets `accept_review_form` (`{"rule": "<where the rule
   (decided at review, under the requester's delegation) or `--owner-ruling '<ground>: <question>'` with a ground from
   the owner-asks closed list ([#owner-asks](#owner-asks): `protected`, `rule`, `outbound`, `choice`, `policy`,
   `fact`); `--no-questions` says there was none. Only the questions sorted to the owner are meant to reach the owner
-  (measured: most questions relayed to an owner from submissions needed no ruling, and the owner said so).
+  (measured: most questions relayed to an owner from submissions needed no ruling, and the owner said so). A
+  `--decided` reason that only points at an earlier decision ("〜の裁定どおり", a ledger item, "前例") with no word for
+  that decision's premise is warned on stderr and counted in the event (`review-premise-unshown: <n>`), never refused:
+  closing a question "as decided before" shows that the decision's reason still holds after the submission, or the
+  question goes to the owner as `fact` (claude-config `actor-attribution.md#premise-before-rank`; measured: an
+  acceptance kept a placement as the ledger's ruling after a later draft had removed its reason).
 - Optional `--leftover 'in <where the confirmed policy is>: <rest>'` or `'out: <rest>'`: whether a follow-up request
   for the submission's out-of-scope rest stays inside the confirmed policy; outside it, a policy stage comes first
   (measured: follow-ups made from acceptances' out-of-scope rests widened a protection beyond what the owner had
@@ -803,7 +808,10 @@ python3 board_asks.py digest --root <board> --session S
   record is searched once with its subject's words, and the ask carries the words (`--prior-term`) and one line of the
   earlier decisions (whose words, which day), the earlier quote's amount and the promises to the other side, with where
   they are (`--prior`; when there are none, `無し (見た範囲 = …)`). If the recommended answer changes an earlier
-  decision, the line says so. The owner's block shows it under the question. An owner board may name the search in
+  decision, the line says so. An earlier decision is listed with its reason and whether that reason still holds now
+  (`前提 = …、 今も成り立つ / 成り立たない / 確かめられない`); a line that names something without a word for the premise
+  gets a warning on the asking side, and the ask still stands (claude-config `actor-attribution.md` 17). The owner's
+  block shows it under the question. An owner board may name the search in
   board.json (`ask_prior_search: {"command": [<script relative to the board>, <argument>...], "hit_line": <regex of a
   hit line, default grep's "path:line:">, "rule": <where the rule is written>}`; owner boards only, because the engine
   runs it on the asking machine): the engine runs it with the words appended, shows the hits to the asking side on
