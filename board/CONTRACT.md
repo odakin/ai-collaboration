@@ -653,7 +653,11 @@ written as new), the candidate's SHA-256 (of its UTF-8 text with newlines unifie
 are computed by the board, not typed. Name the worker's candidate itself, not a copy made for testing: the guard
 counts a write to the named candidate as the reviewer authoring it. The board does not decide the delegated scope:
 the guard checks the same event again in git against the owner's delegation setting and its floor, and again each
-time the recorded approval is used. `edit-approvals` lists the approvals with the commit that applied each (a commit
+time the recorded approval is used. Read the floor before sending a file to the reviewer: the guard judges data files
+by type, so a JSON, TOML, YAML or `.rules` file it stops is outside the delegation unless the change only adds hook
+entries or `permissions.deny` entries to a settings file, whatever the file holds (a ledger a hook reads included).
+The board posts an approval for such a file and the guard refuses it at `apply` (measured), so ask the owner from the
+start. `edit-approvals` lists the approvals with the commit that applied each (a commit
 that touches the file and carries `Reviewer-Approved: <event id>`).
 
 ## <a id="path-touches"></a>Declaring the files you are about to write (touch)
