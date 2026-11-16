@@ -1500,6 +1500,25 @@ class CollaboratorBoards(unittest.TestCase):
                 else: os.environ[k]=v
 
 
+class VanishingPathHints(unittest.TestCase):
+    """A post that points under the desktop app's notes folder for a session family gets one warning line (the folder
+    is removed when the family is archived); the post itself is not stopped."""
+    def test_summary_reference_and_deliverable_are_read(self):
+        n=event('note',3,agent='claude')
+        n['summary']='候補は ~/Library/Application Support/Claude/side-session-notes/local_1/cand.txt に置いた'
+        n['references']=['side-session-notes/local_1/a.md']; n['deliverables']=['plans/ok.md']
+        h=board.vanishing_path_hints(n)
+        self.assertEqual(len(h),1); self.assertIn('⚠️',h[0]); self.assertIn('2 件',h[0])
+        self.assertIn('side-session-notes-deleted-on-archive',h[0]); self.assertIn('side-session-notes/local_1/cand.txt',h[0])
+    def test_no_hint_without_the_folder(self):
+        r,c,sub=chain()
+        self.assertEqual(board.vanishing_path_hints(sub),[])
+        self.assertEqual(board.vanishing_path_hints({'kind':'note','summary':None}),[])
+    def test_long_path_is_cut(self):
+        n=event('note',3,agent='claude'); n['summary']='side-session-notes/'+'x'*300
+        self.assertTrue(board.vanishing_path_hints(n)[0].endswith('…'))
+
+
 class StateAndKindHints(unittest.TestCase):
     """Posts and watch say the request's state as just read, and warn when a post's kind will not do what its text
     asks (a note never answers a blocker; a stop posted as a note never reaches the requester as a question)."""

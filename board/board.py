@@ -178,6 +178,27 @@ def kind_hints(ev, w, me):
     return []
 
 
+VANISHING_DIR='side-session-notes'   # the desktop app's notes folder for a family of sessions: removed when the family is archived
+
+
+def vanishing_path_hints(ev):
+    """A warning for a post whose summary, acceptance, references or deliverables point under the desktop app's notes
+    folder for a session family (printed with kind_hints, on stderr; the post is not stopped). The app removes that
+    folder when the family is archived, so the board's record keeps a path that no longer resolves (measured: most of
+    the files a thread's notes pointed to there were gone after the family was archived;
+    claude-config conventions/multi-session-coordination.md#side-session-notes-deleted-on-archive)."""
+    texts=[ev.get('summary'),ev.get('acceptance'),*(ev.get('references') or []),*(ev.get('deliverables') or [])]
+    hits=[]
+    for t in texts:
+        if not isinstance(t,str) or VANISHING_DIR not in t: continue
+        hits+=[w for w in t.split() if VANISHING_DIR in w] or [t]
+    if not hits: return []
+    first=hits[0] if len(hits[0])<=120 else hits[0][:119]+'…'
+    return [f"⚠️ この投稿が指す path のうち {len(hits)} 件は、 desktop app が session の家族を archive するときに丸ごと消す folder"
+            f" ({VANISHING_DIR}) の下 = 後で読めなくなる。 残すものは repo の中に写し、 その path で書き直す"
+            f" (claude-config conventions/multi-session-coordination.md#side-session-notes-deleted-on-archive): {first}"]
+
+
 def other_party(w, me):
     """For a note inside a request, the participant on the other side: the claimant (else the assignee) for the
     reviewer, the reviewer for anyone else. me = (agent, session)."""
@@ -3028,7 +3049,7 @@ def main():
     if a.command in {'request','claim','submit','accept','blocker','revise','update','handover','release','abandoned'} or (a.command=='note' and a.request):
         note=counterpart_note((a.agent,a.session),ev,events,root=a.root)
         if note: print(note)
-    hints=kind_hints(ev,w_before,(a.agent,a.session))
+    hints=kind_hints(ev,w_before,(a.agent,a.session))+vanishing_path_hints(ev)
     if hints:
         # last, on stderr: a caller that pipes stdout through `tail` still sees it, and `2>&1 | tail` keeps it
         sys.stdout.flush()
