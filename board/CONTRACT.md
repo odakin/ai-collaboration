@@ -619,7 +619,10 @@ earlier work (measured): a glob in an option value of a command that is not a re
 more (a common `import sys`) counts as the reviewer's own when it appears in the text of an earlier command (a
 `python3 -c` string). A candidate whose path ends with the target's repository-relative path makes that relative
 name count before the pickup too, so the worker names candidates flatly (`<repo>__<dir>__<name>`) in a new
-directory (measured). Any other command of the
+directory (measured). That directory is the request's own: it holds only that submission's files (its candidates and
+the absolute paths the submit lists as deliverables; `.DS_Store` aside). The guard refuses a candidate kept in a shared
+folder before it reads the reviewer's transcript, because a note the reviewer writes into that folder would count as
+writing the candidate (measured). Any other command of the
 reviewer's that names the file, the candidate or a directory above the file must be made of reading commands only
 (the rule text lists them); review against copies made with `cp` to an absolute destination outside the
 repository and the candidate's directory, not links.
