@@ -483,6 +483,16 @@ without posting. An attempted post is saved (`.local/outbox/` when a whole-repo
 board has an ignored `.local/`, else `<git dir>/board-outbox/`); after an uncertain network outcome use `retry --event-id <id>` with the same
 identity and policy, never a second request.
 
+<a id="tools-reading-events"></a>A tool that reads a thread from `events/` itself (instead of `show`) owes two things. (1) Order the events
+the way the engine does (the branch's commit order, board-view's `event_paths`), not by file name: a `request` and the
+reviewer `handover` the forwarder adds are written by one call within the same second, so a file-name sort orders them
+by the random suffix of the event id, and a reducer that sees the handover first keeps the requester as the reviewer
+(measured). Without the commit order, put a `request` before a `handover` within the same second. (2) Treat the
+checkout as possibly stale (only a clean owner board that is a whole repository is fast-forwarded): read the state
+again with `show --request <id> --json --sync` immediately before posting a move decided from the checkout, and do not
+post if the status or the reviewer changed (measured: a test board inside a project directory never saw its own posts
+in the working tree). A test of such a tool against the real engine needs a board that is the whole repository.
+
 ### <a id="policy-stage-check"></a>Policy stage of a request
 
 A request says which stage of [policy before implementation](../../claude-config/conventions/policy-before-implementation.md#delegating)
