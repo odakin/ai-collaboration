@@ -93,6 +93,8 @@ worker の起動はカードを押す 2 段のまま。 重ければ [DESIGN](bo
 
 owner 専用の掲示板から engine を移し、 共同研究の repo に層2 の掲示板を置けるようにした。 入口 = [board/README.md](board/README.md)、 運用の契約 = [board/CONTRACT.md](board/CONTRACT.md#boards-and-audiences)、 判断 = [DESIGN](DESIGN.md#board-engine) と [board/DESIGN.md](board/DESIGN.md#one-engine-many-boards)。 次 = 実際の共同研究の掲示板で、 共同研究者側の session が clone して読めるかを確かめる (読む人の gate は名前と path だけを見る = 文章の中身は書き手の判断)。 session の冒頭に要注意 thread を出す hook = `board/board-session-start.py` (配線は各自の settings、 判断 = [board/DESIGN.md](board/DESIGN.md#session-start-surface))。 新しい session から実際に発火したところはまだ見ていない。
 
+未着手 = path の宣言 (`touch`) は宣言した session が終わっていても 🔴 を出す (実測)。 engine の `session_state` を `touch_verdict` と `untouch` の「次の持ち主」 に使い、 ended なら待たない形に (直すなら [board/CONTRACT.md](board/CONTRACT.md#path-touches) と試験も。 今の見方 = claude-config `closing-sweep.md#concurrent` の 2)。
+
 ## 現在地：レビュー成果物の不変性確認
 
 再開前後の比較には [snapshot helper](scripts/review-artifact-snapshot.py) を使える。次の利用時は baseline の対象と writer の停止を確認し、追加物の回収範囲は呼び元で指定する。運用入口は [CLAUDE](CLAUDE.md)。
