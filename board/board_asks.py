@@ -23,7 +23,13 @@ What it is:
   and report"), including asks to ratify such a change (measured). The validator is a separate program
   (`BOARD_ASKS_VALIDATOR`, default = `owner-ask-validate.py` in a sibling `claude-config/scripts/`) so this engine does
   not depend on any one user's protection engines: without one, such asks are made and the output says the gate could
-  not judge.
+  not judge. An ask (and a reword) with a recommended answer also passes a **direction check**: an answer whose verb
+  the question negates in its final predicate ("…にしないようにしますか" recommended "する") is refused, because the
+  owner cannot tell which way the answer goes (measured); `--negation-reason '<why>'` makes it and keeps the reason.
+  The check is language-specific, so it is a separate module loaded by path (`BOARD_ASKS_DIRECTION`, default =
+  `ja_question_direction.py` in a sibling `claude-config/scripts/lib/`; `none` turns it off); without it the asks are
+  made (silently when the module is absent, with a note when it fails). A reword keeps the earlier text and the
+  earlier recommended answer in the ask's `rewords` (`show`).
 - An **answer** records the owner's words verbatim, the labels it was bound to and how: `label` (the owner wrote a
   label this session showed), `order` (a position in the only ask block of the latest reply), `confirmed` (the owner
   confirmed the reading the agent stated), or `guess` (no safe binding: candidates listed). A line that asks back or
@@ -66,7 +72,8 @@ CLI:
                                    --text '<question>' --recommend '<answer>' --ground <g> [--key K]...
                                    [--prior-term <word>... --prior '<earlier decisions, amounts, promises and where>']
                                    [--evidence <repo>@<rev>:<path>] [--applied] [--denied '<guard's reason>']
-                                   [--reask '<what changed>'] [--reword '<what changed>'] [--project P] [--json]
+                                   [--reask '<what changed>'] [--reword '<what changed>'] [--negation-reason '<why>']
+                                   [--project P] [--json]
     python3 board_asks.py answer   --root <board> --label H12 [--label …] --quote '<owner words>' --binding label|order|confirmed|guess
                                    [--reading '<one line>'] [--recorded <path or repo@commit>]
     python3 board_asks.py withdraw --root <board> --label H12 --reason '<why>'
@@ -257,7 +264,10 @@ def state(recs):
         elif t == 'reword':
             a = asks.get(r.get('label'))
             if a is not None and a['status'] == 'open':
-                a.setdefault('rewords', []).append({'from': a['text'], 'reason': r.get('reason', ''), 'created_at': r.get('created_at', '')})
+                # the earlier recommended answer too (measured: a question reworded because its button ran against its
+                # negation could not be reproduced from the ledger's view, which kept only the earlier text)
+                a.setdefault('rewords', []).append({'from': a['text'], 'from_recommend': a.get('recommend', ''),
+                                                    'reason': r.get('reason', ''), 'created_at': r.get('created_at', '')})
                 a['text'] = r.get('text') or a['text']
                 for k in ('recommend', 'about', 'effect', 'prior', 'prior_terms', 'prior_hits'):
                     if r.get(k):
@@ -309,6 +319,41 @@ def _validator():
     if env:
         return Path(os.path.expanduser(env))
     return HERE.parent.parent / 'claude-config' / 'scripts' / 'owner-ask-validate.py'
+
+
+def _direction_path(direction=None):
+    if direction is not None:
+        return Path(direction) if direction else None
+    env = os.environ.get('BOARD_ASKS_DIRECTION')
+    if env is not None:
+        return None if env.strip().lower() in ('', 'none', 'off', '0') else Path(os.path.expanduser(env))
+    return HERE.parent.parent / 'claude-config' / 'scripts' / 'lib' / 'ja_question_direction.py'
+
+
+def direction_gate(text, recommend, reason='', direction=None):
+    """(ok, message, flagged) of the direction check: the question's final predicate must not negate the verb of the
+    recommended answer's first word (the module answers in the owner's language; this engine only passes the two
+    strings). The module is loaded by path (functions leading_answer / flipped / notice). Absent module or no
+    recommendation = ok and silent; a module that fails = ok with a note; `reason` (--negation-reason) makes a flagged
+    ask with the reason (flagged = True: the reason is kept on the ask)."""
+    p = _direction_path(direction)
+    if not (recommend or '').strip() or p is None or not p.exists():
+        return True, '', False
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('board_asks_direction', str(p))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        first = mod.leading_answer(recommend)
+        hits = mod.flipped(text or '', [first] if first else [])
+        if not hits:
+            return True, '', False
+        msg = str(mod.notice(text or '', hits))
+    except Exception as e:   # noqa: BLE001 (the check could not judge = the ask is made, with a note)
+        return True, f'⚠️ 向きの部品が答えない ({e.__class__.__name__}) = 問いと推す答えの向きを確かめずに立てた', False
+    if (reason or '').strip():
+        return True, f'打ち消しで聞く理由: {reason.strip()[:200]}', True
+    return False, (msg + ' (打ち消しで聞くのが正しいなら --negation-reason \'<理由>\' を付けて立て直す)'), False
 
 
 def _resolve_evidence(evidence, root=None):
@@ -750,16 +795,29 @@ def _decide(root, st, it, me):
     return 'ask', dict(it, text=text, keys=keys, _note=note)
 
 
-def ask(root, items, *, session=None, agent='claude', project='', path=None, validator=None):
-    """items = [{text, recommend, ground, keys, evidence, applied, reask}]
+def ask(root, items, *, session=None, agent='claude', project='', path=None, validator=None, direction=None):
+    """items = [{text, recommend, ground, keys, evidence, applied, reask, negation_reason}]
     -> [{status: made|reused|answered-before|refused, label?, message}].
-    The validator runs outside the ledger lock (it may take seconds); the lock covers only the decision and the append."""
+    The validator runs outside the ledger lock (it may take seconds); the lock covers only the decision and the append.
+    `direction` = the direction module's path ('' = off; default = _direction_path())."""
     p = Path(path) if path else ledger_path(root)
     me = _me(session)
     pre = []
     st0 = state(load(p))
     for it in items:
         kind, payload = _decide(root, st0, it, me)
+        if kind in ('ask', 'reworded'):
+            nreason = (it.get('negation_reason') or '').strip()
+            dok, dmsg, flagged = direction_gate(payload.get('text'), payload.get('recommend'), nreason, direction)
+            if not dok:
+                refused = {'status': 'refused', 'text': payload.get('text', ''), 'message': dmsg}
+                if payload.get('label'):
+                    refused['label'] = payload['label']
+                pre.append(('refused', refused, None, None))
+                continue
+            payload = dict(payload, _dir_note=dmsg, negation_reason=nreason[:MAX_TEXT] if flagged else '')
+            if kind == 'reworded' and dmsg:
+                payload['message'] = f"{payload['message']} {dmsg}"
         if kind in ('ask', 'reworded') and payload.get('ground') in PRIOR_GROUNDS:
             found = prior_search(root, payload.get('prior_terms') or [])
             payload = dict(payload, prior_hits=found['hits'], prior_weighty=found['weighty'],
@@ -768,7 +826,7 @@ def ask(root, items, *, session=None, agent='claude', project='', path=None, val
             ok, msg = gate(payload.get('ground'), payload.get('evidence'), applied=bool(payload.get('applied')),
                            validator=validator, session=me, denied=payload.get('denied') or '', root=root)
             note = payload.get('_note')
-            msg = ' '.join(x for x in (msg, note) if x)
+            msg = ' '.join(x for x in (msg, note, payload.get('_dir_note')) if x)
             pre.append(('ask', payload, ok, msg))
         else:
             pre.append((kind, payload, None, None))
@@ -793,6 +851,8 @@ def ask(root, items, *, session=None, agent='claude', project='', path=None, val
                             'prior': payload.get('prior', ''), 'prior_terms': payload.get('prior_terms') or [],
                             'prior_hits': payload.get('prior_hits'),
                             'reason': payload['reason'][:MAX_TEXT], 'session': me, 'created_at': now_iso()})
+                if payload.get('negation_reason'):
+                    new[-1]['negation_reason'] = payload['negation_reason']
                 new.append({'type': 'shown', 'labels': [payload['label']], 'session': me, 'created_at': now_iso()})
                 out.append(payload)
                 continue
@@ -813,6 +873,8 @@ def ask(root, items, *, session=None, agent='claude', project='', path=None, val
                 rec.update(prior=(payload.get('prior') or '').strip(),
                            prior_terms=[t for t in (payload.get('prior_terms') or []) if t],
                            prior_hits=payload.get('prior_hits'), prior_weighty=payload.get('prior_weighty'))
+            if payload.get('negation_reason'):
+                rec['negation_reason'] = payload['negation_reason']
             new.append(rec)
             out.append({'status': 'made', 'label': label, 'text': rec['text'], 'recommend': rec['recommend'], 'message': msg,
                         'ground': rec['ground'], 'about': rec['about'], 'effect': rec['effect'], 'prior': rec.get('prior', ''),
@@ -1602,6 +1664,14 @@ def approval_gaps(text, st):
     return gaps
 
 
+# Added to the send-backs that ask for an addendum with a question or a way to answer: the turn-closing box was shown
+# before the addendum and still holds its own question (measured: an addendum's answer word was the box's button word
+# for another question, and the owner's one word answer could be read as either; claude-config
+# conventions/concise-output.md#question-button-same-words 4). The send-back's own judgement is unchanged.
+BOX_WORDS_NOTE = ('turn の終わりの箱 (次の一手の欄) が別の問いで開いているなら、 追記の答え方の語を箱のボタンと違う語にするか、'
+                  ' その問いで箱を出し直す')
+
+
 def hook_stop(root, data, path=None):
     """Stop: record the ask labels the reply printed; send back once (a) a reply that asks the owner in a paragraph
     without an ask label, (b) a reply after a bound answer whose first line does not name the bound label, (c) a reply
@@ -1692,6 +1762,8 @@ def hook_stop(root, data, path=None):
                     f' ({shown})。 このままでは本人が答えても承認として記録できない (守りの道具は、 答えの直前の返事に file ごとの名と'
                     f' 頭があるときだけ答えを承認と読む)。 python3 {here} list --block --label <印> が出す問いの段を要約せずに貼る'
                     ' 短い追記にする (CONTRACT.md#owner-asks)')
+    if loose or uses:
+        msgs.append(BOX_WORDS_NOTE)
     if not msgs:
         return None
     with contextlib.suppress(OSError):
@@ -1775,6 +1847,8 @@ def main(argv=None):
     ap.add_argument('--reask', default='', help='同じ問いに本人の答えが既にあっても問い直す理由 (何が変わったか)')
     ap.add_argument('--reword', default='', help='開いた問いを同じ印のまま言い直す (同じ key、 何を変えたか)')
     ap.add_argument('--denied', default='', help='その変更を書く時の守りが止めた理由 (判定の道具が「要らない」 と言っても立てる)')
+    ap.add_argument('--negation-reason', default='',
+                    help='問いの述語の打ち消しと推す答えの向きが逆でも、 打ち消しで聞く理由 (向きの門を通して問いに残す)')
     ap.add_argument('--not-from-review', default='',
                     help='検収係の受け取りから出したのでない問いの印 (この窓の依頼に最近の受け取りがあるとき、 request: などの key が無ければ要る)')
     ap.add_argument('--label', action='append', default=[])
@@ -1811,7 +1885,8 @@ def main(argv=None):
                       'about': a.about[i] if a.about else '', 'effect': a.effect[i] if a.effect else '',
                       'prior': a.prior[i] if a.prior else '', 'prior_terms': a.prior_term,
                       'applied': a.applied, 'reask': a.reask, 'denied': a.denied, 'reword': a.reword,
-                      'not_from_review': a.not_from_review} for i, t in enumerate(a.text)]
+                      'not_from_review': a.not_from_review, 'negation_reason': a.negation_reason}
+                     for i, t in enumerate(a.text)]
             res = ask(a.root, items, session=a.session, agent=a.agent, project=a.project)
             _print(res) if a.json else print(format_block(res))
             if not a.json:
@@ -2180,6 +2255,7 @@ def selftest():
             write_tr(('x', f'〔問 {l9}〕 問い九\n\nもう一つ、 こちらも決めてください'))
             stop = hook_stop(None, {'session_id': 's8', 'transcript_path': str(tr)}, path=led)
             check(stop and '印' in stop, '印のある問いと並んでも、 印の無い問いの段は差し戻す')
+            check(BOX_WORDS_NOTE in stop, '問いの追記を求める差し戻しは、 開いた箱のボタンと違う答えの語にする 1 句を添える')
             check(hook_stop(None, {'session_id': 's8', 'transcript_path': str(tr)}, path=led) is None, '同じ返事は繰り返し差し戻さない')
             write_tr(('x', '下書きです。\n```\n担当者様\nこの形で進めてよいですか。\n```\n> 引用: よいですか\n'))
             check(hook_stop(None, {'session_id': 's6', 'transcript_path': str(tr)}, path=led) is None,
@@ -2588,6 +2664,53 @@ def selftest():
             out, err = io_run(main, ['ask', '--root', td, '--text', '一', '--text', '二', '--ground', 'fact', '--about', good])
             check(out[0] == 1 and '問い 1 つに 1 つ' in err, 'CLI: 問いが 2 つで --about が 1 つなら引数の誤り')
             os.environ.pop('BOARD_ASKS_LEDGER', None)
+            # the direction check (a stub module: the engine only passes the two strings; the language part is elsewhere)
+            dled = Path(td) / 'dir.jsonl'
+            dmod = Path(td) / 'dir_stub.py'
+            dmod.write_text('def leading_answer(t):\n    return t.split(" ")[0]\n'
+                            'def flipped(q, answers):\n'
+                            '    return [{"answer": a, "verb": a, "negated": a[:-1] + "ない"} for a in answers if a[:-1] + "ない" in q]\n'
+                            'def notice(q, hits):\n    return "向きが逆: " + hits[0]["negated"]\n')
+            bad = Path(td) / 'dir_bad.py'
+            bad.write_text('def leading_answer(t):\n    raise RuntimeError("x")\n')
+            neg_q, pos_q = '見出しに当てないようにしますか', '見出しにも本人の OK が要るようにしますか'
+            r = ask(None, [{'text': neg_q, 'recommend': '当てる (理由)', 'ground': 'choice'}], session='s1', path=dled,
+                    direction=str(dmod))
+            check(r[0]['status'] == 'refused' and '向きが逆' in r[0]['message'] and '--negation-reason' in r[0]['message'],
+                  f'向き: 問いの打ち消し × 推す答えの肯定形は立てず、 打ち消しで聞く理由の欄を言う {r}')
+            r = ask(None, [{'text': neg_q, 'recommend': '当てる (理由)', 'ground': 'choice', 'negation_reason': '打ち消しが正しい'}],
+                    session='s1', path=dled, direction=str(dmod))
+            rec = [x for x in load(dled) if x.get('type') == 'ask'][-1]
+            check(r[0]['status'] == 'made' and rec.get('negation_reason') == '打ち消しが正しい' and '理由' in r[0]['message'],
+                  f'向き: 打ち消しで聞く理由を書けば立ち、 理由を問いに残す {r}')
+            r = ask(None, [{'text': pos_q, 'recommend': 'そうする', 'ground': 'choice'}], session='s1', path=dled,
+                    direction=str(dmod))
+            check(r[0]['status'] == 'made' and 'negation_reason' not in [x for x in load(dled) if x.get('type') == 'ask'][-1],
+                  '向き: 肯定で聞いた問いは立つ (理由は残さない)')
+            r = ask(None, [{'text': neg_q + '?', 'recommend': '当てる', 'ground': 'choice'}], session='s1', path=dled,
+                    direction=str(bad))
+            check(r[0]['status'] == 'made' and '⚠️' in r[0]['message'], f'向き: 部品が答えないときは立てて添える {r}')
+            r = ask(None, [{'text': neg_q + '??', 'recommend': '当てる', 'ground': 'choice'}], session='s1', path=dled,
+                    direction='')
+            check(r[0]['status'] == 'made', '向き: 部品を切れば見ない')
+            r = ask(None, [{'text': '言い直す前の問い', 'recommend': '残す', 'ground': 'choice', 'keys': ['todo:d:1']}],
+                    session='s1', path=dled, direction=str(dmod))
+            lb = r[0]['label']
+            r = ask(None, [{'text': neg_q + '!', 'recommend': '当てる', 'ground': 'choice', 'keys': ['todo:d:1'],
+                            'reword': '向きを直す'}], session='s1', path=dled, direction=str(dmod))
+            check(r[0]['status'] == 'refused' and r[0].get('label') == lb, f'向き: 言い直しも同じ門を通す {r}')
+            r = ask(None, [{'text': pos_q + '!', 'recommend': 'そうする', 'ground': 'choice', 'keys': ['todo:d:1'],
+                            'reword': '何が要るかの側から'}], session='s1', path=dled, direction=str(dmod))
+            rw = (state(load(dled))[lb].get('rewords') or [{}])[-1]
+            check(r[0]['status'] == 'reworded' and rw.get('from') == '言い直す前の問い' and rw.get('from_recommend') == '残す',
+                  f'言い直しの記録に前の文と前の推す答えを残す {rw}')
+            real = _direction_path(None)
+            if real and real.exists():
+                r = ask(None, [{'text': '校正の例外を見出しにだけ当てないようにしますか', 'recommend': '当てる (理由)',
+                                'ground': 'choice'}], session='s1', path=dled)
+                check(r[0]['status'] == 'refused', f'向き: 既定の部品 (隣の claude-config) でも止まる {r}')
+            else:
+                print('skip: 隣の claude-config に向きの部品が無い = 既定の部品の試験を回していない')
     finally:
         for k, v in saved.items():
             if v is None:

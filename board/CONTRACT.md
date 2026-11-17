@@ -783,7 +783,7 @@ bound to the wrong item, and the agent acts on it in the same turn (measured). A
 answered questions into a one-line "done" (measured).
 
 ```sh
-python3 board_asks.py ask    --root <board> --about '<what it is about>' [--effect '<what changes>'] --text '<question>' --recommend '<answer>' --ground <why the owner> [--prior-term <word>... --prior '<earlier decisions, amounts, promises and where>'] [--key todo:<repo>:<id>] [--evidence <repo>@<rev>:<path>] [--reword '<what changed>']
+python3 board_asks.py ask    --root <board> --about '<what it is about>' [--effect '<what changes>'] --text '<question>' --recommend '<answer>' --ground <why the owner> [--prior-term <word>... --prior '<earlier decisions, amounts, promises and where>'] [--key todo:<repo>:<id>] [--evidence <repo>@<rev>:<path>] [--reword '<what changed>'] [--negation-reason '<why>']
 python3 board_asks.py answer --root <board> --label H12 --quote '<owner words>' --binding label|order|confirmed|guess [--reading '<one line>']
 python3 board_asks.py list   --root <board> [--open] [--session S] [--label H12 ...] [--block]
 python3 board_asks.py digest --root <board> --session S
@@ -837,6 +837,15 @@ python3 board_asks.py digest --root <board> --session S
   A relative repo dir in the evidence is resolved from the board root and its parents before the validator sees it,
   and a repo found nowhere is refused (measured: the validator resolved it from the asking shell's directory, so the
   same evidence was judged free from one directory and "unreadable, asked anyway" from another).
+- **A direction check** on every ask and reword with a recommended answer: when the question's final predicate
+  negates the verb that the recommended answer's first word affirms (a question in the form "shall it not be applied
+  to X?" recommended "apply"), the ask is refused and the agent restates the question as what changes on the owner's
+  side, in the affirmative (rule = claude-config `conventions/concise-output.md#question-button-same-words`; measured:
+  the owner could not tell which way the answer went). Where the negative form is right, `--negation-reason '<why>'`
+  makes the ask and keeps the reason on it. The check is language-specific, so the engine loads it by path
+  (`BOARD_ASKS_DIRECTION`, default = `claude-config/scripts/lib/ja_question_direction.py` next to this repo; `none`
+  turns it off); an absent module asks without the check, a failing one asks with a note. A reword keeps the earlier
+  text and the earlier recommended answer in the ask's `rewords` (`show`).
 - **A question out of a reviewer's accept** carries `--key request:<id>` (`request:<id>#2` for a second one): it is made
   only on a ground the latest accept of that request gave to the owner (`--owner-ruling '<class>: …'`), and what the
   reviewer decided is not asked again. A window whose own requests had a reviewer's accept in the last 24 hours names
