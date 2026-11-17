@@ -383,6 +383,10 @@ when the project wires it: [#boards-and-audiences](#boards-and-audiences)).
 designated reviewer can do so; the owner may record a `human` handover when that session is unavailable. Agents must
 not use the `human` identity without an explicit owner instruction. An assignee handover clears the old claim (review
 or return a pending submission first); a reviewer handover keeps the submission and moves it to the new inbox.
+<a id="handover-does-not-reach-launch"></a>`launch --request` reads the request's own addressee, not an assignee
+handover posted after it: a request first addressed to a live session and then handed over to a role is refused as
+not addressed to a role. To open a worker window for it, post a new request to the role in a new thread (one thread
+holds one request) and withdraw the old request once the new one is accepted (measured).
 
 Runners and dashboards read `inbox --json`: actionable requests and scoped error rows, warnings on stderr, `[]` when
 nothing waits. Each row carries the latest valid `question`, `answer`, `submission` and `review` with their own
