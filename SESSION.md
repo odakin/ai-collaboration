@@ -8,6 +8,13 @@ Codex の書き込みは SendMessage で届かないので、 Claude 側の Stop
 `GET /due` の `waiting_event` で、 拾わない行も番の session に 1 行知らせられる ([契約](board/CONTRACT.md#viewer-handoff-queue))。
 次 = 既存の送り忘れの検査 (observe のまま) を block に上げるかを、 observe の記録で決める。
 
+## 現在地：研究の対話係の窓の起動文 (`--dialogue`)
+
+`request` / `launch` の `--dialogue` で、 対話係の窓に渡す起動文から commit・push の行と「この窓で本人に問わない」 の行を外し、
+repo の file を書かず置いた場所を依頼元に渡す文にする ([契約](board/CONTRACT.md#dialogue-worker-handoff)、 分担の正本 =
+claude-config `multi-session-coordination.md#research-dialogue-and-conductor`)。 題の末尾が同じ model・effort なら二度足さない。
+次 = 印つきで起こした最初の対話係の窓に、 新しい文が届いたかを見る (試験は起動文の file と start_session の引数まで)。
+
 ## 現在地：request の完了条件の頁数・overfull の注意
 
 `request` の `--acceptance` に値の無い頁数か overfull があると、 書いた側に 1 行の注意を出す (止めない、 どの掲示板でも。

@@ -33,6 +33,7 @@ DEFAULT_REVIEWER_ENV='AGENT_BOARD_DEFAULT_REVIEWER'   # request: reviewer sessio
 SEPARATE_REVIEWER_ENV='AGENT_BOARD_REVIEWER_SEPARATE'  # request: `1` = the requesting window may not accept it (owner wiring for a window that has a separate reviewer); CONTRACT.md#separate-reviewer
 REQUEST_DESK_ENV='AGENT_BOARD_REQUEST_DESK'      # request: `0` = do not run the board's request desk (board.json request_desk); set for the desk's own posts; CONTRACT.md#request-desk
 SEPARATE_REVIEWER_LINE='review-separate: yes'          # written into such a request's details; accept reads it there, not in its own environment
+DIALOGUE_LINE='worker-kind: dialogue'                  # request --dialogue: written into the request's details, so `launch --request` on any machine gives the research dialogue window its own hand-off (CONTRACT.md#dialogue-worker-handoff)
 LAUNCH_CONFIG_DIR_ENV='AGENT_BOARD_LAUNCH_CONFIG_DIR'  # request to a role: the CLI config dir the worker runs under (a logged-in account); owner wiring
 LAUNCH_MODEL_ENV='AGENT_BOARD_LAUNCH_MODEL'            # request to a role: default --model (else --expect-model, else the requester's own model)
 LAUNCH_EFFORT_ENV='AGENT_BOARD_LAUNCH_EFFORT'          # request to a role: the effort when --effort is not given (else the requester's CLAUDE_EFFORT)
@@ -1528,6 +1529,8 @@ def event_from(a, events):
                 ev['details']='\n'.join(x for x in (ev.get('details'),policy_stage_details(a)) if x)
             if separate_reviewer():
                 ev['details']='\n'.join(x for x in (ev.get('details'),SEPARATE_REVIEWER_LINE) if x)
+            if getattr(a,'dialogue',False):
+                ev['details']='\n'.join(x for x in (ev.get('details'),DIALOGUE_LINE) if x)
     if kind in ('accept','revise') and ack_lines:
         ev['details']='\n'.join(x for x in (ev.get('details'),*ack_lines) if x)[:4000]   # schema maxLength
     if kind=='handover':
@@ -1563,7 +1566,40 @@ def restricted_handoff_parts(policy, source, session_name):
                     " record, not on the board."),True)
 
 
-def handoff_text(root, role, request_id, spec, model, effort, surface='background', project=None, policy=None, reason=None, worktree=False, source=None):
+DIALOGUE_SCOPE=(" You are a research dialogue window: do research and drafting with the owner here, and nothing else."
+    " Do not write any file in a repository, do not run git (no pull, commit or push), do not apply edits to protected"
+    " files and do not post board notes: put what you hand over (a decided draft, a judgment, a check script you ran) in"
+    " the shared notes folder or your scratchpad and send its path to the requester (the conductor), which moves it into"
+    " the repository, commits, pushes and checks it. Hand the requester anything else you notice (a stale record, a tool"
+    " that misbehaves, a chore) in one line, without looking into it yourself; work you are unsure about goes to the"
+    " requester too.")
+
+
+def dialogue_step_three(scope, src, submit_tail):
+    """Step 3 of a research dialogue window's hand-off: the research and drafting with the owner, the hand-over of each
+    decided item to the requester, and the one submit when the owner closes the window (the requester writes the result
+    file). The worker steps' policy-first stop is left out: the request itself is the owner's word to open the window
+    (claude-config conventions/policy-before-implementation.md#no-policy-stage), and a dialogue window that read the stop
+    could have handed back a policy instead of talking with the owner."""
+    return ("Do the research and drafting the spec describes with the owner in this window. Hand each decided draft or"
+            " judgment to the requester in one SendMessage: the target (file and lines, or thread), the base version, the decided"
+            " text, the owner's words verbatim, what is still open and the checks it needs (a long text goes in one file in the"
+            " shared notes folder or your scratchpad, and the message names its path). When the owner says to close this window,"
+            " send the requester the list of what was decided, what is still open and what the closing sweep should keep; the"
+            " requester writes the result file and returns its path. Then `submit` with the same --root, --session, --request"
+            f"{scope}{src},{submit_tail}")
+
+
+DIALOGUE_ASK=(" Research and drafting questions are this window's work with the owner: discuss them here. Questions about"
+    " the operation (what to hand over, records, acceptance) go to the requester (SendMessage), not to the owner. When the"
+    " owner answers a candidate for a protected file here (a manuscript's title, abstract, introduction, conclusion or"
+    " equations, or a rule document), write in your reply the file name and the head of the candidate's SHA-256 that the"
+    " requester gave you, and send the requester the owner's words and your session id: the requester applies it"
+    " (claude-config conventions/manuscript-claim-ownership.md#owner-answer-in-another-window-manuscript). Ask the owner"
+    " here for a tool permission prompt only if a step that is yours needs one.")
+
+
+def handoff_text(root, role, request_id, spec, model, effort, surface='background', project=None, policy=None, reason=None, worktree=False, source=None, dialogue=False):
     """What a worker window starts from (CONTRACT.md#worker-handoff-text): role, request, spec, the model and effort it
     must run on, and the first two steps. Written to a file and passed to the CLI whole, so quoting never bites.
     A desktop window gets a step 0: the app starts it on the requester's model when the asked one is higher, and on
@@ -1573,7 +1609,12 @@ def handoff_text(root, role, request_id, spec, model, effort, surface='backgroun
     (measured: a max worker started from a card stood at its step 0 until the owner's next message), while a message
     from the child starts a turn in an idle requester (measured). Step 0 holds back the request and its materials only;
     a session's own start-up reads are not the task. The claim and submit steps carry the whole command: a worker told
-    only to `claim` with a session name found --root, --request, --project and --policy by refused posts (measured)."""
+    only to `claim` with a session name found --root, --request, --project and --policy by refused posts (measured).
+    A research dialogue window (dialogue = request --dialogue) gets DIALOGUE_SCOPE instead of the working-tree line, its
+    own step 3 and DIALOGUE_ASK: the working-tree line told it to commit and push, and the desktop questions line told it
+    not to ask the owner in its window and to apply guard-stopped files there, while the window is where the owner
+    discusses the research and the conductor does the files, Git and records (measured: a dialogue window moved material
+    into a repository, committed, pushed and reported the post-commit check to the owner)."""
     run=(f" This window must run on {model}"+(f" at {effort} effort" if effort else '')
          +(f" (why this model and effort: {reason})" if reason else '')+'.') if model else ''
     eng=Path(__file__).resolve()
@@ -1628,11 +1669,16 @@ def handoff_text(root, role, request_id, spec, model, effort, surface='backgroun
           " commit by explicit paths and push to main.")
     src,claim_tail,submit_tail,restricted=restricted_handoff_parts(policy,source,f"<your native session id, 8 chars> ({model or '<model>'})")
     if restricted: plain=''
+    if dialogue:
+        tree=DIALOGUE_SCOPE; ask=DIALOGUE_ASK if surface=='desktop' else ''
+        step3=dialogue_step_three(scope,src,submit_tail)
+    else:
+        step3=f"{POLICY_FIRST_HANDOFF}; when done, `submit` with the same --root, --session, --request{scope}{src},{submit_tail}"
     return (f"You are the board worker for role `{role}`, request `{request_id}`, spec `{spec or '(the request itself)'}`; execute it yourself.{run}{tree}\n"
             +hold+
             f"1. `python3 {eng} inbox --root {root} --agent claude --session {role} --sync`; if the request is not visible, do not read the spec — ask the requester or `watch`.\n"
             f"2. `python3 {eng} claim --root {root} --agent claude --session {role} --request {request_id}{scope}{src}{claim_tail}`; if refused with *another live claim exists*, stop and say so in one line.\n"
-            f"3. {POLICY_FIRST_HANDOFF}; when done, `submit` with the same --root, --session, --request{scope}{src},{submit_tail}{plain}{ask}\n" + safety_stop_handoff_text())
+            f"3. {step3}{plain}{ask}\n" + safety_stop_handoff_text())
 
 
 def own_model(session):
@@ -1916,6 +1962,40 @@ def summary_title(summary, policy, fallback=()):
     return '' if any(p.search(head) for p in fallback) else head
 
 
+def _model_spellings(model):
+    """The ways a title may already name this model: the id, its label ('Fable 5.2'), its tier ('fable') and, for an id
+    such as 'gpt-6.1-astra', its last word. Longest first, so the longer spelling is tried first."""
+    m=(model or '').strip()
+    if not m: return []
+    out={m.lower(),model_label(m,'').lower(),model_tier(m).lower()}
+    last=re.split(r'[-_/ ]',m.lower())[-1]
+    if last.isalpha(): out.add(last)
+    return sorted((x for x in out if len(x)>=3),key=len,reverse=True)
+
+
+def title_ends_with_label(title, model, effort):
+    """True when the title already ends with the model and effort the tool would add (the same model and the same
+    effort, after a space or a separator such as `·`). A model word inside the title ("fable の検証") does not count. A
+    version in the title counts only when the model carries none ('fable' and "· Fable 5.2 xhigh")."""
+    sp=_model_spellings(model)
+    if not sp or not (title or '').strip(): return False
+    ver=r'(?:\s*\d+(?:[.\-]\d+)*)?' if not re.search(r'\d',model or '') else ''
+    pat=(r'(?:^|[\s·・|/,，、(（\[])(?:'+'|'.join(map(re.escape,sp))+r')'+ver
+         +(r'\s+'+re.escape(effort) if effort else '')+r'\s*[)）\]]?\s*$')
+    return bool(re.search(pat,title,re.I))
+
+
+def titled(head, label, model, effort):
+    """The worker's title = head + ' · ' + label, unless head already ends with that model and effort: then head as it
+    is, with one line printed (measured: a --title written with '· fable xhigh' got the label a second time, and the
+    worker sat in the app's list as '… · fable xhigh · fable xhigh'). Nothing is refused."""
+    if not label: return head
+    if title_ends_with_label(head,model,effort):
+        print(f'ℹ️ 題が既に model と effort で終わっている = 道具は {label} を足さない (題 = {head})')
+        return head
+    return head+' · '+label
+
+
 def title_line(args):
     """The one line that says the worker window's title before the start_session arguments (measured: the requester
     read the arguments, saw the title differ from the template, and started the worker anyway; the title then read as
@@ -1924,7 +2004,7 @@ def title_line(args):
     return f'  窓の題 = {t} (要約の最初の句から。 仕事の名でなければ request / launch の --title で名指す)'
 
 
-def desktop_plan(root, role, request_id, spec, expect, session, title=None, project=None, summary=None, detach=False, policy=None, effort=None, reason=None, worktree=False, source=None, effort_quote=None, model_quote=None):
+def desktop_plan(root, role, request_id, spec, expect, session, title=None, project=None, summary=None, detach=False, policy=None, effort=None, reason=None, worktree=False, source=None, effort_quote=None, model_quote=None, dialogue=False):
     """The desktop app's start_session arguments for a role's worker (the worker is listed in the app, unlike a
     background CLI session). The board cannot call the app: the requesting Claude session calls start_session with
     these arguments. Returns (arguments, file). Title = the task first and the model last (measured: a title that
@@ -1934,7 +2014,7 @@ def desktop_plan(root, role, request_id, spec, expect, session, title=None, proj
     reaching the requester; the requester does not relay a child's questions to the owner either way (relayed, they
     reached the owner twice, measured), and the board's watch carries submit and blocker."""
     model,effort=launch_settings(expect,session,effort)
-    text=handoff_text(root,role,request_id,spec,model,effort,surface='desktop',project=project,policy=policy,reason=reason,worktree=worktree,source=source)
+    text=handoff_text(root,role,request_id,spec,model,effort,surface='desktop',project=project,policy=policy,reason=reason,worktree=worktree,source=source,dialogue=dialogue)
     write_outbox(root,request_id+'.handoff.txt',text)
     name=role[len('role-'):] if role.startswith('role-') else role
     if project and name.startswith(project+'-'): name=name[len(project)+1:]
@@ -1942,7 +2022,7 @@ def desktop_plan(root, role, request_id, spec, expect, session, title=None, proj
     head=(title or summary_title(summary,policy,title_fallback(root)) or name).strip()
     head=head if len(head)<=40 else head[:39]+'…'
     label=model_label(model,effort)
-    args={'initiation':'user_asked','context':'fresh','title':head+(' · '+label if label else ''),'name':name,'use_worktree':bool(worktree),
+    args={'initiation':'user_asked','context':'fresh','title':titled(head,label,model,effort),'name':name,'use_worktree':bool(worktree),
           'prompt':text,'background':(f'Board request {request_id} for role {role}, posted by session {(session or "")[:8]}. The request and its'
                                       ' spec are the task; report through the board (claim, a note at each milestone, submit). The requester'
                                       ' reviews the submission on the board.')}
@@ -1958,7 +2038,7 @@ def desktop_plan(root, role, request_id, spec, expect, session, title=None, proj
     write_launch_record(root,request_id,role=role,spec=spec,model=model,effort=effort,surface='desktop',title=args['title'],
                         name=name,requester=session,detach=bool(detach),**({'reason':reason} if reason else {}),
                         **({'effort_quote':effort_quote} if effort_quote else {}),**({'model_quote':model_quote} if model_quote else {}),
-                        **({'worktree':True} if worktree else {}))
+                        **({'worktree':True} if worktree else {}),**({'dialogue':True} if dialogue else {}))
     return args,path
 
 
@@ -2013,7 +2093,7 @@ def launch_cli_settings(rc_off, worktree=False):
     return json.dumps(s) if s else ''
 
 
-def launch_plan(root, role, request_id, spec, expect, session, project=None, policy=None, effort=None, reason=None, worktree=False, source=None, effort_quote=None, model_quote=None):
+def launch_plan(root, role, request_id, spec, expect, session, project=None, policy=None, effort=None, reason=None, worktree=False, source=None, effort_quote=None, model_quote=None, dialogue=False):
     """The command that starts the addressed worker as a background CLI session with model, effort and config dir pinned.
 
     Returns (argv, env, shell line, hand-off file). Model = --expect-model, else the owner's default, else the
@@ -2026,11 +2106,12 @@ def launch_plan(root, role, request_id, spec, expect, session, project=None, pol
     requester's shell does, with the hand-off text read from the file."""
     model,effort=launch_settings(expect,session,effort)
     cfg=os.path.expanduser((os.environ.get(LAUNCH_CONFIG_DIR_ENV) or '').strip())
-    text=handoff_text(root,role,request_id,spec,model,effort,project=project,policy=policy,reason=reason,worktree=worktree,source=source)
+    text=handoff_text(root,role,request_id,spec,model,effort,project=project,policy=policy,reason=reason,worktree=worktree,source=source,dialogue=dialogue)
     path=write_outbox(root,request_id+'.handoff.txt',text)
     write_launch_record(root,request_id,role=role,spec=spec,model=model,effort=effort,surface='background',requester=session,
                         **({'reason':reason} if reason else {}),**({'effort_quote':effort_quote} if effort_quote else {}),
-                        **({'model_quote':model_quote} if model_quote else {}),**({'worktree':True} if worktree else {}))
+                        **({'model_quote':model_quote} if model_quote else {}),**({'worktree':True} if worktree else {}),
+                        **({'dialogue':True} if dialogue else {}))
     cli=os.environ.get(LAUNCH_CLI_ENV) or 'claude'
     rc_off=os.environ.get(LAUNCH_REMOTE_CONTROL_ENV,'').strip() not in ('1','follow')
     settings=launch_cli_settings(rc_off,worktree)
@@ -2044,11 +2125,35 @@ def launch_plan(root, role, request_id, spec, expect, session, project=None, pol
     return argv,env,line,path
 
 
+DIALOGUE_NAME=re.compile(r'dialogue|対話係|対話役',re.I)
+
+
+def dialogue_gate(dialogue, surface, worktree, codex=False):
+    """Refuse the combinations a research dialogue window cannot have: a worktree (the window writes no repository
+    file), a subagent (the owner cannot talk to it) and a Codex role (its hand-off is not this one; Codex dialogue
+    windows follow the owner layer's Codex launch)."""
+    if not dialogue: return
+    if codex: raise ValueError('--dialogue は Claude の役割への依頼だけ (Codex の対話係の起動文はこの印を読まない)')
+    if worktree: raise ValueError('--dialogue と --worktree は一緒に使わない (対話係の窓は repo の file を書かない)')
+    if surface=='agent': raise ValueError('--dialogue は --surface desktop か background (subagent の窓に本人は話しかけられない)')
+
+
+def dialogue_name_note(dialogue, *names):
+    """One line when the role, title or summary reads like a research dialogue window but the request has no --dialogue:
+    the board decides from the flag (a name says nothing reliable), so the line only points at it."""
+    if dialogue or not any(DIALOGUE_NAME.search(str(x or '')) for x in names): return ''
+    return ('ℹ️ 役の名・題・要約が対話係に見えるが --dialogue が無い = 起動の文に commit・push の行が入る。'
+            ' 研究の対話係の窓なら --dialogue を付けて出し直す (CONTRACT.md#dialogue-worker-handoff)')
+
+
 def announce_launch(a, ev, audience):
     """For a request addressed to a Claude role: write the hand-off file, print the launch line, return (argv, env);
     None otherwise. Printed on --preview too (the command is part of what the requester reviews before posting)."""
     if is_codex_role_request(a): return codex_announce(a,ev,audience)
     if a.command!='request' or a.to!='claude' or not (a.to_session or '').startswith('role-'): return None
+    dialogue=bool(getattr(a,'dialogue',False))
+    dnote=dialogue_name_note(dialogue,a.to_session,getattr(a,'title',None),ev.get('summary'))
+    if dnote: print(dnote)
     # Default surface: on an owner board a desktop requester gets the desktop arguments (the owner sees that worker in
     # the app; a background CLI session is listed nowhere), whatever entry path called the engine (measured: a session
     # that called the engine directly skipped the forwarder's wiring and got the CLI line). Others get the CLI line.
@@ -2061,7 +2166,7 @@ def announce_launch(a, ev, audience):
         # Work the owner does not watch, run as the requester's own subagent: no window to open, so only the record
         # (the claim check compares the subagent's model with it) and the hand-off text the Agent tool's prompt carries.
         model,effort=launch_settings(a.expect_model,a.session,a.effort)
-        text=handoff_text(a.root,a.to_session,ev['event_id'],handoff_spec(a),model,effort,project=a.project,policy=a.policy,reason=a.reason,source=a.source)
+        text=handoff_text(a.root,a.to_session,ev['event_id'],handoff_spec(a),model,effort,project=a.project,policy=a.policy,reason=a.reason,source=a.source,dialogue=dialogue)
         hpath=write_outbox(a.root,ev['event_id']+'.handoff.txt',text)
         write_launch_record(a.root,ev['event_id'],role=a.to_session,spec=handoff_spec(a),model=model,effort=effort,surface='agent',requester=a.session,
                             **({'reason':a.reason} if a.reason else {}),**({'effort_quote':a.effort_quote} if a.effort_quote else {}),
@@ -2078,7 +2183,7 @@ def announce_launch(a, ev, audience):
         detach=bool(getattr(a,'detach',False))
         args,spath=desktop_plan(a.root,a.to_session,ev['event_id'],handoff_spec(a),a.expect_model,a.session,
                                 title=getattr(a,'title',None),project=a.project,summary=ev.get('summary'),detach=detach,policy=a.policy,effort=a.effort,reason=a.reason,
-                                worktree=getattr(a,'worktree',False),source=a.source,effort_quote=a.effort_quote,model_quote=a.model_quote)
+                                worktree=getattr(a,'worktree',False),source=a.source,effort_quote=a.effort_quote,model_quote=a.model_quote,dialogue=dialogue)
         sm_cli=ENGINE.parent.parent/'claude-config'/'scripts'/'session-model.py'
         want=' / '.join(x for x in (args.get('model'),('effort '+args['effort']) if args.get('effort') else '') if x)
         cap=effort_cap_note(args.get('effort'))   # said before the arguments: the start lowers it without a word
@@ -2098,7 +2203,7 @@ def announce_launch(a, ev, audience):
     # A role names a window nobody has opened: print the command that opens it with model, effort and account
     # pinned (measured: the chip opens on the parent's model, and a pasted hand-off ran on whatever the window had).
     argv,env,line,hpath=launch_plan(a.root,a.to_session,ev['event_id'],handoff_spec(a),a.expect_model,a.session,project=a.project,policy=a.policy,effort=a.effort,reason=a.reason,
-                                    worktree=getattr(a,'worktree',False),source=a.source,effort_quote=a.effort_quote,model_quote=a.model_quote)
+                                    worktree=getattr(a,'worktree',False),source=a.source,effort_quote=a.effort_quote,model_quote=a.model_quote,dialogue=dialogue)
     if audience=='owner':
         print(f'→ 受け手を起こす (model・effort・account を固定、 貼り付け不要。 依頼元の shell でそのまま):\n  {line}')
     else:
@@ -2252,7 +2357,7 @@ def codex_plan(root, role, request_id, spec, f, project=None, policy=None, title
     rec=write_launch_record(root,request_id,role=role,spec=spec,model=f.get('model'),effort=f.get('effort'),surface='codex-app',
                             launch_host=f.get('host'),cwd=f.get('cwd'))
     label=' '.join(x for x in (f.get('model'),f.get('effort')) if x)
-    name=((title or role)[:60]+(' · '+label if label else ''))
+    name=titled((title or role)[:60],label,f.get('model'),f.get('effort'))
     argv=[sys.executable,str(codex_launcher()),'start','--cwd',os.path.expanduser(f['cwd']),'--prompt-file',str(hpath),
           '--name',name,'--host',f['host'],'--record',str(rec),'--json']
     if f.get('model'): argv+=['--model',f['model']]
@@ -2386,6 +2491,7 @@ def cmd_launch(a):
         return launch_claude_role(a,req,events)
     if asg.get('agent')!='codex' or not str(asg.get('session_id','')).startswith('role-'):
         raise ValueError('launch は Codex か Claude の役割 id 宛ての依頼だけ (この依頼の宛先 = '+_who(asg)+')')
+    dialogue_gate(getattr(a,'dialogue',False),None,False,codex=True)
     f=parse_codex_details(req.get('details'))
     if not f.get('host'): raise ValueError('この依頼には起動の情報 (details の launch-* 行) が無い = 依頼元が request を出し直す')
     done=codex_launched(events,a.request)
@@ -2453,13 +2559,17 @@ def launch_claude_role(a, req, events):
              or ('desktop' if os.environ.get('CLAUDE_CODE_ENTRYPOINT')=='claude-desktop' else 'background')).strip()
     if surface=='agent': raise ValueError('launch: --surface desktop か background (subagent に窓は要らない)')
     project=req['project']['key']; policy=req['source_policy']; spec=handoff_spec(a,req,rec)
+    dialogue=bool(getattr(a,'dialogue',False) or DIALOGUE_LINE in (req.get('details') or '').splitlines() or rec.get('dialogue'))
+    dialogue_gate(dialogue,surface,a.worktree)
+    dnote=dialogue_name_note(dialogue,role,a.title,req.get('summary'))
+    if dnote: print(dnote)
     note=premium_note(*launch_settings(a.expect_model,a.session,a.effort),a.reason)
     if note: print(note)
     poster=(req.get('actor') or {}).get('session_id') or '?'
     if surface=='desktop':
         args,spath=desktop_plan(a.root,role,a.request,spec,a.expect_model,a.session,title=a.title,project=project,
                                 summary=req.get('summary'),detach=a.detach,policy=policy,effort=a.effort,reason=a.reason,worktree=a.worktree,source=getattr(a,'source',None),
-                                effort_quote=a.effort_quote,model_quote=a.model_quote)
+                                effort_quote=a.effort_quote,model_quote=a.model_quote,dialogue=dialogue)
         args['background']=(f'Board request {a.request} for role {role}, posted by {poster} and opened here by session'
                             f' {(a.session or "")[:8]}. The request and its spec are the task; report through the board (claim,'
                             ' a note at each milestone, submit). The poster reviews the submission on the board.')
@@ -2476,7 +2586,7 @@ def launch_claude_role(a, req, events):
         return
     argv,env,line,hpath=launch_plan(a.root,role,a.request,spec,a.expect_model,a.session,project=project,policy=policy,
                                     effort=a.effort,reason=a.reason,worktree=a.worktree,source=getattr(a,'source',None),effort_quote=a.effort_quote,
-                                    model_quote=a.model_quote)
+                                    model_quote=a.model_quote,dialogue=dialogue)
     print(f'→ 既にある依頼 {a.request} の worker を起こす 1 行 (掲示板には何も書いていない):\n  {line}')
     if a.launch: print('→ 起動した: '+launch(argv,env,cwd=bc.workspace(a.root)).replace('\n','\n  '))
 
@@ -2734,7 +2844,7 @@ def main():
     ap.add_argument('--launch',action='store_true',help='request to a role: start the worker now with the printed CLI command (background session; the id is printed)')
     ap.add_argument('--no-launch',action='store_true',help=f'request to a role: only print the command even when {LAUNCH_DEFAULT_ENV}=1 (that default applies to owner boards only)')
     ap.add_argument('--surface',choices=['background','desktop','agent'],help=f'request to a role: desktop = print the desktop app\'s start_session arguments (the worker is listed in the app); background = the CLI line (default; env {LAUNCH_SURFACE_ENV}); agent = the requester runs it as its own subagent (Agent tool, not listed in the app: work the owner does not watch)')
-    ap.add_argument('--title',help='request to a role (--surface desktop, or a Codex role): the worker\'s title in the app\'s list (default: the summary\'s first clause); the model is added at the end')
+    ap.add_argument('--title',help='request to a role (--surface desktop, or a Codex role): the worker\'s title in the app\'s list (default: the summary\'s first clause); the model is added at the end, unless the title already ends with the same model and effort')
     ap.add_argument('--launch-host',help='request to a Codex role: the machine that starts the worker (default: this one). Written in the request; another machine\'s session starts it with `launch --request <id>`, this one does not')
     ap.add_argument('--launch-cwd',help='request to a Codex role: the worker\'s working directory (default: the workspace). A sealed blind-review judge is not a board worker: the worker starts it with codex-app-launch.py start --sealed (cold-eyes-isolation.md#board-blind-variant)')
     ap.add_argument('--launch-writable-root',action='append',default=[],metavar='DIR',help='request to a Codex role: a directory'
@@ -2748,6 +2858,10 @@ def main():
     ap.add_argument('--worktree',action='store_true',help='request / launch to a Claude role: the worker works in a git worktree of its own'
                     ' (when it shares files with a parallel writer); merging its branch into main needs the owner\'s OK. Default: the'
                     ' repository\'s own working tree on main (a background CLI worker is started with worktree.bgIsolation none)')
+    ap.add_argument('--dialogue',action='store_true',help='request / launch to a Claude role: the worker is a research dialogue window'
+                    ' (research and drafting with the owner only): its hand-off says it writes no repository file, runs no git and'
+                    ' hands what it places in the shared notes folder or its scratchpad to the requester; written into the request\'s'
+                    ' details (worker-kind: dialogue), so `launch --request` reads it (CONTRACT.md#dialogue-worker-handoff)')
     ap.add_argument('--nested',action='store_true',help='request / launch to a role with --surface desktop: the default (the worker stays the requester\'s child); accepted so older command lines still run')
     ap.add_argument('--model-ok',action='store_true',help='claim: the requester or the owner accepted the model this session runs although the request was launched for another')
     ap.add_argument('--subagent-ok',action='store_true',help='claim: the requester or the owner accepted a subagent (Agent tool) for a request launched for a desktop window')
@@ -2795,6 +2909,10 @@ def main():
         if not p.is_file(): ap.error(f'--spec-local: no such file: {a.spec_local}')
         a.spec_local=str(p.resolve())
     if a.detach and a.nested: ap.error('--detach and --nested contradict (nested is the default)')
+    if a.dialogue:
+        if a.command not in {'request','launch'}: ap.error('--dialogue is for request and launch only')
+        try: dialogue_gate(True,a.surface,a.worktree,codex=(a.command=='request' and bool(a.to) and a.to!='claude'))
+        except ValueError as e: ap.error(str(e))
     if a.reason and a.command not in {'request','launch'}: ap.error('--reason is for request and launch only')
     if a.effort_quote and a.command not in {'request','launch'}: ap.error('--effort-quote is for request and launch only')
     if a.model_quote and a.command not in {'request','launch'}: ap.error('--model-quote is for request and launch only')

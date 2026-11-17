@@ -196,7 +196,7 @@ machine that starts the worker; a directory missing there, `/`, the home directo
 anything starts; a repository's `.git` stays read-only unless its git dir is named too, layer-1
 `claude-config/conventions/codex-desktop-triage.md#sandbox-git-dir-readonly`; a Claude role's request refuses the
 option, since its worker has no such sandbox); the thread's name in the app = `--title`, else the
-summary's first clause (a restricted request: the role, since its summary is the engine's fixed text), then the model. The thread runs unattended (approval `never`), asks the requester's questions as
+summary's first clause (a restricted request: the role, since its summary is the engine's fixed text), then the model (not added again when the title already ends with the same model and effort). The thread runs unattended (approval `never`), asks the requester's questions as
 a `blocker`, and starts with step 0 = `codex-app-launch.py check-self` (its own model and effort in Codex's local
 record). Being in Codex's local store, the thread is reachable by `codex queue` ([#codex-reach](#codex-reach)): the app
 takes a queued message as the thread's next turn (measured). On an owner board with the launch default the request
@@ -1025,6 +1025,25 @@ python3 board_asks.py digest --root <board> --session S
   git repository otherwise got no worktree, measured), and the hand-off text then tells the worker to call
   `EnterWorktree` unless it already works in one, to push its branch, not to merge it, and to name it in the submit,
   since merging into main needs the owner's OK.
+  <a id="dialogue-worker-handoff"></a>**A research dialogue window** (`--dialogue` on `request` or `launch` to a Claude
+  role) gets its own hand-off text: the request's `details` carry `worker-kind: dialogue` (the launch record too), so
+  `launch --request` on another machine gives the same text (a restricted request writes no `details`: there the mark
+  is in the launch record only, which the posting machine alone reads). In place of the working-tree line the text says the window
+  does research and drafting with the owner and nothing else: it writes no file in a repository, runs no git, applies
+  no protected-file edit and posts no board note, and it hands what it places (a decided draft, a judgment, a check
+  script) to the requester by its path in the shared notes folder or its scratchpad; the requester moves it into the
+  repository, commits, pushes and checks it. Step 3 is the research and drafting with the owner, one message to the
+  requester per decided item, and one submit of the result file the requester writes when the owner closes the window
+  (the policy-first stop is left out: the request itself is the owner's word to open the window). On desktop the
+  questions line is replaced too: research questions are discussed with the owner in the window, questions about the
+  operation go to the requester, and a candidate for a protected file that the owner answers there is applied by the
+  requester ([claude-config manuscript-claim-ownership.md#owner-answer-in-another-window-manuscript](../../claude-config/conventions/manuscript-claim-ownership.md#owner-answer-in-another-window-manuscript)).
+  The board decides from the flag alone: a role, title or summary that reads like a dialogue window but has no flag
+  prints one line pointing at it, and the text stays the worker's (measured: the working-tree line told a dialogue
+  window to commit and push, and it moved material into a repository, committed, pushed and reported the post-commit
+  check to the owner). Refused before anything is posted: `--dialogue` with `--worktree`, with `--surface agent`, and
+  on a request to a Codex role (its hand-off does not read the mark). The division of work itself =
+  [claude-config multi-session-coordination.md#research-dialogue-and-conductor](../../claude-config/conventions/multi-session-coordination.md#research-dialogue-and-conductor).
   The text itself: "You are the board worker for role `<role id>`, request
   `<request event id>`, spec `<path>`; execute it yourself. This window must run on <model> at <effort> effort.
   Work in the repository's own working tree on its main branch: do not call EnterWorktree or create a branch; commit by
@@ -1059,7 +1078,9 @@ python3 board_asks.py digest --root <board> --session S
   window after that other window, measured, so open the summary with the work itself; a first clause that matches the board's
   [`title_fallback`](#title-fallback) patterns gives the role's name instead — and for a restricted request the role, whose summary is the
   engine's fixed text = one title for every restricted window, and the duplicate-spawn guard stopped the second worker
-  sent to another role, measured), and
+  sent to another role, measured; a title that already ends with the same model and effort gets them once, and the
+  board prints one line instead of adding them again = measured, a `--title` written with them got them twice in the
+  app's list), and
   the hand-off text with a step 0 = compare the app's record of this window with the asked model and effort
   (`session-model.py self --expect-model … --expect-effort …`) and, when they differ, send the line it prints to the
   session that started the window (the app's record names it, for a card the owner clicked too), then stop in one

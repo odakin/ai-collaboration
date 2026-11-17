@@ -2668,6 +2668,119 @@ class LaunchClaudeRole(EffortFlag):
         self.assertIn('--effort is for request, handover and launch only',p.stderr)
 
 
+class DialogueWorker(EffortFlag):
+    """`--dialogue` on a request (or launch) to a Claude role marks a research dialogue window (CONTRACT.md
+    #dialogue-worker-handoff): the request's details carry DIALOGUE_LINE, the launch record carries it, and the hand-off
+    text tells the window to write no repository file, run no git and hand what it places to the requester, in place of
+    the working-tree line (commit and push to main), the policy-first step and the desktop questions line. `launch
+    --request` reads the mark from the request. The flag decides, not the role's name: a name that reads like one only
+    prints a line. A worktree, a subagent and a Codex role are refused before anything is posted."""
+    test_order = test_three_surfaces = test_refusals_and_live_note = None   # EffortFlag's tests run once, in EffortFlag
+    WORKER_ONLY=('commit by explicit paths and push to main','not to the owner in this window',
+                 'apply with the command the guard printed','If the spec asks for an implementation')
+
+    def test_handoff_text(self):
+        rid='20990101T000000Z-claude-000001'
+        d=board.handoff_text(Path('/fixture/board'),'role-fixture-dialogue',rid,'fixture/spec.md','fixture-model','high',
+                             surface='desktop',project='fixture',policy='ordinary',dialogue=True)
+        for x in self.WORKER_ONLY: self.assertNotIn(x,d)
+        for x in ('do not run git (no pull, commit or push)','shared notes folder','send its path to the requester',
+                  'discuss them here','owner-answer-in-another-window-manuscript','`--deliverable <path>`','--expect-model fixture-model',
+                  'the requester writes the result file'):
+            self.assertIn(x,d)
+        self.assertTrue(d.split('\n3. ',1)[1].startswith('Do the research and drafting'))
+        bg=board.handoff_text(Path('/fixture/board'),'role-fixture-dialogue',rid,'fixture/spec.md','fixture-model','high',
+                              policy='ordinary',dialogue=True)
+        self.assertNotIn('push to main',bg); self.assertNotIn('discuss them here',bg)      # the desktop questions line only on desktop
+        plain=board.handoff_text(Path('/fixture/board'),'role-fixture-worker',rid,'fixture/spec.md','fixture-model','high',surface='desktop')
+        for x in self.WORKER_ONLY: self.assertIn(x,plain)                                  # other workers: unchanged
+        self.assertNotIn('research dialogue window',plain)
+
+    def details(self, rid):
+        with board.snapshot(self.root,fresh=True) as snap:
+            return next(e for e in board.read(snap) if e['event_id']==rid).get('details') or ''
+
+    def test_request_marks_and_launch_reads_it(self):
+        b=self.post_args()
+        out=self.cli('request',*b,'--thread','2026-01-01-dlg-a','--to','claude','--to-session','role-eproj-talk','--surface','desktop','--dialogue').stdout
+        rid=self.rid(out)
+        self.assertIn(board.DIALOGUE_LINE,self.details(rid).splitlines())
+        self.assertTrue(board.launch_record(self.root,rid)['dialogue'])
+        prompt=json.loads((board.outbox_dir(self.root)/(rid+'.start_session.json')).read_text())['prompt']
+        self.assertIn('research dialogue window',prompt); self.assertNotIn('push to main',prompt)
+        self.assertNotIn('対話係に見えるが',out)
+        # another machine opens it: no launch record here, no --dialogue on the launch line = the request's details decide
+        b2=self.post_args(); b2[b2.index('--session')+1]='role-eproj-coauthor'
+        out=self.cli('request',*b2,'--thread','2026-01-01-dlg-b','--to','claude','--to-session','role-eproj-talk2','--surface','background','--no-launch','--dialogue').stdout
+        rid=self.rid(out)
+        self.assertNotIn('push to main',(board.outbox_dir(self.root)/(rid+'.handoff.txt')).read_text())
+        for f in board.outbox_dir(self.root).glob(rid+'.*'): f.unlink()
+        self.cli('launch','--root',str(self.root),'--agent','claude','--session','claude-win-9','--request',rid,'--surface','desktop',
+                 '--expect-model','claude-opus-5-5','--effort','xhigh')
+        prompt=json.loads((board.outbox_dir(self.root)/(rid+'.start_session.json')).read_text())['prompt']
+        self.assertIn('research dialogue window',prompt); self.assertNotIn('push to main',prompt)
+        self.assertTrue(board.launch_record(self.root,rid)['dialogue'])
+        p=self.cli('launch','--root',str(self.root),'--agent','claude','--session','claude-win-9','--request',rid,'--surface','desktop',
+                   '--worktree',ok=False)
+        self.assertNotEqual(p.returncode,0); self.assertIn('--worktree',p.stderr)          # the mark read from the request refuses a worktree
+
+    def test_refusals_before_posting(self):
+        b=self.post_args()
+        for extra,word in ((('--worktree',),'--worktree'),(('--surface','agent'),'subagent')):
+            p=self.cli('request',*b,'--thread','2026-01-01-dlg-r','--to','claude','--to-session','role-eproj-talk','--dialogue',*extra,ok=False)
+            self.assertNotEqual(p.returncode,0); self.assertIn(word,p.stderr)
+        p=self.cli('request',*b,'--thread','2026-01-01-dlg-r','--to','codex','--to-session','role-eproj-talk','--dialogue',ok=False)
+        self.assertNotEqual(p.returncode,0); self.assertIn('Claude',p.stderr)
+        p=self.cli('claim','--root',str(self.root),'--agent','claude','--session','role-x','--dialogue',ok=False)
+        self.assertIn('--dialogue is for request and launch only',p.stderr)
+        with board.snapshot(self.root,fresh=True) as snap: self.assertEqual(len([e for e in board.read(snap) if e['kind']=='request']),0)
+
+    def test_a_name_only_prints_a_line(self):
+        b=self.post_args()
+        out=self.cli('request',*b,'--thread','2026-01-01-dlg-n','--to','claude','--to-session','role-eproj-dialogue','--surface','desktop').stdout
+        rid=self.rid(out)
+        self.assertIn('対話係に見えるが --dialogue が無い',out)
+        self.assertIn('push to main',json.loads((board.outbox_dir(self.root)/(rid+'.start_session.json')).read_text())['prompt'])
+        self.assertNotIn(board.DIALOGUE_LINE,self.details(rid))
+
+
+class TitleLabel(unittest.TestCase):
+    """The worker's title in the app's list = the title + ' · ' + the model and effort, unless the title already ends
+    with the same model and effort (measured: a --title written with '· fable xhigh' got it twice): then once, with one
+    line printed. A model word inside the title, another effort or another version still gets the label."""
+    def git_root(self):
+        td=tempfile.TemporaryDirectory(); self.addCleanup(td.cleanup)
+        root=Path(td.name); (root/'board.json').write_text(json.dumps({'board_format':1,'audience':'owner','encryption':'none'}))
+        subprocess.run(['git','init','-q',str(root)],check=True)
+        return root
+    def title(self, root, title, model, effort):
+        args,_=board.desktop_plan(root,'role-proj-talk','20260101T000000Z-claude-abcdef','(the request itself)',model,'sess-1',
+                                  title=title,project='proj',effort=effort)
+        return args['title']
+    def test_desktop_title(self):
+        import contextlib, io
+        root=self.git_root()
+        with contextlib.redirect_stdout(io.StringIO()) as buf:
+            self.assertEqual(self.title(root,'X 対話係','claude-fable-5-2','xhigh'),'X 対話係 · Fable 5.2 xhigh')
+            self.assertNotIn('足さない',buf.getvalue())
+            self.assertEqual(self.title(root,'X 対話係 · fable xhigh','fable','xhigh'),'X 対話係 · fable xhigh')
+            self.assertIn('足さない',buf.getvalue())
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(self.title(root,'X · Fable 5.2 xhigh','claude-fable-5-2','xhigh'),'X · Fable 5.2 xhigh')
+            self.assertEqual(self.title(root,'X · Fable 5.2 xhigh','fable','xhigh'),'X · Fable 5.2 xhigh')   # a bare tier takes any version
+            self.assertEqual(self.title(root,'fable の検証','fable','xhigh'),'fable の検証 · fable xhigh')       # the word inside: as before
+            self.assertEqual(self.title(root,'X · fable max','fable','xhigh'),'X · fable max · fable xhigh')     # another effort
+            self.assertEqual(self.title(root,'X · Fable 5.1 xhigh','claude-fable-5-2','xhigh'),'X · Fable 5.1 xhigh · Fable 5.2 xhigh')
+    def test_codex_thread_name(self):
+        import contextlib, io
+        root=self.git_root(); f={'host':board.this_host(),'cwd':'~','model':'gpt-6.1-astra','effort':'xhigh'}
+        name=lambda t: (lambda argv: argv[argv.index('--name')+1])(board.codex_plan(root,'role-proj-talk','20260101T000000Z-codex-abcdef',None,f,title=t)[0])
+        with contextlib.redirect_stdout(io.StringIO()) as buf:
+            self.assertEqual(name('X 対話係'),'X 対話係 · gpt-6.1-astra xhigh')
+            self.assertEqual(name('X 対話係 · astra xhigh'),'X 対話係 · astra xhigh')
+        self.assertEqual(buf.getvalue().count('足さない'),1)
+
+
 class EffortFloor(EffortFlag):
     """A board whose board.json sets launch_effort_floor refuses a Claude role's worker below it on `request` and
     `launch --request`, in one line naming where the rule is, before anything is posted or written; at or above the
