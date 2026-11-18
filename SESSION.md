@@ -69,36 +69,20 @@ worker の起動はカードを押す 2 段のまま。 重ければ [DESIGN](bo
 掲示板の設定の `ask_prior_search` が名指す検索を引いた語で回し、 当たりに額・決定の語があるのに「無し」 と書いた問いは問う側に知らせる。
 次 = 実際の問いで、 作業側の語の断りが言い換えを強いすぎないか・知らせが当たりすぎないかを、 台帳の問いで見る。
 
-## 現在地：Lindblad 観測量の検査
+## 現在地：検証の再利用道具 (次に使うときの入口)
 
-再利用 API と合成 selftest を整備した。次の利用では、
-[作用空間とチャネルの境界](docs/lindblad-observables.md)を確認してから、
-[生成索引](scripts/README.md)の module を使う。独立検査の原本は呼び元で保持する。
-
-## 現在地：有限積分・外積・式の転記
-
-共通道具を追加した。再利用時は [実装の分担](DESIGN.md#finite-vacuum-and-transcription-tools) と
-[主張の依存関係・物理的な解釈](conventions/physics-verification-cycle.md#claim-dependencies-and-observables) を読み、
-[生成索引](scripts/README.md)から該当 module へ進む。caller の量子測度・適用範囲・個別判定は各 project が持つ。
-次の利用では必要な module の selftest を通し、独立検査の原本を共通実装への別名に置き換えない。
-
-## 現在地：共変作用・密度frameの検査module
-
-作用の等価性・境界項・有限多項式性を再利用可能な形にした。
-入口は [検証kernel](conventions/physics-verification-cycle.md#action-equivalence-and-polynomiality)、
-実装判断は [DESIGN](DESIGN.md#covariant-action-audit-hoist)、コードは生成された
-[script索引](scripts/README.md)から辿る。次の利用時は、制限背景の必要条件と一般共変な十分条件、
-有限ambient polynomialと場依存制約を別々に判定する。個別論文の判定はこのpublic repoに置かない。
+どれも整備済み。 次に使うときに読む正本だけを置く (旧全文 = [SESSION-archive.md](SESSION-archive.md) の「pointer 化退避 (2026-11-18)」)。
+- Lindblad 観測量 = [作用空間とチャネルの境界](docs/lindblad-observables.md) を確かめてから [生成索引](scripts/README.md) の module。 独立検査の原本は呼び元が持つ。
+- 有限積分・外積・式の転記 = [実装の分担](DESIGN.md#finite-vacuum-and-transcription-tools) と [主張の依存関係・物理的な解釈](conventions/physics-verification-cycle.md#claim-dependencies-and-observables)。 module の selftest を通し、 独立検査の原本を共通実装への別名に置き換えない。
+- 共変作用・密度 frame = [検証 kernel](conventions/physics-verification-cycle.md#action-equivalence-and-polynomiality)・[DESIGN](DESIGN.md#covariant-action-audit-hoist)。 制限背景の必要条件と一般共変な十分条件、 有限 ambient polynomial と場依存制約を別々に判定する。 個別論文の判定はこの public repo に置かない。
+- レビュー成果物の不変性 = [snapshot helper](scripts/review-artifact-snapshot.py)。 baseline の対象と writer の停止を確かめ、 追加物の回収範囲は呼び元で指定する (入口 = [CLAUDE](CLAUDE.md))。
+- 事前登録した比較実験の受領 = [共通手順](conventions/physics-verification-cycle.md#preregistered-comparison-receipt)。 登録した版と判定規則・匿名対応表の固定時点・部分確認した指摘の加点単位を仕様で確かめる。 個別の得点・採用判断・独立検算の原本は呼び元が持つ。
 
 ## 現在地：掲示板の engine (board/)
 
 owner 専用の掲示板から engine を移し、 共同研究の repo に層2 の掲示板を置けるようにした。 入口 = [board/README.md](board/README.md)、 運用の契約 = [board/CONTRACT.md](board/CONTRACT.md#boards-and-audiences)、 判断 = [DESIGN](DESIGN.md#board-engine) と [board/DESIGN.md](board/DESIGN.md#one-engine-many-boards)。 次 = 実際の共同研究の掲示板で、 共同研究者側の session が clone して読めるかを確かめる (読む人の gate は名前と path だけを見る = 文章の中身は書き手の判断)。 session の冒頭に要注意 thread を出す hook = `board/board-session-start.py` (配線は各自の settings、 判断 = [board/DESIGN.md](board/DESIGN.md#session-start-surface))。 新しい session から実際に発火したところはまだ見ていない。
 
 未着手 = path の宣言 (`touch`) は宣言した session が終わっていても 🔴 を出す (実測)。 engine の `session_state` を `touch_verdict` と `untouch` の「次の持ち主」 に使い、 ended なら待たない形に (直すなら [board/CONTRACT.md](board/CONTRACT.md#path-touches) と試験も。 今の見方 = claude-config `closing-sweep.md#concurrent` の 2)。
-
-## 現在地：レビュー成果物の不変性確認
-
-再開前後の比較には [snapshot helper](scripts/review-artifact-snapshot.py) を使える。次の利用時は baseline の対象と writer の停止を確認し、追加物の回収範囲は呼び元で指定する。運用入口は [CLAUDE](CLAUDE.md)。
 
 ## 現在地：封じた sandbox の回収
 
@@ -108,12 +92,6 @@ owner 専用の掲示板から engine を移し、 共同研究の repo に層2 
 
 Codex の役割宛ての request は `--launch-writable-root <dir>` (繰り返し可) で、 作業 dir の外に書く dir を起動の時点で渡す ([契約](board/CONTRACT.md#codex-worker-launch))。 request の details に 1 dir 1 行で載り、 `launch --request` が読み戻して起動の道具の `--writable-root` に足す。
 app の turn から名指した dir に書けることは実機で確かめた (Codex の worker が作業 dir の外の共有フォルダに成果物を書けた)。 次 = headless の行の `-c sandbox_workspace_write.writable_roots=[…]` は実機ではまだ走らせていない。
-
-## 現在地：事前登録した比較実験の受領
-
-受領時に照合する範囲を [共通手順](conventions/physics-verification-cycle.md#preregistered-comparison-receipt) に整理した。
-次の比較実験では、登録した版と判定規則、匿名対応表の固定時点、部分確認した指摘の加点単位を仕様で確かめる。
-個別の得点・採用判断・独立検算の原本は呼び元が持つ。
 
 ## 残タスク
 

@@ -112,3 +112,38 @@ foil の歯の確かめ方 (2026-09-14): [`physics-verification-cycle.md#foil-te
 - `scripts/check-edit-intent.py --fill` の `--intents` が、JSON file の path に加えて `{` で始まる JSON そのものを受ける (file path だと思わず文字列を渡して止まったため。selftest +2、shim 経由の `--fill` で 12/12 を確認)。[`#fill-mode`](conventions/edit-intent-record.md#fill-mode) の説明も合わせた。
 - [`#apply-then-record`](conventions/edit-intent-record.md#apply-then-record) に、live の HEAD を書き込み時に実測する記録道具が並列 session の commit を自分の pass として記録する件への pointer (正本 = claude-config `multi-session-coordination.md#measured-record-race`)。
 - 次: 変化なし (Phase 2 の監視)。
+
+## pointer 化退避 (2026-11-18): 検証の再利用道具の現在地 5 節
+
+SESSION.md の行数の警告を払うため、 次に使うときの入口だけを持つ 5 節を全文のまま移した (SESSION には 1 行ずつの入口 = 「検証の再利用道具」 の節)。
+
+## 現在地：Lindblad 観測量の検査
+
+再利用 API と合成 selftest を整備した。次の利用では、
+[作用空間とチャネルの境界](docs/lindblad-observables.md)を確認してから、
+[生成索引](scripts/README.md)の module を使う。独立検査の原本は呼び元で保持する。
+
+## 現在地：有限積分・外積・式の転記
+
+共通道具を追加した。再利用時は [実装の分担](DESIGN.md#finite-vacuum-and-transcription-tools) と
+[主張の依存関係・物理的な解釈](conventions/physics-verification-cycle.md#claim-dependencies-and-observables) を読み、
+[生成索引](scripts/README.md)から該当 module へ進む。caller の量子測度・適用範囲・個別判定は各 project が持つ。
+次の利用では必要な module の selftest を通し、独立検査の原本を共通実装への別名に置き換えない。
+
+## 現在地：共変作用・密度frameの検査module
+
+作用の等価性・境界項・有限多項式性を再利用可能な形にした。
+入口は [検証kernel](conventions/physics-verification-cycle.md#action-equivalence-and-polynomiality)、
+実装判断は [DESIGN](DESIGN.md#covariant-action-audit-hoist)、コードは生成された
+[script索引](scripts/README.md)から辿る。次の利用時は、制限背景の必要条件と一般共変な十分条件、
+有限ambient polynomialと場依存制約を別々に判定する。個別論文の判定はこのpublic repoに置かない。
+
+## 現在地：レビュー成果物の不変性確認
+
+再開前後の比較には [snapshot helper](scripts/review-artifact-snapshot.py) を使える。次の利用時は baseline の対象と writer の停止を確認し、追加物の回収範囲は呼び元で指定する。運用入口は [CLAUDE](CLAUDE.md)。
+
+## 現在地：事前登録した比較実験の受領
+
+受領時に照合する範囲を [共通手順](conventions/physics-verification-cycle.md#preregistered-comparison-receipt) に整理した。
+次の比較実験では、登録した版と判定規則、匿名対応表の固定時点、部分確認した指摘の加点単位を仕様で確かめる。
+個別の得点・採用判断・独立検算の原本は呼び元が持つ。
