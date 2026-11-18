@@ -717,6 +717,13 @@ def selftest() -> int:
         inc = Path(td) / "paper.pdf"; inc.write_bytes(b"%PDF")
         sb = create(root, "t1", spec, [inc])
         ok((sb / "CLAUDE.md").exists() and (sb / "REVIEW-SPEC.md").exists() and (sb / "paper.pdf").exists() and (sb / "scratch").is_dir())
+        # --include を 2 回書いても、 1 回に並べても、 両方が sandbox に入る (2 回目が先の file を黙って落とさない)
+        inc2 = Path(td) / "notes.md"; inc2.write_text("# notes\n", encoding="utf-8")
+        for k, inc_args in enumerate((["--include", str(inc), "--include", str(inc2)], ["--include", str(inc), str(inc2)])):
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc = main(["create", f"t-inc{k}", "--spec", str(spec), "--root", str(Path(td) / "sb-inc")] + inc_args)
+            got = Path(td) / "sb-inc" / f"t-inc{k}"
+            ok(rc == 0 and (got / "paper.pdf").exists() and (got / "notes.md").exists(), f"--include の形 {k}: {inc_args}")
         try:
             create(root, "t1", spec, []); raise AssertionError("should refuse non-empty")
         except SystemExit as e:
@@ -1004,7 +1011,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("mode", nargs="?", choices=["create", "add", "collect", "status", "close"])
     ap.add_argument("slug", nargs="*")
     ap.add_argument("--spec", type=Path)
-    ap.add_argument("--include", type=Path, nargs="*", default=[])
+    # extend = `--include A --include B` も `--include A B` も両方を溜める (nargs だけだと 2 回目が先の A を黙って置き換えた = 実測)
+    ap.add_argument("--include", type=Path, nargs="*", action="extend", default=[])   # 既定の list は argparse が写して使う
     ap.add_argument("--into", type=Path)
     ap.add_argument("--root", type=Path, default=DEFAULT_ROOT)
     ap.add_argument("--keep-comments", action="store_true",
