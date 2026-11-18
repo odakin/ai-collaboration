@@ -92,6 +92,7 @@ NET_TOKEN_RE = re.compile(r"\b(?:curl|wget|urllib\.request|urlopen|urllib3|httpx
 DENY_RE = re.compile(r"permission|denied|requires approval|haven't granted", re.I)
 RESULT_ROOT_NAMES = ("REVIEW-RESULTS.md", "ledger.yaml", "HANDOFF.md")
 RESULT_DIRS = ("notes", "checks")
+RECHECK_NAME = "RECHECK-RESULTS.md"     # a later round's result file at any depth (the same name make-review-sandbox.py uses)
 CIPHER_KEYS = {"encrypted_content", "signature"}
 CODEX_CALL_TYPES = ("custom_tool_call", "function_call", "local_shell_call", "web_search_call")
 
@@ -620,7 +621,7 @@ def written_files(sandbox: Path, results: Path) -> tuple[list[tuple[str, Path]],
     def is_result(rel: str) -> bool:
         parts = rel.split("/")
         return (len(parts) == 1 and (parts[0] in RESULT_ROOT_NAMES or (parts[0].startswith("STAGE") and parts[0].endswith("-RESULTS.md")))
-                or parts[0] in RESULT_DIRS)
+                or parts[0] in RESULT_DIRS or parts[-1] == RECHECK_NAME)   # a later round's result (make-review-sandbox.py add)
     msb = _sibling("make-review-sandbox.py")
     if results == sandbox:
         inv = msb.inventory(sandbox, msb.read_ledger(sandbox.parent, sandbox.name))
@@ -929,6 +930,13 @@ def selftest() -> int:
         (sandbox / "STAGE2-RESULTS.md").write_text("stage two cites OtherAuthor\n")
         rc, out = run(cmd_receipt, *args, ["OtherAuthor"], home=home)
         assert rc == 2 and "'OtherAuthor': 1 / 1 / 0" in out, out
+        (sandbox / "round2").mkdir()
+        (sandbox / "round2" / "RECHECK-RESULTS.md").write_text("round two cites OtherAuthor\n")
+        rc, out = run(cmd_receipt, *args, ["OtherAuthor"], home=home)
+        assert rc == 2 and "'OtherAuthor': 2 / 1 / 0" in out, out      # a later round's result is a result file
+        assert RECHECK_NAME == _sibling("make-review-sandbox.py").RECHECK_NAME   # one name in the two tools
+        (sandbox / "round2" / "RECHECK-RESULTS.md").unlink()
+        (sandbox / "round2").rmdir()
         collected = tmp / "collected"
         (collected / "outside-rules").mkdir(parents=True)
         (collected / "REVIEW-RESULTS.md").write_text("clean\n")

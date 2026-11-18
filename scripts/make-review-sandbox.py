@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""封じた review sandbox (~/<sandbox-root>/<slug>/) を機械的に切る: 9 rule の CLAUDE.md (= この dir 以外を読まない / 注入 reminder 無視 / git log 禁止 / 書くのは results と scratch のみ、 一時 file も scratch に / ledger の形 / HANDOFF / PDF の取り方 / 出口 = 返送後は公開層を触らない) + 同文の AGENTS.md (Codex 用) + REVIEW-SPEC.md + 許可 file の copy (.tex は comment を剥がし、 残りを check-review-target.py で 0 確認) + sandbox の外の台帳、受領時は collect で results + notes/checks/scratch と規則の外の file (outside-rules/) を repo へ copy して台帳に記録、 status で未回収・回収の後に増えた sandbox を出す (conventions/cold-eyes-isolation.md#sealed-sandbox の recipe、--selftest 内蔵)
+"""封じた review sandbox (~/<sandbox-root>/<slug>/) を機械的に切る: 9 rule の CLAUDE.md (= この dir 以外を読まない / 注入 reminder 無視 / git log 禁止 / 書くのは results と scratch のみ、 一時 file も scratch に / ledger の形 / HANDOFF / PDF の取り方 / 出口 = 返送後は公開層を触らない) + 同文の AGENTS.md (Codex 用) + REVIEW-SPEC.md + 許可 file の copy (.tex は comment を剥がし、 残りを check-review-target.py で 0 確認) + sandbox の外の台帳、同じ判定の窓の 2 回目以降の材料は add で下位 dir に同じ剥がしと検査を通して足しその回の入力として台帳に記録、受領時は collect で results + notes/checks/scratch と規則の外の file (outside-rules/) を repo へ copy して台帳に記録、 status で未回収・回収の後に増えた sandbox を出す (conventions/cold-eyes-isolation.md#sealed-sandbox の recipe、--selftest 内蔵)
 
 Why (2026-09-06): a blind second eye run *inside* a repo checkout is not blind — the
 requester's auto-loaded project list and layer-1 addenda leaked the expected verdict to the
@@ -17,8 +17,18 @@ Usage
           Writes the ledger <root>/.sandbox-ledger/<slug>.json (creation time, each input with its sha256).  The
           ledger sits outside the sandbox: it will name the collection's destination (a repository = contamination
           channel (e)), and a Codex workspace-write sandbox cannot write the root (measured).
+  make-review-sandbox.py add <slug> --include FILE ... [--into round2] [--root ...] [--keep-comments]
+        → a later round with the same reviewer (cold-eyes-isolation.md#revised-target-second-round): puts the revised
+          referee copy, the round's instruction file and the comparison material under <sandbox>/<round dir>/ (default
+          round2, round3, …).  .tex / .bib are stripped and every file is checked as in create; a refused file never
+          enters the sandbox (staged under the ledger directory).  Refuses a rule directory (notes/ checks/ scratch/
+          outside-rules/), a parent path, and a name already in the round directory: nothing in the sandbox is overwritten.
+          Each file goes into the ledger as that round's input with its sha256, so status keeps a collected sandbox
+          "collected, unchanged" after the add and collect does not copy the material as the reviewer's.  Take the
+          review-artifact-snapshot.py capture baseline before the add.  The round's results are RECHECK-RESULTS.md (at the
+          root or in any directory) and HANDOFF.md in the round directory.
   make-review-sandbox.py collect <slug> --into DEST_DIR [--root ...] [--include-literature]
-        → copies REVIEW-RESULTS.md, STAGE*-RESULTS.md (+ ledger.yaml / HANDOFF.md / notes/ / checks/ / scratch/ if present)
+        → copies REVIEW-RESULTS.md, STAGE*-RESULTS.md, RECHECK-RESULTS.md (any depth; + ledger.yaml / HANDOFF.md / notes/ / checks/ / scratch/ if present)
           into DEST_DIR, never the other way.  Every other file the reviewer wrote anywhere in the sandbox (the root,
           other directories, deeper levels) goes to DEST_DIR/outside-rules/<its relative path>, and is listed: copied and
           announced, not refused (measured: files outside those places were dropped without a word, and a refusing
@@ -199,6 +209,100 @@ def create(root: Path, slug: str, spec: Path, includes: list[Path], keep_comment
     return sb
 
 
+RECHECK_NAME = "RECHECK-RESULTS.md"                  # a later round's result file: at the root or in any directory below
+ROUND_RESULT_NAMES = (RECHECK_NAME, "HANDOFF.md")    # result files inside a round directory that add registered
+
+
+def _rounds(ledger: dict | None) -> list[dict]:
+    return [r for r in ((ledger or {}).get("rounds") or []) if isinstance(r, dict) and r.get("dir")]
+
+
+def round_inputs(ledger: dict | None) -> dict[str, str]:
+    """{sandbox-relative path: sha256} of every file add put in a round directory (the material of a later round)."""
+    out: dict[str, str] = {}
+    for r in _rounds(ledger):
+        out.update(r.get("inputs") or {})
+    return out
+
+
+def _is_result(rs: str, n: str, top: str | None, round_dirs: set[str]) -> bool:
+    if n == RECHECK_NAME:
+        return True
+    if top is None:
+        return n in RESULT_NAMES or (n.startswith("STAGE") and n.endswith("-RESULTS.md"))
+    return "/" in rs and rs.rsplit("/", 1)[0] in round_dirs and n in ROUND_RESULT_NAMES
+
+
+def add(root: Path, slug: str, includes: list[Path], into: str | None = None, keep_comments: bool = False) -> Path:
+    """Put the material of a later round with the same reviewer (the revised referee copy, the round's instruction file,
+    the comparison material) in a directory of an existing sandbox.  Same stripping and check as create; each file is
+    recorded with its sha256 as that round's input in the ledger, so collect and status do not count it as a file the
+    reviewer wrote (without this, a hand copy showed as "written to after the collection" the moment it was placed, and
+    collect copied the round's material into outside-rules/).  Round-1 files are not touched.  Returns the directory."""
+    sb = root / slug
+    if not is_sealed_sandbox(sb):
+        raise SystemExit(f"✗ no sealed sandbox at {sb} (made with another --root? pass the same --root as create)")
+    if not includes:
+        raise SystemExit("✗ add needs --include FILE ... (the revised copy, the round's instruction file, the comparison material)")
+    missing = [str(f) for f in includes if not f.is_file()]
+    if missing:
+        raise SystemExit(f"✗ not a file: {_some(missing)}")
+    led = read_ledger(root, slug) or _inferred_ledger(sb, slug)
+    rounds = _rounds(led)
+    rel = (into or f"round{len({r['dir'] for r in rounds}) + 2}").strip().rstrip("/")
+    parts = rel.split("/")
+    if (not rel or rel.startswith("/") or "\\" in rel or any(p in ("", ".", "..") or p.startswith(".") for p in parts)
+            or parts[0] in RULE_DIRS + (OUTSIDE_DIR,) or _is_tree(parts[0]) or parts[0] in INPUT_NAMES + RESULT_NAMES):
+        raise SystemExit(f"✗ refuse --into {rel!r}: a new directory name relative to the sandbox, not one of"
+                         f" {', '.join(RULE_DIRS + (OUTSIDE_DIR,))}, a hidden or third-party directory, or a parent path")
+    dest = sb / rel
+    if dest.exists() and not dest.is_dir():
+        raise SystemExit(f"✗ refuse: {dest} exists and is not a directory")
+    names = [f.name for f in includes]
+    dup = sorted({n for n in names if names.count(n) > 1})
+    clash = [n for n in names if (dest / n).exists()]
+    if dup or clash:
+        why = (["the same name twice in --include: " + ", ".join(dup)] if dup else []) + \
+              ([f"already in {rel}/: " + ", ".join(clash)] if clash else [])
+        raise SystemExit(f"✗ refuse: {'; '.join(why)} (nothing is overwritten in the sandbox)")
+    stage = root / LEDGER_DIR / f".add-{slug}-{time.time_ns()}"   # outside the sandbox: a refused file never enters it
+    stage.mkdir(parents=True)
+    try:
+        strip = None if keep_comments else _sibling("strip-tex-comments.py").strip_for
+        for f in includes:
+            if strip and f.suffix.lower() in (".tex", ".bib"):
+                src = f.read_text(encoding="utf-8")
+                out = strip(f.name, src)
+                (stage / f.name).write_text(out, encoding="utf-8")
+                print(f"  stripped {f.name}: {src.count(chr(10)) - out.count(chr(10))} comment line(s) removed in the sandbox copy")
+            else:
+                shutil.copy2(f, stage / f.name)
+        if not keep_comments:
+            check = _sibling("check-review-target.py")
+            scans = [check.scan(stage / n) for n in names]
+            left = [r for r in scans if r["hits"]]
+            if left:
+                raise SystemExit("✗ refuse: the round's copy still carries comments (cold-eyes-isolation.md#contamination-channels"
+                                 " (d)); nothing was put in the sandbox:\n" + check.report(left))
+            warned = [r for r in scans if r.get("warnings")]
+            if warned:
+                print(check.report(warned))
+        dest.mkdir(parents=True, exist_ok=True)
+        for n in names:
+            os.replace(stage / n, dest / n)
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
+    at, ns = _now()
+    entry = next((r for r in rounds if r["dir"] == rel), None)
+    if entry is None:
+        entry = {"dir": rel, "inputs": {}, "added": []}
+        led.setdefault("rounds", []).append(entry)
+    entry.setdefault("inputs", {}).update({f"{rel}/{n}": _sha256(dest / n) for n in names})
+    entry.setdefault("added", []).append({"at": at, "at_ns": ns, "files": names})
+    write_ledger(root, slug, led)
+    return dest
+
+
 LITERATURE_SUFFIXES = (".pdf", ".tar.gz", ".tgz", ".tar", ".tar.bz2", ".tar.xz", ".gz", ".zip", ".djvu", ".epub")
 ARCHIVE_SUFFIXES = (".tar.gz", ".tgz", ".tar", ".tar.bz2", ".tar.xz", ".gz", ".zip")
 # saved web pages (abstract pages, journal landing pages, API answers) are third-party text too
@@ -264,6 +368,8 @@ def inventory(sb: Path, ledger: dict | None) -> dict:
     files = {path: sha256} of every file outside the trees (the collection's "seen", and the diff for status) /
     mtime = {path: file time} of the reviewer's files.  An unchanged input is in files and nowhere else."""
     inputs = (ledger or {}).get("inputs")
+    rin = round_inputs(ledger)
+    rdirs = {r["dir"] for r in _rounds(ledger)}
     base = None
     if inputs is None:
         cm = sb / "CLAUDE.md"
@@ -307,10 +413,15 @@ def inventory(sb: Path, ledger: dict | None) -> dict:
             h = note(p, rs)
             if h is None:
                 continue
-            if top is None:   # the sandbox root
-                if n in RESULT_NAMES or (n.startswith("STAGE") and n.endswith("-RESULTS.md")):
-                    out["results"].append(rs)
+            if rs in rin:     # a later round's material (add)
+                if rin[rs] == h:
+                    out["mtime"].pop(rs, None)
                     continue
+                out["inputs_changed"].append(rs)
+            elif _is_result(rs, n, top, rdirs):
+                out["results"].append(rs)
+                continue
+            elif top is None:   # the sandbox root
                 if inputs is not None and rs in inputs:
                     if inputs[rs] == h:
                         out["mtime"].pop(rs, None)
@@ -371,6 +482,7 @@ def collect(root: Path, slug: str, into: Path, include_literature: bool = False)
             # observed 2026-09-06: a second collect silently reverted the ledger to the sandbox copy
             print(f"  ↷ kept existing {dest} (differs from sandbox copy; delete it first if you really want the sandbox version)")
             continue
+        dest.parent.mkdir(parents=True, exist_ok=True)      # a round's result sits in its directory (round2/RECHECK-RESULTS.md)
         shutil.copy2(p, dest)
         copied.append(dest)
         taken.append(rs)
@@ -491,7 +603,7 @@ def sandbox_state(root: Path, slug: str, find_in: Path | None = None, _index: di
     inv = inventory(sb, led)
     mine = reviewer_files(inv)
     st.update(ledger=led is not None, written=len(mine), code=reviewer_code(inv), outside=inv["outside"],
-              trees=inv["trees"], literature=len(inv["literature"]),
+              trees=inv["trees"], literature=len(inv["literature"]), rounds=[r["dir"] for r in _rounds(led)],
               last_write=max((inv["mtime"].get(r, 0) for r in mine), default=None))
     cols = (led or {}).get("collections") or []
     closed = (led or {}).get("closed")
@@ -797,13 +909,99 @@ def selftest() -> int:
         ok("`/tmp`" in rule4 and "`$TMPDIR`" in rule4 and "scratchpad" in rule4, "temporary files stay in the sandbox")
         rule7 = next(line for line in CLAUDE_MD.splitlines() if line.startswith("7. "))
         ok("heredoc" in rule7 and "`./checks/`" in rule7, "computations run from files")
+
+        # ---- add: a later round with the same reviewer, in a directory of the same sandbox ----
+        sa = create(root, "r1", spec, [inc])
+        (sa / "REVIEW-RESULTS.md").write_text("round 1\n", encoding="utf-8")
+        (sa / "notes").mkdir(); (sa / "notes" / "n1.md").write_text("n1\n", encoding="utf-8")
+        da = Path(td) / "dest-r"
+        with contextlib.redirect_stdout(io.StringIO()):
+            collect(root, "r1", da)
+        ok(sandbox_state(root, "r1")["state"] == "collected")
+        rev = Path(td) / "note-v2.tex"
+        rev.write_text("% changed after the referee's finding 3\n\\section{A}\nrevised text\n", encoding="utf-8")
+        rspec = Path(td) / "RECHECK-SPEC.md"; rspec.write_text("# recheck\nRead round2/note-v2.tex.\n", encoding="utf-8")
+        diff = Path(td) / "stripped.diff"; diff.write_text("-old text\n+revised text\n", encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()):
+            got = add(root, "r1", [rev, rspec, diff])
+        ok(got == sa / "round2" and (got / "note-v2.tex").exists() and (got / "RECHECK-SPEC.md").exists(), got)
+        ok("finding" not in (got / "note-v2.tex").read_text(encoding="utf-8") and "finding" in rev.read_text(encoding="utf-8"),
+           "the round's .tex is stripped in the sandbox, the source is untouched")
+        led = read_ledger(root, "r1")
+        ok(led["rounds"][0]["dir"] == "round2" and set(led["rounds"][0]["inputs"]) ==
+           {"round2/note-v2.tex", "round2/RECHECK-SPEC.md", "round2/stripped.diff"}
+           and led["rounds"][0]["inputs"]["round2/note-v2.tex"] == _sha256(got / "note-v2.tex"), led.get("rounds"))
+        st = sandbox_state(root, "r1")
+        ok(st["state"] == "collected" and st["rounds"] == ["round2"], st)          # the material is not the reviewer's write
+        ok(not any(r.startswith("round2/") for r in reviewer_files(inventory(sa, led))), "round inputs are not the reviewer's files")
+        with contextlib.redirect_stdout(io.StringIO()):
+            add(root, "r1", [inc], into="round2")                                 # a second add to the same round merges
+        ok(set(read_ledger(root, "r1")["rounds"][0]["inputs"]) >= {"round2/paper.pdf", "round2/note-v2.tex"}
+           and len(read_ledger(root, "r1")["rounds"]) == 1)
+        ok(sandbox_state(root, "r1")["state"] == "collected")
+        # refusals: nothing enters the sandbox and the ledger is unchanged
+        before = ledger_path(root, "r1").read_text(encoding="utf-8")
+        bad_md = Path(td) / "RECHECK-NOTE.md"; bad_md.write_text("x\n<!-- requester: finding 3 is fixed -->\n", encoding="utf-8")
+        for kw, want in (({"into": "notes"}, "refuse --into"), ({"into": "../up"}, "refuse --into"),
+                         ({"into": "/abs"}, "refuse --into"), ({"into": ".hidden"}, "refuse --into"),
+                         ({"into": "outside-rules"}, "refuse --into"), ({"into": "round2"}, "already in round2/")):
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    add(root, "r1", [rspec], **kw); raise AssertionError(f"should refuse {kw}")
+            except SystemExit as e:
+                ok(want in str(e), (kw, str(e)))
+        try:
+            add(root, "r1", [rspec, rspec], into="round3")
+            raise AssertionError("should refuse the same name twice")
+        except SystemExit as e:
+            ok("the same name twice" in str(e), str(e))
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                add(root, "r1", [bad_md], into="round3"); raise AssertionError("should refuse a commented include")
+        except SystemExit as e:
+            ok("still carries comments" in str(e) and "fixed" not in str(e), str(e))
+        ok(not (sa / "round3").exists() and ledger_path(root, "r1").read_text(encoding="utf-8") == before,
+           "a refused add puts nothing in the sandbox and leaves the ledger as it was")
+        ok(not [p for p in (root / LEDGER_DIR).iterdir() if p.name.startswith(".add-")], "the staging directory is removed")
+        try:
+            add(root, "no-such", [rspec]); raise AssertionError("should refuse a missing sandbox")
+        except SystemExit as e:
+            ok("no sealed sandbox" in str(e))
+        # the reviewer writes round 2: the results are taken as results, other files go to outside-rules/
+        (got / "RECHECK-RESULTS.md").write_text("recheck\n", encoding="utf-8")
+        (got / "HANDOFF.md").write_text("round 2 handoff\n", encoding="utf-8")
+        (got / "extra.md").write_text("extra\n", encoding="utf-8")
+        (sa / "checks").mkdir(); (sa / "checks" / "round2_a.py").write_text("print(2)\n", encoding="utf-8")
+        st = sandbox_state(root, "r1")
+        ok(st["state"] == "changed_after_collect" and set(st["changed"]) ==
+           {"round2/RECHECK-RESULTS.md", "round2/HANDOFF.md", "round2/extra.md", "checks/round2_a.py"}, st)
+        inv = inventory(sa, read_ledger(root, "r1"))
+        ok({"round2/RECHECK-RESULTS.md", "round2/HANDOFF.md"} <= set(inv["results"]) and inv["outside"] == ["round2/extra.md"], inv)
+        with contextlib.redirect_stdout(io.StringIO()):
+            collect(root, "r1", da)
+        ok((da / "round2" / "RECHECK-RESULTS.md").read_text(encoding="utf-8") == "recheck\n"
+           and (da / "round2" / "HANDOFF.md").exists() and (da / OUTSIDE_DIR / "round2" / "extra.md").exists()
+           and (da / "checks" / "round2_a.py").exists(), "the round's results and files are collected")
+        ok(not (da / "round2" / "note-v2.tex").exists() and not (da / OUTSIDE_DIR / "round2" / "note-v2.tex").exists()
+           and not (da / OUTSIDE_DIR / "round2" / "RECHECK-SPEC.md").exists(), "the round's inputs are not copied")
+        ok(sandbox_state(root, "r1")["state"] == "collected")
+        # a changed round input is reported, a RECHECK-RESULTS.md at the root is a result, a HANDOFF.md outside a round is not
+        (got / "stripped.diff").write_text("edited by the reviewer\n", encoding="utf-8")
+        (sa / "RECHECK-RESULTS.md").write_text("at the root\n", encoding="utf-8")
+        (sa / "misc").mkdir(); (sa / "misc" / "HANDOFF.md").write_text("not a round\n", encoding="utf-8")
+        inv = inventory(sa, read_ledger(root, "r1"))
+        ok("round2/stripped.diff" in inv["inputs_changed"] and "RECHECK-RESULTS.md" in inv["results"]
+           and "misc/HANDOFF.md" in inv["outside"], inv)
+        # the default round directory follows the rounds already recorded
+        with contextlib.redirect_stdout(io.StringIO()):
+            ok(add(root, "r1", [rspec]) == sa / "round3")
     print(f"selftest OK ({n_checks} checks)")
     return 0
 
 
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("mode", nargs="?", choices=["create", "collect", "status", "close"])
+    ap.add_argument("mode", nargs="?", choices=["create", "add", "collect", "status", "close"])
     ap.add_argument("slug", nargs="*")
     ap.add_argument("--spec", type=Path)
     ap.add_argument("--include", type=Path, nargs="*", default=[])
@@ -829,6 +1027,17 @@ def main(argv: list[str]) -> int:
         print(f"✓ sandbox: {sb}")
         print("spawn hint: cwd を上の dir に pin し、prompt は「REVIEW-SPEC.md を読んで実行。token = <TOKEN>」だけ。")
         print("receipt: make-review-sandbox.py collect", one, "--into <campaign dir>  → 汚染 grep → 独立再実装 → ledger 記入 → HANDOFF.md を読んで hoist station")
+        return 0
+    if a.mode == "add":
+        if not (one and a.include):
+            ap.error("add needs one <slug> --include FILE ... [--into <round dir>]")
+        dest = add(a.root, one, a.include, str(a.into) if a.into else None, keep_comments=a.keep_comments)
+        rel = dest.relative_to(a.root / one).as_posix()
+        print(f"✓ added {len(a.include)} file(s) under {dest} (recorded in the ledger as the inputs of {rel}/)")
+        spec_names = [f.name for f in a.include if f.name.upper().startswith("RECHECK-SPEC")]
+        print(f"resume hint: 同じ判定の session を同じ model・推論の深さで再開し、 prompt は「{rel}/{spec_names[0] if spec_names else '<指示書>'}"
+              " を読んで実行。token = <TOKEN>」だけ (cold-eyes-isolation.md#judge-window-between-rounds)。")
+        print("receipt: make-review-sandbox.py collect", one, "--into <受領の dir>  → status が「回収済みで、 その後に変わっていない」 まで")
         return 0
     if a.mode == "collect":
         if not (one and a.into):
