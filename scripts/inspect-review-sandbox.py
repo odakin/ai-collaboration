@@ -234,9 +234,16 @@ def _new_info() -> dict:
 
 def parse(transcript: Path, seal_name: str) -> dict:
     """Metadata of one transcript.  Only counts, names, timestamps and lookups are printed; the tool inputs and the
-    records are kept for the order, outside-path and contamination checks."""
+    records are kept for the order, outside-path and contamination checks.
+
+    A Claude transcript can write one response more than once as its content grows (the later record repeats the
+    earlier blocks, measured): a tool call is counted once per tool_use id, a tool result once per tool_use_id, and
+    the stop reason and output-limit checks once per message id (from the latest record of that message).  Blocks
+    and messages without an id are counted as they come."""
     info = _new_info()
-    run = 0
+    seen_calls: set[str] = set()
+    seen_results: set[str] = set()
+    msgs: dict[str, tuple] = {}     # message id -> (stop, kinds, out_tok, think_tok) of its latest record, in first-seen order
     with transcript.open(encoding="utf-8", errors="replace") as fh:
         for line in fh:
             info["lines"] += 1
@@ -253,34 +260,29 @@ def parse(transcript: Path, seal_name: str) -> dict:
             content = msg.get("content") if isinstance(msg, dict) else None
             blocks = content if isinstance(content, list) else []
             if obj.get("type") == "assistant":
-                stop = msg.get("stop_reason")
-                if stop:
-                    info["stops"][stop] += 1
                 kinds = {b.get("type") for b in blocks if isinstance(b, dict)}
                 usage = msg.get("usage") or {}
                 out_tok = usage.get("output_tokens") or 0
                 think_tok = (usage.get("output_tokens_details") or {}).get("thinking_tokens") or 0
-                if stop == "max_tokens":
-                    info["cap_hits"] += 1
-                    if not ({"text", "tool_use"} & kinds) and (think_tok >= out_tok > 0 or kinds <= {"thinking"}):
-                        info["thinking_only_cap"] += 1
-                        run += 1
-                        info["max_consecutive_thinking_cap"] = max(info["max_consecutive_thinking_cap"], run)
-                    else:
-                        run = 0
-                elif stop:
-                    run = 0
+                mid = msg.get("id") or f"\0line{info['lines']}"
+                msgs[mid] = (msg.get("stop_reason"), kinds, out_tok, think_tok)   # a rewrite keeps its first place
             for b in blocks:
                 if not isinstance(b, dict):
                     continue
                 if b.get("type") == "tool_use":
+                    tid = b.get("id")
+                    if tid:
+                        if tid in seen_calls:
+                            continue
+                        seen_calls.add(tid)
                     name = b.get("name") or "?"
                     info["tools"][name] += 1
                     inp = b.get("input") or {}
                     seal = writes_seal(name, inp, seal_name)
                     if seal:
                         info["seal_ts"] = ts            # the latest write counts: a seal rewritten after a lookup is not a seal
-                    info["calls"].append({"ts": ts, "name": name, "text": json.dumps(inp, ensure_ascii=False), "seal": seal})
+                    info["calls"].append({"ts": ts, "name": name, "text": json.dumps(inp, ensure_ascii=False), "seal": seal,
+                                          "id": tid})
                     if name == "WebSearch":
                         info["net"].append((ts, "search", str(inp.get("query", ""))))
                     elif name == "WebFetch":
@@ -292,8 +294,27 @@ def parse(transcript: Path, seal_name: str) -> dict:
                         if urls or toks:
                             info["net"].append((ts, "download", ", ".join(urls) or f"({', '.join(toks)} without a literal URL)"))
                 elif b.get("type") == "tool_result" and b.get("is_error"):
+                    rid = b.get("tool_use_id")
+                    if rid:
+                        if rid in seen_results:
+                            continue
+                        seen_results.add(rid)
                     if DENY_RE.search(json.dumps(b.get("content"), ensure_ascii=False)[:4000]):
                         info["denied"] += 1
+    run = 0
+    for stop, kinds, out_tok, think_tok in msgs.values():
+        if stop:
+            info["stops"][stop] += 1
+        if stop == "max_tokens":
+            info["cap_hits"] += 1
+            if not ({"text", "tool_use"} & kinds) and (think_tok >= out_tok > 0 or kinds <= {"thinking"}):
+                info["thinking_only_cap"] += 1
+                run += 1
+                info["max_consecutive_thinking_cap"] = max(info["max_consecutive_thinking_cap"], run)
+            else:
+                run = 0
+        elif stop:
+            run = 0
     return info
 
 
@@ -409,7 +430,15 @@ def outside_paths(text: str, sandbox: Path, home: str | None = None) -> list[str
 
 
 def merged_calls(parts: list[dict]) -> list[dict]:
-    calls = sorted((c for p in parts for c in p["calls"]), key=lambda c: c["ts"] or "")
+    """The calls of one launch (main transcript + subagents) in time order, each call id once."""
+    seen: set[str] = set()
+    calls = []
+    for c in sorted((c for p in parts for c in p["calls"]), key=lambda c: c["ts"] or ""):
+        if c.get("id"):
+            if c["id"] in seen:
+                continue
+            seen.add(c["id"])
+        calls.append(c)
     for i, c in enumerate(calls, 1):
         c["n"] = i
     return calls
@@ -924,6 +953,36 @@ def selftest() -> int:
                                       + assistant("T03", [{"type": "text", "text": "ok"}], stop="end_turn"))
         one = parse(proj / "a.jsonl", "stage1-seal")
         assert one["thinking_only_cap"] == 1 and one["max_consecutive_thinking_cap"] == 1
+
+        # one response written twice as it grows (the later record repeats the earlier tool call) counts once
+        def msg(ts, mid, blocks, stop="tool_use", usage=None):
+            return line({"type": "assistant", "timestamp": ts, "message": {"id": mid, "role": "assistant", "content": blocks,
+                                                                          "stop_reason": stop, "usage": usage or {"output_tokens": 10}}})
+        ra = {"type": "tool_use", "id": "toolu_A", "name": "Read", "input": {"file_path": "REVIEW-SPEC.md"}}
+        rb = {"type": "tool_use", "id": "toolu_B", "name": "Bash", "input": {"command": f"cat {home}/work/repo-q/x.md"}}
+        rc_ = {"type": "tool_use", "id": "toolu_C", "name": "Read", "input": {"file_path": "paper.pdf"}}
+        deny = line({"type": "user", "timestamp": "T04", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "toolu_B", "is_error": True, "content": "Permission to use Bash has been denied."}]}})
+        twice = (msg("T01", "msg_1", [ra]) + msg("T02", "msg_1", [{"type": "thinking", "thinking": ""}, ra, rb])
+                 + deny + deny + msg("T05", "msg_2", [rc_]))
+        (proj / "a.jsonl").write_text(twice)
+        d2 = parse(proj / "a.jsonl", "stage1-seal")
+        assert d2["tools"] == {"Read": 2, "Bash": 1} and [c["id"] for c in d2["calls"]] == ["toolu_A", "toolu_B", "toolu_C"], d2["tools"]
+        assert d2["stops"] == {"tool_use": 2} and d2["denied"] == 1, (d2["stops"], d2["denied"])
+        assert len(merged_calls([d2, d2])) == 3                     # the same call in two parts also counts once
+        rc, out = run(cmd_receipt, *args, [], home=home)
+        assert "tool calls: 3" in out and "calls naming a path outside the sandbox: 1" in out, out
+        # distinct calls with distinct ids still count one by one (the real repeat is not folded away)
+        (proj / "a.jsonl").write_text(msg("T01", "msg_1", [ra]) + msg("T02", "msg_2", [dict(ra, id="toolu_A2")]))
+        assert parse(proj / "a.jsonl", "stage1-seal")["tools"] == {"Read": 2}
+        # a thinking-only capped response written twice is one capped response, not a loop of two
+        cap_msg = msg("T02", "msg_c", [{"type": "thinking", "thinking": ""}], stop="max_tokens", usage=cap)
+        (proj / "a.jsonl").write_text(cap_msg + cap_msg + msg("T03", "msg_d", [{"type": "text", "text": "ok"}], stop="end_turn"))
+        d3 = parse(proj / "a.jsonl", "stage1-seal")
+        assert d3["thinking_only_cap"] == 1 and d3["max_consecutive_thinking_cap"] == 1 and d3["cap_hits"] == 1, d3
+        # two different capped responses in a row are still a loop
+        (proj / "a.jsonl").write_text(cap_msg + msg("T03", "msg_e", [{"type": "thinking", "thinking": ""}], stop="max_tokens", usage=cap))
+        assert parse(proj / "a.jsonl", "stage1-seal")["max_consecutive_thinking_cap"] == 2
 
         # --- a Codex app rollout (synthetic: every name, path and word below is made up) ---
         def rec(ts, typ, payload):
