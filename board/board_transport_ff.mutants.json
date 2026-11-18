@@ -1,0 +1,18 @@
+{
+  "_comment": "board_transport.py の fast-forward の直し (途中で止まった最新化を次の ff が仕上げる・誰かの作業は畳まない・git の失敗の文を機械に残す) の selftest が、 直した箇所を 1 つずつ外した版でそれぞれ落ちるか (assert の名前の行で読む)",
+  "target": "board_transport.py",
+  "run": "python3 {} --selftest",
+  "fail_marker": "AssertionError: ",
+  "pass_marker": "  ok: ",
+  "mutants": [
+    {"name": "途中で止まった最新化を仕上げない (判定を常に空にする)",
+     "pairs": [["        if git(self.top, 'diff', '--quiet', check=False).returncode: return ''\n        idx = git(self.top, 'write-tree', check=False)", "        return ''\n        idx = git(self.top, 'write-tree', check=False)"]],
+     "expect_fail": ["interrupted-ff: next fast-forward completes"]},
+    {"name": "未 stage の変更を見ずに仕上げる (誰かの作業を畳む)",
+     "pairs": [["        if git(self.top, 'diff', '--quiet', check=False).returncode: return ''\n", ""]],
+     "expect_fail": ["interrupted-ff: unstaged work kept"]},
+    {"name": "失敗した fast-forward の git の文を残さない",
+     "pairs": [["            log.write_text('\\n'.join(old) + '\\n', encoding='utf-8')", "            pass"]],
+     "expect_fail": ["ff-log: git message kept"]}
+  ]
+}

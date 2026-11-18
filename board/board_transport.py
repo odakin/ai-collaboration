@@ -53,6 +53,8 @@ ORDER_FILE = '.order'   # materialised board: `<commit sha10>|<date>|<author>|<p
 BASE_FILE = '.base'     # materialised board: the commit it was read from
 NOTIFY_FILE = 'last-push'
 LAST_FETCH_FILE = 'last-fetch'   # when this machine last fetched or pushed the branch (any process): an optimistic post trusts a young one
+FF_LOG_FILE = 'fast-forward-failures.log'   # the last failed fast-forwards of the checkout, with git's message (machine-local)
+FF_LOG_KEEP = 50
 TREE_DIR = 'tree'                # <cache>/tree/<commit>/ = the board at that commit, built once from hard links to the blob cache
 TREE_KEEP = 5                    # materialised commits kept per board (older ones are removed after TREE_TTL_S)
 TREE_TTL_S = 600
@@ -63,10 +65,16 @@ NOTIFY_SSH_ENV = 'AGENT_BOARD_NOTIFY_SSH'       # the ssh executable (tests poin
 FETCH_RETRIES = 4       # two sessions fetching one repository at once: one loses the ref lock (layer-1 #concurrent-fetch-ref-lock)
 
 
+NO_AUTO_GC = ('-c', 'gc.auto=0', '-c', 'maintenance.auto=false')
+# Every git call of the transport runs without auto gc: an auto gc expires the reflog and packs refs in the foreground
+# while holding ref locks, and a fast-forward's HEAD update that meets one of those locks dies after the index and the
+# tracked files were already written (measured: the checkout then refused every later fast-forward as dirty).
+
+
 def git(root, *args, check=True, env=None, input=None):
     e = dict(os.environ)
     if env: e.update(env)
-    p = subprocess.run(['git', '-C', str(root), *args], capture_output=True, check=False, timeout=GIT_TIMEOUT, env=e, input=input)
+    p = subprocess.run(['git', *NO_AUTO_GC, '-C', str(root), *args], capture_output=True, check=False, timeout=GIT_TIMEOUT, env=e, input=input)
     if check and p.returncode:
         raise ValueError(f'git {args[0]} failed: ' + p.stderr.decode(errors='replace')[:1200])
     return p
@@ -385,14 +393,58 @@ class Repo:
                 branch = git(self.top, 'symbolic-ref', '--short', '-q', 'HEAD', check=False).stdout.decode().strip()
                 if not head or branch != self.branch: return False
                 if git(self.top, 'merge-base', '--is-ancestor', head, new, check=False).returncode: return False
-                if git(self.top, 'status', '--porcelain', '--untracked-files=no', check=False).stdout.strip(): return False
-                return git(self.top, 'merge', '--ff-only', '--quiet', new, check=False).returncode == 0
+                if git(self.top, 'status', '--porcelain', '--untracked-files=no', check=False).stdout.strip():
+                    head = self._complete_interrupted(head, new)   # an earlier fast-forward stopped before moving HEAD
+                    if not head or git(self.top, 'status', '--porcelain', '--untracked-files=no', check=False).stdout.strip():
+                        return False
+                    if head == new: return True
+                p = git(self.top, 'merge', '--ff-only', '--quiet', new, check=False)
+                if p.returncode == 0: return True
+                self._note_failure(new, p)
+                return self._complete_interrupted(head, new) == new
         except (OSError, subprocess.SubprocessError, ValueError):
             return False
+
+    def _complete_interrupted(self, head: str, new: str) -> str:
+        """Finish a fast-forward that wrote the index and the tracked files but stopped before moving HEAD; the commit
+        HEAD now points to, or '' when the checkout is in any other state (nothing is changed then).
+
+        That state is: no unstaged change (the tracked files equal the index) and the index's tree is the tree of a
+        commit between HEAD and `new`. HEAD moves to that commit with an old-value guard, so the index and the files
+        stay as they are. Anything else (someone's staged or unstaged work) is left alone."""
+        if git(self.top, 'diff', '--quiet', check=False).returncode: return ''
+        idx = git(self.top, 'write-tree', check=False)
+        log = git(self.top, 'log', '--format=%H %T', f'{head}..{new}', check=False)
+        if idx.returncode or log.returncode: return ''
+        tree = idx.stdout.decode().strip()
+        target = next((row.split()[0] for row in log.stdout.decode().splitlines() if row.split()[1:] == [tree]), '')
+        if not target: return ''
+        p = git(self.top, 'update-ref', '-m', f'merge {target}: Fast-forward (completing an interrupted fast-forward)',
+                'HEAD', target, head, check=False)
+        if p.returncode:
+            self._note_failure(target, p)
+            return ''
+        return target
+
+    def _note_failure(self, sha: str, p) -> None:
+        """Keep the last failed fast-forwards' git messages on this machine (the board only needs True / False, but a
+        checkout that stops moving must be explainable afterwards: measured, the message was discarded and lost)."""
+        try:
+            log = self.cache_dir() / FF_LOG_FILE
+            old = log.read_text(encoding='utf-8').splitlines()[-(FF_LOG_KEEP - 1):] if log.is_file() else []
+            msg = ' '.join(p.stderr.decode(errors='replace').split())[:400]
+            old.append(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {sha[:12]} rc={p.returncode} {msg}")
+            log.write_text('\n'.join(old) + '\n', encoding='utf-8')
+        except OSError:
+            pass
 
 
 def _selftest() -> int:
     import json, sys
+
+    def _check(cond, label):   # a named check prints its label when it holds (board_transport_ff.mutants.json reads it)
+        assert cond, label
+        print('  ok: ' + label)
     with tempfile.TemporaryDirectory(prefix='board-transport-') as td:
         base = Path(td); remote = base / 'remote.git'; root = base / 'source'; ws = base / 'cache'
         os.environ['AGENT_BOARD_CACHE_DIR'] = str(ws)
@@ -429,6 +481,31 @@ def _selftest() -> int:
         assert not r.fast_forward(c3, 'owner') and git(root, 'rev-parse', 'HEAD').stdout.decode().strip() == c2
         git(root, 'checkout', '-q', '--', 'board.json')
         assert not r.fast_forward(c3, 'collaborators')                                  # never for a collaborators board
+        # an interrupted fast-forward (measured): another process holds HEAD's ref lock, so the merge writes the index
+        # and the tracked files and dies before moving HEAD; the next fast-forward finishes it instead of refusing
+        head_of = lambda: git(root, 'rev-parse', 'HEAD').stdout.decode().strip()
+        dirty = lambda: git(root, 'status', '--porcelain', '--untracked-files=no').stdout.strip()
+        ref_lock = root / '.git' / 'refs' / 'heads' / 'main.lock'
+        ref_lock.write_text('')
+        assert not r.fast_forward(c3, 'owner') and head_of() == c2 and dirty()          # staged = c3's event, HEAD stayed
+        ff_log = r.cache_dir() / FF_LOG_FILE
+        _check(ff_log.is_file() and 'main.lock' in ff_log.read_text(), 'ff-log: git message kept')
+        ref_lock.unlink()
+        _check(r.fast_forward(c3, 'owner') and head_of() == c3 and not dirty(), 'interrupted-ff: next fast-forward completes')
+        # someone's work is never folded into HEAD: an unstaged change on top of the interrupted state, or a staged
+        # change that is no commit's tree, keeps the checkout where it is
+        rel5 = 'events/p/t/20260101T000004Z--e5.json'; c4 = r.commit(c3, rel5, r.write_blob(rel5, ev(5))); assert r.push(c4)
+        ref_lock.write_text(''); assert not r.fast_forward(c4, 'owner'); ref_lock.unlink()
+        assert head_of() == c3 and dirty()
+        (root / 'board.json').write_text('{}')
+        _check(not r.fast_forward(c4, 'owner') and head_of() == c3 and (root / 'board.json').read_text() == '{}',
+               'interrupted-ff: unstaged work kept')
+        git(root, 'checkout', '-q', '--', 'board.json')
+        assert r.fast_forward(c4, 'owner') and head_of() == c4 and not dirty()
+        (root / 'board.json').write_text('{"x": 1}'); git(root, 'add', 'board.json')
+        _check(not r.fast_forward(c4, 'owner') and head_of() == c4, 'interrupted-ff: staged work kept')
+        assert git(root, 'diff', '--cached', '--name-only').stdout.decode().split() == ['board.json']
+        git(root, 'reset', '-q', '--', 'board.json'); git(root, 'checkout', '-q', '--', 'board.json')
         r.notify(c3); assert r.notified() == c3
         assert r.fetched_age() < 60                                                          # push stamped the machine
         # persistent materialisation: built once, hard-linked, reused by path; a second commit gets its own directory
