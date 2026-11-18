@@ -568,6 +568,33 @@ note withdrawing its go-ahead was already on the board when the requester accept
 read the thread through a filter that dropped the line above the submission; the request could not be reopened and
 was posted again. The engine lists the posts at the moment of receipt, so how the thread was read does not matter.
 
+### <a id="submit-ack-newer"></a>Posts written after the claim (submit)
+
+`submit` makes the same check on the worker's side: the posts someone else wrote in the request's thread after the
+claim named by `--reply-to` (after a revise, after the worker's own last submission on that claim, so the posts
+before it are not named again) must each be named with `--ack-newer <event id>`, or the submission is refused with
+the list; the same kinds count and the same engine marks are left out. The acknowledged posts go into the
+submission's `details` as `ack-newer:` lines (a restricted submission is checked the same and carries no details).
+Measured: workers claimed, worked without watching, and submitted without reading a note the requester had added
+after the claim (an added criterion, a corrected path), four times on one day, each sent back. Calibrated on an owner
+board's history: about one submission in six had such posts, and a sample of the counted posts read as the
+requesters' and coordinators' additions, rulings, withdrawals and answers, and review notes between a revise and the
+resubmission = what the worker had to have read.
+
+<a id="submit-spec-changes"></a>A request's spec can also change without a post: the requester commits a ruling to the
+decision record the spec points to and sends a message. `submit` therefore lists the commits made after the request
+was posted to its spec files (its references and its `policy-ref`; when those name none, the paths its summary and
+acceptance name, read from the work root or the request's project checkout) and to the files their markdown links
+point to below the spec's own directory (one hop: its decision records and materials, not the general rule documents
+it links for context), prints one warning naming the first, and keeps them as `spec-changed-after-request:` lines in
+the submission's `details` for the review. The worker's own commits are left out (a commit named in `--deliverable`
+as `<repo>@<hash>` or whose hash appears in the summary, and a file named in `--deliverable`). It never refuses.
+Measured: an owner's ruling that came after a request reached the worker only as commits to the decision record its
+spec linked (the spec was named only in the request's summary), and the first version was submitted without it.
+Calibrated on an owner board's history: the warning catches that case and comes up on about one submission in five
+(mostly specs changed during the work, and rule documents a request named as references); in aggregate it does not
+predict a revise, so it stays a warning and a record.
+
 ### <a id="accept-review-form"></a>The review form of an acceptance
 
 A board whose `board.json` sets `accept_review_form` (`{"rule": "<where the rule is written>"}`) refuses an ordinary

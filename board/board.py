@@ -1209,6 +1209,83 @@ def review_prior(events, req, subs, ws=None):
     return sorted(out,key=lambda x:x[0].get('created_at') or '')
 
 
+SPEC_LINK_RE=re.compile(r'\]\(([^)\s]+)\)')   # a markdown link in a spec
+# A path written in a request's summary or acceptance (`plans/x-spec.md`, `<repo>/plans/x.md`, `~/…`): measured, a
+# request named its spec only in the summary, so the references held nothing to follow.
+SPEC_PATH_WORD=re.compile(r'[~\w.\-]*/[\w.\-/]*\.(?:md|txt|json|ya?ml|tex)\b',re.A)
+SPEC_FILES_MAX=40                              # files spec_changes looks at for one request
+
+
+def spec_files(req, ws):
+    """The request's spec files below the workspace `ws` (its references and its policy-ref, read like review_prior; when
+    they name none, the paths its summary and acceptance name, read from the workspace or the request's project
+    checkout) and the
+    files their markdown links point to below the spec's own directory (one hop), as resolved paths, the spec files
+    first."""
+    refs=list(req.get('references') or [])+re.findall(r'^policy-ref:\s*(\S+)',req.get('details') or '',re.M)
+    first=list(dict.fromkeys(p for p in (_ref_path(r,ws) for r in refs) if p))
+    proj=(req.get('project') or {}).get('key') or ''
+    # the summary's paths only when the references name no spec: a summary also names the rules it follows, and those
+    # change all the time (measured: read alongside the references, they made the largest share of the warnings)
+    for t in ([] if first else SPEC_PATH_WORD.findall(' '.join(str(x) for x in (req.get('summary'),req.get('acceptance')) if x))):
+        for cand in ([t] if t.startswith(('/','~')) else [t]+([f'{proj}/{t}'] if proj and proj!='restricted' else [])):
+            p=_ref_path(os.path.expanduser(cand),ws)
+            if p and p not in first: first.append(p); break
+    out=list(first)
+    for p in first:
+        try: text=p.read_text(encoding='utf-8',errors='replace')
+        except OSError: continue
+        for link in SPEC_LINK_RE.findall(text):
+            l=link.split('#',1)[0]
+            if not l or re.match(r'[a-z]+:',l): continue
+            try: q=(p.parent/l).resolve()
+            except (OSError, ValueError): continue
+            # only the spec's own materials (below its directory, where its decision records sit): the general rule
+            # documents a spec links for context change all the time (measured: they made most of the warnings)
+            if q not in out and q.is_relative_to(p.parent.resolve()) and q.is_file(): out.append(q)
+    return out[:SPEC_FILES_MAX]
+
+
+def spec_changes(req, ws, *, skip=(), until=None, own_text=''):
+    """[(path below ws, commit 8, date, subject)] = the commits made after the request was posted (its created_at; up to
+    `until` when given) to its spec files and the files they link (spec_files). The worker's own work is left out: a
+    file or a `<repo>@<hash>` commit named in `skip` (the submission's deliverables), and a commit whose hash (7 or more
+    characters) appears in `own_text` (the submission's summary). Read-only; a file that git cannot read is left out. CONTRACT.md#submit-spec-changes: measured, an owner's ruling that came after
+    a request reached the worker only as a commit to the decision record the spec pointed to (and a message), and the
+    worker submitted the first version without it."""
+    since=req.get('created_at')
+    if not since: return []
+    root=Path(ws).resolve(); skip_paths=set(); skip_commits=set(re.findall(r'\b[0-9a-f]{7,40}\b',own_text or ''))
+    for d in skip:
+        m=re.fullmatch(r'[\w.\-]+@([0-9a-f]{7,40})',str(d))
+        if m: skip_commits.add(m.group(1))
+        else:
+            p=_ref_path(d,ws)
+            if p: skip_paths.add(p)
+    out=[]
+    for p in spec_files(req,ws):
+        if p in skip_paths: continue
+        args=['log','--format=%H%x09%cI%x09%s',f'--since={since}']+([f'--until={until}'] if until else [])+['-n','3','--',p.name]
+        try: rc,o=_git_out(p.parent,*args)
+        except (OSError, subprocess.SubprocessError): continue
+        if rc: continue
+        for line in o.decode('utf-8','replace').splitlines():
+            h,_,rest=line.partition('\t'); date,_,subj=rest.partition('\t')
+            if not h or any(h.startswith(c) or c.startswith(h) for c in skip_commits): continue
+            out.append((p.relative_to(root).as_posix(),h[:8],date,subj[:120]))
+    return out
+
+
+def spec_change_hint(changes):
+    """The warning a submit prints when spec_changes found commits (stderr, last; the post is not stopped)."""
+    if not changes: return []
+    p,h,d,s=changes[0]
+    more=f" ほか {len(changes)-1} 件" if len(changes)>1 else ''
+    return [f"⚠️ 依頼の後に、 依頼書か依頼書が指す file が変わっている: {p} {h} ({d[:16]})「{s}」{more}。"
+            " 提出がその変更を読んだ後の形かを確かめる (読まずに出したなら、 読み直して出し直すか note で依頼元に知らせる)。"
+            " この提出の details に spec-changed-after-request の行で残した = 検収の側も読む (CONTRACT.md#submit-spec-changes)"]
+
+
 def _compactions(native):
     """Context compactions the native Claude session `native` (8+ hex chars) has been through, counted in this
     machine's transcript, or None (another machine, another vendor, no companion tool)."""
@@ -1578,7 +1655,7 @@ def newer_since_submission(events, req, sub_id, poster):
         if e.get('event_id')==sub_id or e.get('kind') not in NEWER_KINDS: continue
         if ((e.get('project') or {}).get('key'),e.get('thread_id'))!=key: continue
         if same_session(_actor(e),poster): continue
-        if e.get('touches') or (isinstance(e.get('summary'),str) and e['summary'].startswith(view.TOOL_NOTE_PREFIXES)): continue
+        if engine_mark(e): continue
         try:
             if wf_timestamp(e['created_at'])<=t: continue
         except (KeyError, ValueError, TypeError):
@@ -1587,28 +1664,48 @@ def newer_since_submission(events, req, sub_id, poster):
     return sorted(out,key=lambda e:e['created_at'])
 
 
-def ack_newer_lines(a, events, req):
+def submit_base(events, req, claim_id, poster):
+    """The event a submit's --ack-newer counts from (CONTRACT.md#submit-ack-newer): the claim it replies to, or the
+    poster's own latest submission on that claim when it submits again after a revise (the posts before that
+    submission were named then, or read by the review)."""
+    claim=next((e for e in events if e.get('event_id')==claim_id),None)
+    if claim is None: return claim_id
+    try: t=wf_timestamp(claim['created_at'])
+    except (KeyError, ValueError, TypeError): return claim_id
+    own=[e for e in events if e.get('kind')=='submit' and e.get('request_id')==req['event_id'] and e.get('reply_to')==claim_id
+         and same_session(_actor(e),poster)]
+    own=[e for e in own if wf_timestamp(e.get('created_at') or '1970-01-01T00:00:00Z')>t]
+    return max(own,key=lambda e:e['created_at'])['event_id'] if own else claim_id
+
+
+def ack_newer_lines(a, events, req, base=None):
     """accept / revise: refuse unless --ack-newer names exactly the posts written after the submission by someone else
-    (the same check send_mail.py --ack-newer makes for a thread). Returns the lines kept in the event's details: each
-    acknowledged post's id, kind, author and summary, so the record says what the reviewer had read."""
+    (the same check send_mail.py --ack-newer makes for a thread). submit: the same, counted from the claim (or the
+    poster's own last submission on it, submit_base) = the requester's notes and answers written while the worker
+    worked (CONTRACT.md#submit-ack-newer; measured, workers submitted without reading a note the requester had added
+    after their claim, four times on one day). Returns the lines kept in the event's details: each acknowledged post's
+    id, kind, author and summary, so the record says what the poster had read."""
     poster={'agent':a.agent,'session_id':a.session}
-    newer=newer_since_submission(events,req,a.reply_to,poster)
+    base=base or a.reply_to
+    what=('the submission' if a.command in ('accept','revise') else
+          'your claim' if base==a.reply_to else 'your last submission')
+    newer=newer_since_submission(events,req,base,poster)
     want=[e['event_id'] for e in newer]
     given=list(dict.fromkeys(getattr(a,'ack_newer',None) or []))
     if set(given)!=set(want):
         missing=[e for e in newer if e['event_id'] not in given]
         extra=[g for g in given if g not in want]
-        lines=[f"{a.command} refused: the thread has posts written after the submission {a.reply_to} by someone else."
+        lines=[f"{a.command} refused: the thread has posts written after {what} {base} by someone else."
                " Read each (show --request "+a.request+"), then name every one with --ack-newer <event id>"
                " (repeatable) and post again."]
         for e in missing:
             who=address_label(_actor(e))
             lines.append(f"  not named: {e['event_id']} ({e['kind']}, {who}): {str(e.get('summary') or '')[:300]}")
         for g in extra:
-            lines.append(f"  named but not a post after the submission by someone else: {g}")
+            lines.append(f"  named but not a post after {what} by someone else: {g}")
         if not want:
-            lines=[f"{a.command} refused: --ack-newer names {', '.join(extra)}, but no one else posted after the submission"
-                   f" {a.reply_to}; leave --ack-newer off"]
+            lines=[f"{a.command} refused: --ack-newer names {', '.join(extra)}, but no one else posted after {what}"
+                   f" {base}; leave --ack-newer off"]
         raise ValueError('\n'.join(lines))
     out=[]
     for e in newer:
@@ -1647,6 +1744,8 @@ def event_from(a, events):
             claims=[e for e in events if e.get('request_id')==a.request and e['kind']=='claim']
             cur=max(claims,key=lambda e:e['created_at'])['event_id'] if claims else None
             raise ValueError(f'{a.command} needs --reply-to <your current claim, not the request>'+(f': the latest claim is {cur}' if cur else ': no claim yet'))
+        if a.command=='submit':
+            ack_lines=ack_newer_lines(a,events,req,submit_base(events,req,a.reply_to,{'agent':a.agent,'session_id':a.session}))
     kind=a.command
     # Existing template supplies metadata; workflow fields are added below.
     ev,path=view.build_template(kind='update',project=pk,thread=tid,task=a.session_name or 'workflow',agent=a.agent,
@@ -1697,6 +1796,8 @@ def event_from(a, events):
                 ev['details']='\n'.join(x for x in (ev.get('details'),DIALOGUE_LINE,DIALOGUE_DESK_PREFIX+desk if desk else '') if x)
     if kind in ('accept','revise') and ack_lines:
         ev['details']='\n'.join(x for x in (ev.get('details'),*ack_lines) if x)[:4000]   # schema maxLength
+    if kind=='submit' and ack_lines and not restricted:   # a restricted post carries no details (the ids were checked all the same)
+        ev['details']='\n'.join(x for x in (ev.get('details'),*ack_lines) if x)[:4000]
     if kind=='handover':
         if not a.to or not a.to_session or not a.role: raise ValueError('handover needs --to, --to-session, --role')
         ev.update(target={'agent':a.to,'session_id':a.to_session},handover_role=a.role)
@@ -3029,7 +3130,8 @@ def main():
     ap.add_argument('--leftover',action='append',default=[],help="accept (review form): a follow-up of the submission's out-of-scope rest: 'in <where the confirmed policy is>: <rest>' or 'out: <rest>' (repeatable)")
     ap.add_argument('--ack-newer',action='append',default=[],help='accept / revise: an event id written after the submission'
                     ' by someone else (a note, update, blocker or submit) that you read before taking the submission; name every'
-                    ' one (repeatable), or the post is refused with the list (CONTRACT.md#accept-ack-newer)')
+                    ' one (repeatable), or the post is refused with the list (CONTRACT.md#accept-ack-newer). submit: the same for'
+                    ' the posts written after your claim, or after your own last submission on it (CONTRACT.md#submit-ack-newer)')
     ap.add_argument('--self-review',help="accept: the requesting window accepts a request marked for a separate reviewer"
                     " (CONTRACT.md#separate-reviewer): why the reviewer's window cannot take it, and the reviewer window started again")
     ap.add_argument('--spec-local',help='request / launch to a role: the spec file on the requester\'s side, named only in the'
@@ -3391,6 +3493,18 @@ def main():
             if attempt==0 and _REUSED: continue
             raise
       break
+    spec_hint=[]
+    if ev['kind']=='submit' and a.policy=='ordinary':
+        # The spec and the files it links, changed after the request was posted (CONTRACT.md#submit-spec-changes): a
+        # warning and a record for the review, never a refusal.
+        try:
+            req=next(e for e in events if e['event_id']==a.request and e['kind']=='request')
+            changes=spec_changes(req,ws,skip=ev.get('deliverables') or [],own_text=ev.get('summary') or '')
+        except Exception: changes=[]   # noqa: BLE001  a warning never stops a post
+        if changes:
+            ev['details']='\n'.join(x for x in (ev.get('details'),*[f"spec-changed-after-request: {p} {h} {d}" for p,h,d,_ in changes])
+                                    if x)[:4000]
+            spec_hint=spec_change_hint(changes)
     # What the board's readers may see is checked before anything leaves this machine (owner boards pass).
     bc.check_post(cfg,a.root,project=ev['project']['key'],policy=a.policy,
         texts=[('--summary',ev.get('summary')),('--acceptance',ev.get('acceptance')),('--session-name',a.session_name)],
@@ -3509,7 +3623,7 @@ def main():
     if a.command in {'request','claim','submit','accept','blocker','revise','update','handover','release','abandoned'} or (a.command=='note' and a.request):
         note=counterpart_note((a.agent,a.session),ev,events,root=a.root)
         if note: print(note)
-    hints=kind_hints(ev,w_before,(a.agent,a.session))+vanishing_path_hints(ev)
+    hints=kind_hints(ev,w_before,(a.agent,a.session))+vanishing_path_hints(ev)+spec_hint
     if hints:
         # last, on stderr: a caller that pipes stdout through `tail` still sees it, and `2>&1 | tail` keeps it
         sys.stdout.flush()

@@ -10,7 +10,7 @@
    "expect_fail": ["test_bare_name_in_running_text_is_not_a_path"],
    "expect_pass": ["test_real_paths_still_warn"]},
   {"name": "受け取りの前の決定の欄が道具の印の note も数える",
-   "pairs": [["        if engine_mark(e): continue\n", ""]],
+   "pairs": [["==here: continue\n        if engine_mark(e): continue\n", "==here: continue\n"]],
    "expect_fail": ["test_marks_left_out_plain_note_kept"]},
   {"name": "submit が受け取りの欄を断らない",
    "pairs": [["        if form: ap.error(", "        if False: ap.error("]],

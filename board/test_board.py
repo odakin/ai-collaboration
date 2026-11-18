@@ -4023,6 +4023,141 @@ class SessionWatch(unittest.TestCase):
             self.assertEqual(p.returncode,2,p.stderr); self.assertIn('--request と使う',p.stderr)
 
 
+class SubmitAckNewer(unittest.TestCase):
+    """submit names, with --ack-newer, every post someone else wrote after the claim (CONTRACT.md#submit-ack-newer):
+    measured, workers submitted without reading a note the requester had added after their claim (an added criterion,
+    a corrected path), four times on one day. Counted from the claim, or after a revise from the worker's own last
+    submission on it; engine marks and the worker's own posts are not counted; a restricted post is checked the same
+    and carries no details."""
+    def args(self, r, c, ack=(), policy='ordinary'):
+        import argparse
+        return argparse.Namespace(command='submit',policy=policy,source=Path('/nonexistent/example'),project=None,thread=None,
+            repo=None,request=r['event_id'],summary=None if policy!='ordinary' else 'done',acceptance=None,agent='codex',
+            session='codex-session-001',session_name=None,instance=None,event_id=None,reply_to=c['event_id'],lease_hours=12,
+            reference=[],deliverable=[] if policy!='ordinary' else ['results/example.md'],to=None,to_session=None,role=None,
+            ack_newer=list(ack))
+    def other(self, kind, seq, summary, session='claude-session-001', agent='claude'):
+        e=event(kind,seq,agent=agent); e['actor']['session_id']=session; e['summary']=summary; return e
+
+    def test_requester_note_after_the_claim_is_named(self):
+        r,c,_=chain()
+        before=self.other('note',0,'Before the claim.',session='other-session-009',agent='other')
+        added=self.other('note',3,'Add: also check the second table.')
+        mine=event('note',4); mine['summary']='Stage 1 done.'                       # the worker's own note
+        pick=self.other('note',5,'引き受けた: 受け持つ',session='other-session-009')   # an engine mark
+        evs=[r,before,c,added,mine,pick]
+        with self.assertRaises(ValueError) as cm: board.event_from(self.args(r,c),evs)
+        msg=str(cm.exception)
+        self.assertIn(f"submit refused: the thread has posts written after your claim {c['event_id']} by someone else",msg)
+        self.assertIn(added['event_id'],msg); self.assertIn('also check the second table',msg)
+        for e in (before,mine,pick): self.assertNotIn(e['event_id'],msg)
+        ev=board.event_from(self.args(r,c,[added['event_id']]),evs)
+        self.assertIn(f"ack-newer: {added['event_id']} (note, claude-session-001): Add: also check the second table.",ev['details'])
+        self.assertEqual(errors(ev,SCHEMA),[])
+        with self.assertRaises(ValueError) as cm2: board.event_from(self.args(r,c,[added['event_id'],before['event_id']]),evs)
+        self.assertIn('named but not a post after your claim by someone else: '+before['event_id'],str(cm2.exception))
+
+    def test_nothing_after_the_claim_needs_nothing(self):
+        r,c,_=chain(); mine=event('note',3); mine['summary']='Stage 1 done.'
+        ev=board.event_from(self.args(r,c),[r,c,mine])
+        self.assertNotIn('ack-newer',ev.get('details') or '')
+        with self.assertRaises(ValueError) as cm: board.event_from(self.args(r,c,['20990101T000000Z-x-000001']),[r,c])
+        self.assertIn('leave --ack-newer off',str(cm.exception))
+
+    def test_after_a_revise_counts_from_the_last_submission(self):
+        r,c,sub=chain()
+        early=self.other('note',1,'Before the first submission (named then).')
+        rv=event('revise',3,reply=sub); late=self.other('note',4,'After the revise: keep the old header.')
+        self.assertEqual(board.submit_base([r,c,early,sub,rv,late],r,c['event_id'],{'agent':'codex','session_id':'codex-session-001'}),sub['event_id'])
+        evs=[r,c,early,sub,rv,late]
+        with self.assertRaises(ValueError) as cm: board.event_from(self.args(r,c),evs)
+        msg=str(cm.exception)
+        self.assertIn(f"after your last submission {sub['event_id']}",msg); self.assertIn(late['event_id'],msg)
+        self.assertNotIn(early['event_id'],msg)
+        self.assertIn(late['event_id'],board.event_from(self.args(r,c,[late['event_id']]),evs)['details'])
+
+    def test_restricted_is_checked_and_writes_no_details(self):
+        r,c,_=chain(); r['source_policy']=c['source_policy']='encrypted-metadata-only'
+        added=self.other('note',3,'Status noted.'); added['source_policy']='encrypted-metadata-only'
+        with self.assertRaises(ValueError): board.event_from(self.args(r,c,policy='encrypted-metadata-only'),[r,c,added])
+        ev=board.event_from(self.args(r,c,[added['event_id']],policy='encrypted-metadata-only'),[r,c,added])
+        self.assertNotIn('details',ev)
+
+
+class SpecChanges(unittest.TestCase):
+    """A submit prints, and keeps in its details, the commits made after the request to its spec and the files the spec
+    links (CONTRACT.md#submit-spec-changes): measured, an owner's ruling that came after the request reached the worker
+    only as a commit to the decision record the spec pointed to, and the first version was submitted without it. The
+    worker's own commits (named in the deliverables or the summary) and files named as deliverables are left out; a
+    spec named only in the request's summary is read too."""
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory(prefix='spec-changes-'); self.ws=Path(self.tmp.name)
+        self.repo=self.ws/'proj'; (self.repo/'plans').mkdir(parents=True)
+        subprocess.run(['git','init','-q','-b','main',str(self.repo)],check=True)
+        for k,v in [('user.name','Fixture'),('user.email','fixture@example.invalid')]: board.run(self.repo,'config',k,v)
+        (self.repo/'plans/spec.md').write_text('依頼書。 判断の記録 = [decision](decision.md)、 外 = [x](https://example.org/x)、'
+                                               ' 一般の規則 = [rules](../rules/general.md)\n')
+        (self.repo/'plans/decision.md').write_text('判断 1\n'); (self.repo/'plans/work.md').write_text('作業\n')
+        (self.repo/'rules').mkdir(); (self.repo/'rules/general.md').write_text('規則\n')
+        self.commit('2026-01-01T00:00:00Z','spec and decision')
+    def tearDown(self): self.tmp.cleanup()
+    def commit(self, when, msg, *paths):
+        import os
+        board.run(self.repo,'add','-A')
+        env=dict(os.environ,GIT_COMMITTER_DATE=when,GIT_AUTHOR_DATE=when)
+        subprocess.run(['git','-C',str(self.repo),'commit','-q','-m',msg],check=True,env=env)
+        return board.run(self.repo,'rev-parse','HEAD').stdout.decode().strip()
+    def req(self, **kw):
+        r=event('request',0); r.update(project={'key':'proj','repo':'o/proj'},created_at='2026-01-02T00:00:00Z',references=['proj/plans/spec.md']); r.update(kw)
+        return r
+
+    def test_commits_after_the_request(self):
+        (self.repo/'rules/general.md').write_text('規則 (別の窓が直した)\n'); self.commit('2026-01-02T00:40:00Z','general rule edited')
+        (self.repo/'plans/decision.md').write_text('判断 1\n判断 2 (依頼の後)\n'); h=self.commit('2026-01-02T01:00:00Z','ruling after the request')
+        ch=board.spec_changes(self.req(),self.ws)                   # the general rule outside the spec's directory is not read
+        self.assertEqual([(p,c) for p,c,_,_ in ch],[('proj/plans/decision.md',h[:8])])
+        self.assertEqual(board.spec_changes(self.req(),self.ws,until='2026-01-02T00:30:00Z'),[])          # submitted before the ruling
+        self.assertEqual([p for p,_,_,_ in board.spec_changes(self.req(references=[],summary='依頼書 = proj plans/spec.md'),self.ws)],
+                         ['proj/plans/decision.md'])                                                  # named only in the summary
+        self.assertEqual(board.spec_changes(self.req(references=[]),self.ws),[])                        # no spec named at all
+        self.assertEqual([p for p,_,_,_ in board.spec_changes(self.req(summary='規則 = proj/rules/general.md'),self.ws)],
+                         ['proj/plans/decision.md'])            # with references, a rule the summary names is not a spec
+        hint=board.spec_change_hint(ch)
+        self.assertEqual(len(hint),1); self.assertIn('proj/plans/decision.md',hint[0]); self.assertIn('ruling after the request',hint[0])
+
+    def test_own_work_is_left_out(self):
+        (self.repo/'plans/decision.md').write_text('判断 1 (worker が直した)\n'); h=self.commit('2026-01-02T01:00:00Z','worker fix')
+        self.assertEqual(board.spec_changes(self.req(),self.ws,skip=[f'proj@{h[:7]}']),[])
+        self.assertEqual(board.spec_changes(self.req(),self.ws,own_text=f'直して push した ({h[:7]})'),[])
+        self.assertEqual(board.spec_changes(self.req(),self.ws,skip=['proj/plans/decision.md']),[])
+        self.assertEqual(len(board.spec_changes(self.req(),self.ws,skip=['proj/plans/work.md'])),1)        # another file named
+
+
+class SpecChangesCLI(EffortFlag):
+    """Through the posting command: the warning on stderr and the spec-changed-after-request line in the submission."""
+    test_order = test_three_surfaces = test_preview_writes_nothing_to_the_outbox = test_refusals_and_live_note = None
+    KEYS=EffortFlag.KEYS+('AGENT_BOARD_WORKSPACE','AGENT_BOARD_PATH_BASE')
+
+    def test_submit_warns_and_records(self):
+        import os, datetime
+        b=self.post_args(); src=self.base/'eproj'
+        for k,v in [('user.name','Fixture'),('user.email','fixture@example.invalid')]: board.run(src,'config',k,v)
+        (src/'plans').mkdir(); (src/'plans'/'spec.md').write_text('依頼書\n')
+        board.run(src,'add','-A'); board.run(src,'commit','-qm','spec')
+        rid=self.rid(self.cli('request',*b,'--thread','2026-01-01-sc-a','--to','claude','--to-session','claude-worker-sc',
+                              '--reference','eproj/plans/spec.md').stdout)
+        later=(datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(minutes=2)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        (src/'plans'/'spec.md').write_text('依頼書 (差し替え)\n'); board.run(src,'add','-A')
+        subprocess.run(['git','-C',str(src),'commit','-qm','spec replaced'],check=True,env=dict(os.environ,GIT_COMMITTER_DATE=later,GIT_AUTHOR_DATE=later))
+        w=['--root',str(self.root),'--agent','claude','--session','claude-worker-sc','--source',str(src),'--policy','ordinary']
+        cid=self.rid(self.cli('claim',*w,'--request',rid,'--summary','引き受けた').stdout)
+        s=self.cli('submit',*w,'--request',rid,'--reply-to',cid,'--summary','出した','--deliverable','results/x.md')
+        self.assertIn('依頼の後に、 依頼書か依頼書が指す file が変わっている: eproj/plans/spec.md',s.stderr)
+        with board.snapshot(self.root,fresh=True) as snap:
+            sub=next(e for e in board.read(snap) if e['event_id']==self.rid(s.stdout))
+        self.assertIn('spec-changed-after-request: eproj/plans/spec.md',sub.get('details') or '')
+
+
 class SessionWatchClone(SessionWatch):
     """The same through the previous transport (AGENT_BOARD_TRANSPORT=clone): a full read every interval."""
     def setUp(self):
