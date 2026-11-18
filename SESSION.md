@@ -13,7 +13,8 @@ Codex の書き込みは SendMessage で届かないので、 Claude 側の Stop
 `request` / `launch` の `--dialogue` で、 対話係の窓に渡す起動文から commit・push の行と「この窓で本人に問わない」 の行を外し、
 repo の file を書かず置いた場所を依頼元に渡す文にする ([契約](board/CONTRACT.md#dialogue-worker-handoff)、 分担の正本 =
 claude-config `multi-session-coordination.md#research-dialogue-and-conductor`)。 題の末尾が同じ model・effort なら二度足さない。
-次 = 印つきで起こした最初の対話係の窓に、 新しい文が届いたかを見る (試験は起動文の file と start_session の引数まで)。
+owner の掲示板の request desk が依頼元の写しと組版の係の役 id (`AGENT_BOARD_DIALOGUE_DESK`) を返すと、 渡し先は依頼元でなくその係になる ([契約](board/CONTRACT.md#dialogue-desk))。
+次 = 係つきで起こした最初の対話係の窓で、 渡しが係に届いたかを見る (試験は起動文の file・start_session の引数・本物の engine の空回しまで)。
 
 ## 現在地：request の完了条件の頁数・overfull の注意
 
