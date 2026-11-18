@@ -183,17 +183,24 @@ def kind_hints(ev, w, me):
 
 
 VANISHING_DIR='side-session-notes'   # the desktop app's notes folder for a family of sessions: removed when the family is archived
+# In running text a word names that folder as a path only with a slash next to the folder's name (`…/side-session-notes`,
+# `side-session-notes/…`): the bare name in a sentence is the folder spoken of, not a path (measured: a note whose summary
+# only mentioned the folder by name got the warning).
+VANISHING_PATH_WORD=re.compile(r'/'+re.escape(VANISHING_DIR)+r'|'+re.escape(VANISHING_DIR)+r'/')
 
 
 def vanishing_path_hints(ev):
-    """A warning for a post whose summary, acceptance, references or deliverables point under the desktop app's notes
-    folder for a session family (printed with kind_hints, on stderr; the post is not stopped). The app removes that
-    folder when the family is archived, so the board's record keeps a path that no longer resolves (measured: most of
-    the files a thread's notes pointed to there were gone after the family was archived;
-    claude-config conventions/multi-session-coordination.md#side-session-notes-deleted-on-archive)."""
-    texts=[ev.get('summary'),ev.get('acceptance'),*(ev.get('references') or []),*(ev.get('deliverables') or [])]
+    """A warning for a post whose references or deliverables, or a path-shaped word of whose summary or acceptance, point
+    under the desktop app's notes folder for a session family (printed with kind_hints, on stderr; the post is not
+    stopped). The app removes that folder when the family is archived, so the board's record keeps a path that no longer
+    resolves (measured: most of the files a thread's notes pointed to there were gone after the family was archived;
+    claude-config conventions/multi-session-coordination.md#side-session-notes-deleted-on-archive). In the summary and
+    the acceptance only a word with a slash next to the folder's name counts (VANISHING_PATH_WORD); a reference or a
+    deliverable is a path field, so any mention counts."""
     hits=[]
-    for t in texts:
+    for t in (ev.get('summary'),ev.get('acceptance')):
+        if isinstance(t,str) and VANISHING_DIR in t: hits+=[w for w in t.split() if VANISHING_PATH_WORD.search(w)]
+    for t in [*(ev.get('references') or []),*(ev.get('deliverables') or [])]:
         if not isinstance(t,str) or VANISHING_DIR not in t: continue
         hits+=[w for w in t.split() if VANISHING_DIR in w] or [t]
     if not hits: return []
@@ -230,6 +237,130 @@ def watch_report(key, new, thread, me, *, root, agent, session, request, quiet=(
     lines.append(f"→ 続きを見張る (background): python3 {eng} watch --root {root} --agent {agent} --session {session}"
                  f" --request {request}{q} --since {new[-1]['event_id']}")
     return lines
+
+
+def session_turns(threads, me):
+    """watch --session (no --request): {(project, thread): token} of the requests whose next move waits on `me` (the
+    inbox's rows: waiting_on = me, no protocol error) and that someone else put there. The token is the event that
+    moved the request into its current state (last_transition), so a returned submission or an answered question on a
+    thread that waited on `me` before counts as a new turn; a move of `me`'s own (its claim: the request then waits on
+    its submission) is no turn."""
+    out={}
+    for key,t in threads.items():
+        w=t.get('workflow') or {}
+        if not w.get('request') or w.get('errors') or not same_session(w.get('waiting_on'),me): continue
+        ev=last_transition(t['events'],w['request']['event_id']) or w['request']
+        if not same_session(_actor(ev),me): out[key]=ev['event_id']
+    return out
+
+
+def session_parts(threads, me):
+    """The open threads where `me` is the assignee or the reviewer (board-view derive's names): an event there can move
+    a request onto `me` without naming `me` (a revise, the answer to a question)."""
+    return {k for k,t in threads.items() if (w:=t.get('workflow')) and w.get('status') not in ('accepted','abandoned')
+            and any(same_session(w.get(x),me) for x in ('assignee','reviewer','waiting_on'))}
+
+
+def added_events(repo, old, new):
+    """[(path below the board, blob)] of the event files added or changed from commit `old` to `new`, or None when git
+    cannot say (then the caller reads the board again)."""
+    p=bt.git(repo.top,'diff-tree','-r','-z','--no-commit-id','--diff-filter=AM',old,new,'--',repo.prefix+'events',check=False)
+    if p.returncode: return None
+    toks=p.stdout.decode('utf-8','replace').split('\0'); out=[]
+    for meta,path in zip(toks[0::2],toks[1::2]):
+        if meta.startswith(':') and path.startswith(repo.prefix) and len(meta.split())>=4:
+            out.append((path[len(repo.prefix):],meta.split()[3]))
+    return out
+
+
+def concerns_session(added, parts, me, load):
+    """Whether one of the `added` events (added_events) could put a request's next move on `me`: an event in a thread of
+    `parts` (session_parts of the last read), or a request or a handover addressed to `me` (load(path, blob) = the
+    event). An event that cannot be read counts (the board is read again)."""
+    for rel,blob in added:
+        bits=rel.split('/')
+        if len(bits)>=4 and (bits[1],bits[2]) in parts: return True
+        try: e=load(rel,blob)
+        except Exception: return True   # noqa: BLE001  unreadable = read the board again
+        if not isinstance(e,dict): return True
+        if e.get('kind')=='request' and same_session(e.get('assignee') or {},me): return True
+        if e.get('kind')=='handover' and same_session(e.get('target') or {},me): return True
+    return False
+
+
+def session_watch_report(threads, new, *, root, agent, session):
+    """The lines watch --session prints when a new request or turn reached the session: each request, the event that
+    gave the session its turn and the command that reads it, then the inbox and the command that watches again."""
+    eng=Path(__file__).resolve(); lines=[]
+    for key in sorted(new):
+        t=threads[key]; w=t['workflow']; rid=w['request']['event_id']
+        ev=next((e for e in t['events'] if e['event_id']==new[key]),None) or {}; act=ev.get('actor') or {}
+        lines.append(f"📨 {key[0]}/{key[1]} [{w.get('label')}] {w.get('title') or ''} / request={rid}")
+        lines.append(f"   番が来た = {ev.get('kind')} {ev.get('created_at','')[:16]} from {act.get('agent')}/{act.get('session_id')}"
+                     f" → {w.get('next_action') or ''}")
+        lines.append(f"   → この依頼を読む: python3 {eng} show --root {root} --agent {agent} --session {session} --request {rid} --sync")
+    lines.append(f"→ 受信箱を読む: python3 {eng} inbox --root {root} --agent {agent} --session {session} --sync")
+    lines.append(f"→ 続きを見張る (background): python3 {eng} watch --root {root} --agent {agent} --session {session}")
+    return lines
+
+
+def watch_session(a):
+    """`watch --session <id>` without --request: exits, and so wakes the session, when a new request or a new turn
+    reaches that session's inbox (a request addressed to it, a handover to it, a returned submission, an answered
+    question). The turns waiting when the watch starts are taken as known. Default transport: like the request watch,
+    the remote is asked with `ls-remote` every --interval and this machine's push note every NOTIFY_POLL_S; when the
+    branch moved, the event files added since the last read are listed (git diff-tree) and the board is read again
+    only when one of them is in a thread where the session is the assignee or the reviewer, or is a request or a
+    handover addressed to it (every post anywhere on the board moves the branch, and a full read of a large board costs
+    tens of CPU seconds, measured). The clone transport reads every interval. Exit 3 when --max-minutes runs out."""
+    me={'agent':a.agent,'session_id':a.session}; deadline=time.time()+a.max_minutes*60
+    repo=bt.Repo(a.root) if bt.transport()!='clone' else None
+    base=None; parts=set(); last_sha=''; last_remote=last_note=None; next_remote=0.0; moved=False
+    load=lambda sha: (lambda rel,blob: json.loads(repo.blob(sha,rel,blob)))
+    while True:
+        try:
+            if repo is not None and base is not None:
+                note=repo.notified(); remote=last_remote
+                if time.time()>=next_remote: remote=repo.ls_remote(); next_remote=time.time()+a.interval
+                if (remote,note)!=(last_remote,last_note): moved=True; last_remote,last_note=remote,note
+                if moved:
+                    sha=repo.fetch(); fetched(a.root,sha); last_remote=sha
+                    added=added_events(repo,last_sha,sha) if last_sha else None
+                    moved=added is None or concerns_session(added,parts,me,load(sha))
+                    if not moved: last_sha=sha
+                if not moved:
+                    if time.time()+NOTIFY_POLL_S>deadline: print('watch: 新しい依頼も番も来ていない (時間切れ)'); sys.exit(3)
+                    time.sleep(NOTIFY_POLL_S); continue
+            note_before=repo.notified() if repo is not None else ''
+            with snapshot(a.root,fresh=base is None) as root:
+                read_sha=fetched_sha(a.root) if repo is not None else ''
+                events=read(root)
+            if os.environ.get('AGENT_BOARD_WATCH_TRACE'):   # one line per full read (tests, measuring)
+                print(f"watch: read {read_sha[:12] or '-'} {time.strftime('%H:%M:%S')}",file=sys.stderr,flush=True)
+            threads=view.derive(events,view.now_utc())
+            turns=session_turns(threads,me); parts=session_parts(threads,me)|set(turns)
+            if repo is not None:
+                # the commit just read is the baseline: a post that lands during the read is in the next diff
+                if base is None: last_remote,last_note=read_sha,note_before; next_remote=time.time()+a.interval
+                last_sha=read_sha; moved=False
+        except Exception as ex:  # noqa: BLE001  only sync failures are retried, see transient_sync_error
+            if not transient_sync_error(ex): raise
+            print('watch: 同期に失敗 ('+(str(ex).splitlines() or [type(ex).__name__])[0][:200]+')、 '
+                  +str(int(a.interval))+' 秒後にやり直す',file=sys.stderr)
+            if time.time()+a.interval>deadline:
+                print('watch: 時間切れ。 最後の同期に失敗したので、 新しい依頼も番も無いとは確かめていない (読み直す = inbox --session '
+                      +a.session+' --sync)'); sys.exit(3)
+            time.sleep(a.interval); continue
+        if base is None:
+            print(f"watch: {_who(me)} の番の依頼 {len(turns)} 件を既知として見張る (新しい依頼か番が来たら起きる)",file=sys.stderr)
+        else:
+            new={k:v for k,v in turns.items() if base.get(k)!=v}
+            if new:
+                print('\n'.join(session_watch_report(threads,new,root=a.root,agent=a.agent,session=a.session))); return
+        base=turns
+        if time.time()+a.interval>deadline: print('watch: 新しい依頼も番も来ていない (時間切れ)'); sys.exit(3)
+        if repo is None: time.sleep(a.interval); continue
+        next_remote=time.time()+a.interval
 
 
 def source_gate(source, policy):
@@ -934,6 +1065,28 @@ def restricted_dropped_note(a):
             +(" = 方針の段の印は spec の file に書く" if stage else '')+"。 書かれる形は --preview で見られる")
 
 
+def policy_ref_problem(cfg, a):
+    """A request's --policy-ref read when it is posted the way the reviewer's approval (approve-edit) reads it later:
+    `<repo>/<path>` committed at HEAD in a repository directly under the work root (_policy_problem). '' when it reads.
+    Measured: the post checked the path relative to the request's source checkout and the approval read it from the work
+    root, so a path without the repository's name passed the post and was refused at the approval, and the path with it
+    drew "not found" at the post. A collaborators board has no approve-edit: there a path relative to the source is enough."""
+    ref=str(a.policy_ref).strip(); ws=touch_base(getattr(a,'root',None))
+    why=_policy_problem(ws,ref)
+    if not why: return ''
+    p=Path(ref.split('#',1)[0]).expanduser(); src=getattr(a,'source',None)
+    if not p.is_absolute() and src: p=Path(src)/p
+    if not p.is_file():
+        return f"--policy-ref {ref} が見つからない ({why})。 確認済みの方針の file を commit してから出す"
+    if cfg.get('audience')!='owner': return ''
+    try: rel=p.resolve().relative_to(Path(ws).resolve()).as_posix()
+    except ValueError: rel=''
+    fix=_policy_problem(ws,rel) if rel else '作業ルートの外'
+    anchor='#'+ref.split('#',1)[1] if '#' in ref else ''
+    return (f"--policy-ref {ref} は手元に在るが、 検収係の承認 (approve-edit) は作業ルートの直下の <repo>/<path> を HEAD で読む"
+            f" = 承認の時に読めない ({why})。 "+(f"repo の名から書く = --policy-ref {rel}{anchor}" if not fix else f"直す: {fix}"))
+
+
 def policy_stage_note(cfg, a, texts=None):
     """One notice line for a request whose policy stage needs a look, or ''. Only on a board whose board.json sets
     `policy_stage_check` ({"rule": "<where the rule is written>", "confirmed_words": [<extra words>]}); a board
@@ -946,9 +1099,8 @@ def policy_stage_note(cfg, a, texts=None):
         return (f"⚠️ 実装の段 (--stage implement) なのに、 確認済みの方針の引用 (--policy-quote '<本人の確認の発言>') も"
                 f" file (--policy-ref <確認済みの方針の file>) も無い = worker は方針だけを出して止まる (規則 = {rule})")
     if stage=='implement' and getattr(a,'policy_ref',None):
-        ref=Path(str(a.policy_ref)).expanduser()
-        if not ref.is_absolute() and getattr(a,'source',None): ref=Path(a.source)/ref
-        if not ref.exists(): return f"⚠️ --policy-ref {a.policy_ref} が見つからない (確認済みの方針の file を commit してから出す。 規則 = {rule})"
+        why=policy_ref_problem(cfg,a)
+        if why: return f"⚠️ {why} (規則 = {rule})"
     if stage=='exempt':
         m=re.match(r'\s*(\d+)\s*[:：.、 ]\s*(\S.*)',getattr(a,'stage_reason',None) or '')
         if not m or int(m.group(1)) not in NO_POLICY_STAGE_ITEMS:
@@ -1003,6 +1155,13 @@ def _owner_grounds():
 SPEC_READ_MAX=300_000   # bytes of one referenced spec read by review_prior (larger files are skipped)
 
 
+def engine_mark(e):
+    """Whether the event is a note the engine posts by itself: a touch / untouch declaration (it carries `touches`) or a
+    launch / pickup mark (board-view TOOL_NOTE_PREFIXES) = the views' `tool` notes."""
+    return e.get('kind')=='note' and bool(e.get('touches') or (isinstance(e.get('summary'),str)
+                                                                and e['summary'].startswith(view.TOOL_NOTE_PREFIXES)))
+
+
 def _ref_path(ref, ws):
     """A post's --reference / policy-ref as a readable file below the workspace `ws`, or None (a link, a commit, a
     path outside the workspace, a missing or oversized file)."""
@@ -1026,7 +1185,8 @@ def review_prior(events, req, subs, ws=None):
     With the workspace `ws`, a request in another thread also counts when the spec it references (or its policy-ref)
     names a key: measured, the follow-up request that carried the owner's answer named only its own spec, and only
     that spec named the results file under review (keys found this way are marked `spec:<file>`). Files are read, never
-    run."""
+    run. Engine marks (a touch or untouch declaration, a launch or pickup note) are left out: they decide nothing
+    (measured: an untouch note that only listed the deliverables' file names came out as a decision built on the work)."""
     keys={req['event_id']}
     for n in list(req.get('references') or [])+[d for s in subs for d in (s.get('deliverables') or [])]:
         base=os.path.basename(str(n).split('#')[0].split('@')[-1].rstrip('/'))
@@ -1035,6 +1195,7 @@ def review_prior(events, req, subs, ws=None):
     out=[]
     for e in events:
         if ((e.get('project') or {}).get('key'),e.get('thread_id'))==here: continue
+        if engine_mark(e): continue
         hay=' '.join(str(x) for x in (e.get('summary'),e.get('acceptance'),e.get('details'),*(e.get('references') or []),
                                       *(e.get('deliverables') or [])) if x)
         hit=sorted(k for k in keys if k in hay)
@@ -2530,17 +2691,22 @@ def cmd_launch(a):
     with snapshot(a.root,fresh=True) as dest: events=read(dest)
     req=next((e for e in events if e['event_id']==a.request and e['kind']=='request'),None)
     if req is None: raise ValueError('request not found: '+a.request)
-    asg=req.get('assignee') or {}
+    same=[e for e in events if (e['project']['key'],e['thread_id'])==(req['project']['key'],req['thread_id'])]
+    # The addressee now, after any assignee handover (the reducer's value): measured, a request first sent to a live
+    # session and then handed over to a role was refused as not addressed to a role, and was posted again in a new thread.
+    asg=reduce_workflow(same,view.now_utc()).get('assigned_to') or req.get('assignee') or {}
+    handed=not same_session(asg,req.get('assignee') or {})
     if asg.get('agent')=='claude' and str(asg.get('session_id','')).startswith('role-'):
-        return launch_claude_role(a,req,events)
+        return launch_claude_role(a,req,events,asg)
     if asg.get('agent')!='codex' or not str(asg.get('session_id','')).startswith('role-'):
         raise ValueError('launch は Codex か Claude の役割 id 宛ての依頼だけ (この依頼の宛先 = '+_who(asg)+')')
     dialogue_gate(getattr(a,'dialogue',False),None,False,codex=True)
     f=parse_codex_details(req.get('details'))
-    if not f.get('host'): raise ValueError('この依頼には起動の情報 (details の launch-* 行) が無い = 依頼元が request を出し直す')
+    if not f.get('host'):
+        raise ValueError('この依頼には起動の情報 (details の launch-* 行) が無い = 依頼元が request を出し直す'
+                         +(' (Codex の役への引き継ぎは起動の情報を運ばない = その役宛ての request を新しい thread に出す)' if handed else ''))
     done=codex_launched(events,a.request)
     if done: raise ValueError('起動済み: '+done[-1]['summary']+' = 二重に起こさない')
-    same=[e for e in events if (e['project']['key'],e['thread_id'])==(req['project']['key'],req['thread_id'])]
     st=reduce_workflow(same,view.now_utc()).get('status')
     if st not in ('requested','stale'): raise ValueError(f'この依頼は {st} = 受け手はもう居る (か終わった)。 起こさない')
     if not same_host(f['host'],this_host()):
@@ -2578,7 +2744,7 @@ def premium_note(model, effort, reason):
             + " 要るなら --reason '<worker が何を導出・判断するか>' を付ける (起動を検査する機械では、 理由が無いと起動の段で止まる)")
 
 
-def launch_claude_role(a, req, events):
+def launch_claude_role(a, req, events, asg=None):
     """`launch --request <id>` on a Claude role: open the worker window for a request already on the board (a
     co-author's AI, another machine or another session posted it, so this machine has no launch record) the way a
     request to a role does: the launch record, the hand-off file and the start_session arguments (or the CLI line),
@@ -2598,7 +2764,7 @@ def launch_claude_role(a, req, events):
     if st not in ('requested','stale'): raise ValueError(f'この依頼は {st} = 受け手はもう居る (か終わった)。 起こさない')
     check_effort_floor(bc.load(a.root),launch_effort(a.effort),a.effort_quote)
     check_model_allow(bc.load(a.root),launch_settings(a.expect_model,a.session,a.effort)[0],a.model_quote,a.agent,a.session)
-    role=req['assignee']['session_id']
+    role=(asg or req['assignee'])['session_id']   # asg = the addressee after any assignee handover (cmd_launch)
     surface=(a.surface or os.environ.get(LAUNCH_SURFACE_ENV)
              or ('desktop' if os.environ.get('CLAUDE_CODE_ENTRYPOINT')=='claude-desktop' else 'background')).strip()
     if surface=='agent': raise ValueError('launch: --surface desktop か background (subagent に窓は要らない)')
@@ -2916,9 +3082,11 @@ def main():
     ap.add_argument('--reviewer',help='request: the session that receives the submission (default: the requester; env '
                     f'{DEFAULT_REVIEWER_ENV} with <project> on an owner board). A role id outlives this session; posted as a reviewer handover right after the request')
     ap.add_argument('--max-minutes',type=float,default=240,help='watch: give up after this long (exit 3)')
-    ap.add_argument('--since',help='watch: treat events after this event id as new (resume after a restart)')
+    ap.add_argument('--since',help='watch --request: treat events after this event id as new (resume after a restart)')
     ap.add_argument('--quiet-kind',action='append',default=[],choices=sorted(KINDS),
-                    help='watch: event kind that does not end the watch (repeatable, e.g. note); shown with the next waking event')
+                    help='watch --request: event kind that does not end the watch (repeatable, e.g. note); shown with the next'
+                    ' waking event. Without --request, watch --session wakes when a new request or turn reaches that session'
+                    ' (CONTRACT.md#watch-session)')
     ap.add_argument('--path',action='append',default=[],help='touch / untouch / touching: a file or directory below the workspace (repeatable; relative = from the workspace)')
     ap.add_argument('--hours',type=float,default=12,help='touching: declarations older than this no longer hold a path (a session that died)')
     # approve-edit (CONTRACT.md#edit-approval) / edit-approvals
@@ -2964,6 +3132,13 @@ def main():
     if a.reason and a.command not in {'request','launch'}: ap.error('--reason is for request and launch only')
     if a.effort_quote and a.command not in {'request','launch'}: ap.error('--effort-quote is for request and launch only')
     if a.model_quote and a.command not in {'request','launch'}: ap.error('--model-quote is for request and launch only')
+    if a.command=='submit':
+        # The review form's fields belong to the receipt (accept): submit kept none of them and said nothing (measured:
+        # a worker's checks and leftovers passed this way were missing from the submission, and the review ran them again).
+        form=[f for f,v in (('--checked',a.checked),('--verdict',a.verdict),('--decided',a.decided),('--owner-ruling',a.owner_ruling),
+                             ('--no-questions',a.no_questions),('--leftover',a.leftover)) if v]
+        if form: ap.error(f"{', '.join(form)} は受け取り (accept) の欄なので submit では使えない (submit は書かない)。 回した確かめと残りは"
+                          " --summary か結果の file (--deliverable) に書く (CONTRACT.md#accept-review-form)")
     if a.command == 'show' and not a.request: ap.error('show requires --request')
     if a.all_boards:
         if a.command not in {'inbox','show'}: ap.error('--all-boards is for inbox / show')
@@ -3034,7 +3209,11 @@ def main():
         # A post is a record, not a push: a session working on a request sees the other side's note,
         # answer or review only when it reads again. Run this in the background after claim/request
         # (Claude: Bash run_in_background) so the session is woken when the other side writes to the thread.
-        if not a.request: ap.error('watch requires --request')
+        if not a.request:
+            # The session's whole inbox (a role id waiting for its next request): it wakes on a new turn only, so a
+            # thread's event id (--since) and the kinds that keep a thread's watch going (--quiet-kind) do not apply.
+            if a.since or a.quiet_kind: ap.error('watch --session (--request なし) は新しい依頼か番だけで起きる = --since・--quiet-kind は --request と使う')
+            watch_session(a); return
         me={'agent':a.agent,'session_id':a.session}; deadline=time.time()+a.max_minutes*60; key=None; seen=None
         quiet=set(a.quiet_kind); pending=[]
         # Default transport: between reads, the remote's branch head is asked with `ls-remote` (one round trip, no
@@ -3320,8 +3499,13 @@ def main():
                   " codex queue の 1 行でこの thread に新しい turn が届く。 別の機械なら次の inbox --sync で読む"
                   " (desktop ならこの task に heartbeat を付けて inbox を読み直す。 --sync は承認の画面を経るので、 claim・返事・投稿の直前だけ)")
         else:
+            # After a submit the worker waits for the receipt (accept / revise) or a question; a note never moves the
+            # request, so notes wait for that event and are printed with it (measured: the coordinators' pickup marks,
+            # one every two hours while a submission waited, woke the worker's watch over and over; with --quiet-kind
+            # note the watch woke once, at the receipt, with the marks printed alongside it).
+            quiet=' --quiet-kind note' if a.command=='submit' else ''
             print(f"→ 相手の書き込みで起こされるように、 background で見張る (Claude = Bash の run_in_background):"
-                  f" python3 {Path(__file__).resolve()} watch --root {a.root} --agent {a.agent} --session {a.session} --request {rid}")
+                  f" python3 {Path(__file__).resolve()} watch --root {a.root} --agent {a.agent} --session {a.session} --request {rid}{quiet}")
     if a.command in {'request','claim','submit','accept','blocker','revise','update','handover','release','abandoned'} or (a.command=='note' and a.request):
         note=counterpart_note((a.agent,a.session),ev,events,root=a.root)
         if note: print(note)

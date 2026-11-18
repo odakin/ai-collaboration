@@ -6,10 +6,10 @@
  "pass_marker": "test_",
  "mutants": [
   {"name": "restricted でも要約の固定文を題に使う",
-   "pairs": [["    if policy=='encrypted-metadata-only': return ''\n    return re.split", "    return re.split"]],
+   "pairs": [["    if policy=='encrypted-metadata-only': return ''\n    head=re.split", "    head=re.split"]],
    "expect_fail": ["test_worker_tree_default_main"]},
   {"name": "desktop の題が summary_title を通らない (前の式に戻す)",
-   "pairs": [["    head=(title or summary_title(summary,policy) or name).strip()", "    head=(title or re.split(r'[。:：(（]',summary or '')[0] or name).strip()"]],
+   "pairs": [["    head=(title or summary_title(summary,policy,title_fallback(root)) or name).strip()", "    head=(title or re.split(r'[。:：(（]',summary or '')[0] or name).strip()"]],
    "expect_fail": ["test_worker_tree_default_main"]},
   {"name": "止め の打ち消しを外す",
    "pairs": [["止め(?!な|ず)", "止め"]],

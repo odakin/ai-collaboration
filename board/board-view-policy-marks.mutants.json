@@ -1,0 +1,16 @@
+{
+ "_comment": "board-view.py が依頼の方針の段の印を inbox・show (と --json) に運ぶ直しを、 直した箇所を 1 つずつ外した版で試験がそれぞれ落とすか (unittest の FAIL 行で読む)",
+ "target": "board-view.py",
+ "run": "python3 test_board.py -v PolicyMarksInViews",
+ "fail_marker": "FAIL: ",
+ "pass_marker": "test_",
+ "mutants": [
+  {"name": "derive が印を状態に運ばない (状態の依頼は details の無い抜粋)",
+   "pairs": [["request=event_brief(w['request']), policy_stage=policy_marks(w['request']), submission=", "request=event_brief(w['request']), submission="]],
+   "expect_fail": ["test_unit", "test_inbox_and_show"]},
+  {"name": "--json の行に印を載せない",
+   "pairs": [["'claim_expired', 'lease_until', 'policy_stage')}", "'claim_expired', 'lease_until')}"]],
+   "expect_fail": ["test_inbox_and_show"],
+   "expect_pass": ["test_unit"]}
+ ]
+}

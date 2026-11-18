@@ -3743,4 +3743,297 @@ class EditApprovalUnit(unittest.TestCase):
         self.assertEqual(board.edit_approvals(self.events+[n],since='2999-01-01'),[])
 
 
+# ---------------------------------------------------------------- small fixes to the board tool (views, gates, watch, launch)
+
+class VanishingPathProse(unittest.TestCase):
+    """The archive-folder warning reads a word of the summary or the acceptance as a path only with a slash next to the
+    folder's name; the bare name in a sentence is the folder spoken of (measured: such a summary drew the warning). A
+    reference or a deliverable is a path field whatever its form, and real paths in the text still warn."""
+    def note(self, **kw):
+        n=event('note',3,agent='claude'); n.update(kw); return n
+
+    def test_bare_name_in_running_text_is_not_a_path(self):
+        for said in ('候補は side-session-notes の下に置かず repo に写した',
+                     'notes folder (side-session-notes) は archive で消える',
+                     'side-session-notesの下は使わない'):
+            self.assertEqual(board.vanishing_path_hints(self.note(summary=said)),[],said)
+            self.assertEqual(board.vanishing_path_hints(self.note(summary='ok',acceptance=said)),[],said)
+
+    def test_real_paths_still_warn(self):
+        for said in ('候補は side-session-notes/local_2/cand.md に置いた',
+                     '置き場 = ~/Library/Application Support/Claude/side-session-notes',
+                     '候補はside-session-notes/local_2/x.mdに置いた'):
+            h=board.vanishing_path_hints(self.note(summary=said))
+            self.assertEqual(len(h),1,said); self.assertIn('1 件',h[0])
+        self.assertEqual(len(board.vanishing_path_hints(self.note(summary='ok',references=['side-session-notes']))),1)   # a path field
+        self.assertEqual(len(board.vanishing_path_hints(self.note(summary='ok',deliverables=['side-session-notes/a.md']))),1)
+
+
+class ReviewPriorEngineMarks(unittest.TestCase):
+    """accept's review-prior leaves out the engine's own notes (a touch / untouch declaration, a launch or pickup mark):
+    measured, an untouch note that only listed the deliverables' file names came out as a decision built on the work.
+    A plain note naming the same file in another thread is still found."""
+    def test_marks_left_out_plain_note_kept(self):
+        r,c,sub=chain(); key='proj/plans/2026-01-06-tool-fixes-results.md'; sub['deliverables']=[key]
+        untouch=event('note',5,agent='claude',thread='2026-01-08-other'); untouch.update(touches=['(none)'],summary='手放す: '+key)
+        touch=event('note',6,agent='claude',thread='2026-01-08-other'); touch.update(touches=[key],summary='触る: '+key)
+        pick=event('note',7,agent='claude',thread='2026-01-08-other2'); pick['summary']=f"{board.PICKUP} {key} を検収する"
+        plain=event('note',8,agent='claude',thread='2026-01-08-plain'); plain['summary']='2026-01-06-tool-fixes-results.md の推す答えで決めた'
+        prior=board.review_prior([r,c,sub,untouch,touch,pick,plain],r,[sub])
+        self.assertEqual([e['event_id'] for e,_ in prior],[plain['event_id']])
+        self.assertTrue(board.engine_mark(untouch) and board.engine_mark(touch) and board.engine_mark(pick))
+        self.assertFalse(board.engine_mark(plain) or board.engine_mark(sub))
+
+
+class SubmitReviewFormFlags(unittest.TestCase):
+    """The review form's fields (--checked, --leftover, ...) belong to the receipt: submit refuses them instead of
+    dropping them without a word (measured: a worker's checks and leftovers passed to submit were not kept). The refusal
+    comes before anything is read or posted."""
+    def test_refused_on_submit(self):
+        import sys
+        base=[sys.executable,str(board.ENGINE/'board.py'),'submit','--root','/nonexistent-board','--agent','claude',
+              '--session','claude-x','--request','20990101T000000Z-claude-000001','--summary','出した']
+        for flag,val in (('--checked','回した x → 合う'),('--leftover','out: 残り'),('--verdict','a → b'),
+                         ('--decided','問い => 答え (理由)'),('--owner-ruling','policy: 問い'),('--no-questions',None)):
+            p=subprocess.run(base+[flag]+([val] if val else []),capture_output=True,text=True)
+            self.assertEqual(p.returncode,2,p.stderr); self.assertIn(flag,p.stderr)
+            self.assertIn('受け取り (accept) の欄なので submit では使えない',p.stderr)
+        p=subprocess.run(base,capture_output=True,text=True)                  # a submit without them reaches the board
+        self.assertNotIn('受け取り (accept) の欄',p.stderr)
+
+
+class PostWatchLine(EffortFlag):
+    """The watch line printed after a submit keeps watching through notes (--quiet-kind note): the worker waits for the
+    receipt or a question, and pickup marks posted while the submission waits had woken it again and again (measured).
+    The lines after a request and a claim still wake on notes (a requester's note may change the work)."""
+    test_order = test_three_surfaces = test_preview_writes_nothing_to_the_outbox = test_refusals_and_live_note = None
+
+    def watch_line(self, out): return next(l for l in out.splitlines() if 'background で見張る' in l)
+
+    def test_submit_line_is_quiet_on_notes(self):
+        b=self.post_args()
+        p=self.cli('request',*b,'--thread','2026-01-01-pw-a','--to','claude','--to-session','claude-worker-pw')
+        rid=self.rid(p.stdout); self.assertNotIn('--quiet-kind',self.watch_line(p.stdout))
+        w=['--root',str(self.root),'--agent','claude','--session','claude-worker-pw','--source',str(self.base/'eproj'),'--policy','ordinary']
+        c=self.cli('claim',*w,'--request',rid,'--summary','引き受けた'); cid=self.rid(c.stdout)
+        self.assertNotIn('--quiet-kind',self.watch_line(c.stdout))
+        s=self.cli('submit',*w,'--request',rid,'--reply-to',cid,'--summary','出した','--deliverable','results/x.md')
+        line=self.watch_line(s.stdout)
+        self.assertTrue(line.endswith(f'--request {rid} --quiet-kind note'),line)
+
+
+class PolicyMarksInViews(EffortFlag):
+    """inbox and show (text and --json) carry a request's policy-stage marks (CONTRACT.md#policy-stage-check): measured,
+    the views did not show them and a worker told to check the mark wrote that the request had none. An ordinary request
+    without marks says so; a restricted request carries none (its marks live in the spec)."""
+    test_order = test_three_surfaces = test_preview_writes_nothing_to_the_outbox = test_refusals_and_live_note = None
+
+    def test_unit(self):
+        v=board.view
+        self.assertEqual(v.policy_marks({'details':'policy-stage: implement\npolicy-ref: proj/plans/p.md\nother: x'}),
+                         {'stage':'implement','ref':'proj/plans/p.md'})
+        self.assertEqual(v.policy_marks({'details':''}),{})
+        self.assertIsNone(v.policy_marks({'source_policy':'encrypted-metadata-only','details':'policy-stage: implement'}))
+        self.assertIsNone(v.policy_mark_line(None))
+        line=v.policy_mark_line(v.policy_marks({'details':'policy-stage: exempt\npolicy-stage-reason: 1: 記録の書き換えだけ'}))
+        self.assertEqual(line,'    方針の段の印: exempt / 段を立てない理由 = 1: 記録の書き換えだけ')
+        self.assertTrue(v.policy_mark_line(v.policy_marks({'details':'policy-quote: '+'あ'*400})).endswith('…」'))
+        # the derived workflow carries them (its request is a brief without details)
+        r,c,sub=chain(); r['details']='policy-stage: implement\npolicy-quote: それで'
+        w=v.derive([r],NOW+dt.timedelta(seconds=30))[('example',r['thread_id'])]['workflow']
+        self.assertEqual(w.get('policy_stage'),{'stage':'implement','quote':'それで'})
+        self.assertIn('    方針の段の印: implement / 本人の確認 =「それで」',v.handoff_lines(w))
+
+    def test_inbox_and_show(self):
+        b=self.post_args()
+        rid=self.rid(self.cli('request',*b,'--thread','2026-01-01-pm-a','--to','claude','--to-session','claude-worker-pm',
+                              '--policy-quote','その方針で進めて').stdout)
+        rid2=self.rid(self.cli('request',*b,'--thread','2026-01-01-pm-b','--to','claude','--to-session','claude-worker-pm').stdout)
+        rd=['--root',str(self.root),'--agent','claude','--session','claude-worker-pm','--sync']
+        self.assertIn('方針の段の印: implement / 本人の確認 =「その方針で進めて」',self.cli('show',*rd,'--request',rid).stdout)
+        self.assertIn('方針の段の印: なし',self.cli('show',*rd,'--request',rid2).stdout)
+        row=json.loads(self.cli('show',*rd,'--request',rid,'--json').stdout)
+        self.assertEqual(row.get('policy_stage'),{'stage':'implement','quote':'その方針で進めて'})
+        inbox=self.cli('inbox',*rd).stdout
+        self.assertIn('方針の段の印: implement',inbox); self.assertIn('方針の段の印: なし',inbox)
+        rows=json.loads(self.cli('inbox',*rd,'--json').stdout)
+        self.assertEqual({r['request_id']:r.get('policy_stage') for r in rows},{rid:{'stage':'implement','quote':'その方針で進めて'},rid2:{}})
+
+
+class PolicyRefAtPost(EffortFlag):
+    """A request's --policy-ref is read when it is posted the way the reviewer's approval reads it later: `<repo>/<path>`
+    committed at HEAD in a repository directly under the work root (measured: a path without the repository's name
+    passed the post and was refused at the approval, and the path with it drew "not found" at the post). The form
+    the approval reads posts without a notice; a missing file is still reported; a collaborators board has no
+    approval, so a path relative to the source is enough there."""
+    test_order = test_three_surfaces = test_preview_writes_nothing_to_the_outbox = test_refusals_and_live_note = None
+    KEYS=EffortFlag.KEYS+('AGENT_BOARD_WORKSPACE','AGENT_BOARD_PATH_BASE')
+
+    def test_reading(self):
+        import types
+        self.post_args(); src=self.base/'eproj'
+        for k,v in [('user.name','Fixture'),('user.email','fixture@example.invalid')]: board.run(src,'config',k,v)
+        (src/'plans').mkdir(); (src/'plans'/'p.md').write_text('確認済みの方針\n'); (src/'plans'/'q.md').write_text('まだ\n')
+        board.run(src,'add','plans/p.md'); board.run(src,'commit','-qm','policy')
+        owner={'audience':'owner'}; ref=lambda r: types.SimpleNamespace(policy_ref=r,root=self.root,source=src)
+        self.assertEqual(board.policy_ref_problem(owner,ref('eproj/plans/p.md')),'')              # the approval's reading
+        self.assertEqual(board.policy_ref_problem(owner,ref('eproj/plans/p.md#section')),'')
+        for r in ('plans/p.md',str(src/'plans'/'p.md')):
+            why=board.policy_ref_problem(owner,ref(r))
+            self.assertIn('承認の時に読めない',why,r); self.assertIn('--policy-ref eproj/plans/p.md',why,r)
+        self.assertIn('--policy-ref eproj/plans/p.md#sec',board.policy_ref_problem(owner,ref('plans/p.md#sec')))   # the section is kept
+        why=board.policy_ref_problem(owner,ref('plans/q.md'))                                   # found, not committed
+        self.assertIn('承認の時に読めない',why); self.assertIn('HEAD に無い',why)
+        self.assertIn('見つからない',board.policy_ref_problem(owner,ref('no/such/policy.md')))
+        self.assertEqual(board.policy_ref_problem({'audience':'collaborators'},ref('plans/p.md')),'')
+        # through the posting command, on a board that turns the notice on
+        cfg=json.loads((self.root/'board.json').read_text()); cfg['policy_stage_check']={'rule':'owner-notes/policy.md'}
+        (self.root/'board.json').write_text(json.dumps(cfg)); board.run(self.root,'commit','-q','-am','check on'); board.run(self.root,'push','-q','origin','main')
+        b=self.post_args()
+        req=lambda t,r: self.cli('request',*b,'--thread',t,'--to','codex','--to-session','codex-x','--stage','implement','--policy-ref',r).stderr
+        self.assertNotIn('⚠️',req('2026-01-01-pr-a','eproj/plans/p.md'))
+        self.assertIn('承認の時に読めない',req('2026-01-01-pr-b','plans/p.md'))
+        self.assertIn('見つからない',req('2026-01-01-pr-c','no/such/policy.md'))
+
+
+class LaunchAfterHandover(EffortFlag):
+    """launch --request reads the addressee after an assignee handover (the reducer's value): measured, a request first
+    sent to a live session and then handed over to a role was refused as not addressed to a role. A request still
+    addressed to a live session is refused as before."""
+    test_order = test_three_surfaces = test_preview_writes_nothing_to_the_outbox = test_refusals_and_live_note = None
+
+    def test_role_after_handover_opens(self):
+        import os
+        os.environ['AGENT_BOARD_LAUNCH_MODEL']='claude-model-y'
+        b=self.post_args()
+        rid=self.rid(self.cli('request',*b,'--thread','2026-01-01-lh-a','--to','claude','--to-session','claude-live-lh').stdout)
+        rd=['--root',str(self.root),'--agent','claude','--session','claude-win-9']
+        refused=self.cli('launch',*rd,'--request',rid,'--surface','background',ok=False)
+        self.assertNotEqual(refused.returncode,0); self.assertIn('役割 id 宛ての依頼だけ',refused.stderr)
+        self.cli('handover',*rd,'--source',str(self.base/'eproj'),'--policy','ordinary','--request',rid,'--role','assignee',
+                 '--to','claude','--to-session','role-eproj-lh-worker','--summary','役に渡す')
+        out=self.cli('launch',*rd,'--request',rid,'--surface','background').stdout
+        self.assertIn(f'既にある依頼 {rid} の worker を起こす 1 行',out)
+        hand=(board.outbox_dir(self.root)/(rid+'.handoff.txt')).read_text()
+        self.assertIn('role-eproj-lh-worker',hand); self.assertNotIn('claude-live-lh',hand)
+
+
+def _thread_events(thread, seq, to, *, by=None):
+    """A request in `thread` addressed to `to` (a claude session or role), its request_id its own id."""
+    r=event('request',seq,thread=thread); r['request_id']=r['event_id']; r['assignee']={'agent':'claude','session_id':to}
+    if by: r['actor']['session_id']=by
+    return r
+
+
+def _in_thread(r, kind, seq, *, agent, session, reply=None):
+    e=event(kind,seq,agent=agent,reply=reply,thread=r['thread_id']); e['request_id']=r['event_id']; e['actor']['session_id']=session
+    return e
+
+
+class SessionWatchUnit(unittest.TestCase):
+    """watch --session (no --request): the turns of a session, the threads where an event can give it a turn, and the
+    filter that keeps the watch from reading the whole board on every post (CONTRACT.md#watch-session)."""
+    ME={'agent':'claude','session_id':'role-w-worker'}
+    def threads(self, events): return board.view.derive(events,NOW+dt.timedelta(seconds=120))
+
+    def test_turns_and_parts(self):
+        a=_thread_events('2026-01-02-sw-a',0,'role-w-worker'); other=_thread_events('2026-01-02-sw-b',1,'role-other')
+        t=board.session_turns(self.threads([a,other]),self.ME)
+        self.assertEqual(t,{('example','2026-01-02-sw-a'):a['event_id']})
+        c=_in_thread(a,'claim',2,agent='claude',session='role-w-worker')
+        sub=_in_thread(a,'submit',3,agent='claude',session='role-w-worker',reply=c)
+        self.assertEqual(board.session_turns(self.threads([a,other,c]),self.ME),{})          # its own claim: no turn
+        self.assertEqual(board.session_parts(self.threads([a,other,c]),self.ME),{('example','2026-01-02-sw-a')})
+        self.assertEqual(board.session_turns(self.threads([a,other,c,sub]),self.ME),{})      # the reviewer's turn
+        self.assertEqual(board.session_parts(self.threads([a,other,c,sub]),self.ME),{('example','2026-01-02-sw-a')})
+        rv=_in_thread(a,'revise',4,agent='claude',session='claude-session-001',reply=sub)
+        self.assertEqual(board.session_turns(self.threads([a,other,c,sub,rv]),self.ME),{('example','2026-01-02-sw-a'):rv['event_id']})
+
+    def test_filter(self):
+        a=_thread_events('2026-01-02-sw-a',0,'role-w-worker'); parts={('example','2026-01-02-sw-a')}
+        new=_thread_events('2026-01-02-sw-c',5,'role-w-worker'); stray=_thread_events('2026-01-02-sw-d',6,'role-other')
+        hand=event('handover',7,agent='claude',thread='2026-01-02-sw-d'); hand.update(handover_role='assignee',target=dict(self.ME))
+        evs={f'events/example/{e["thread_id"]}/{e["event_id"]}.json':e for e in (new,stray,hand)}
+        load=lambda rel,blob: evs[rel]
+        path=lambda e: f'events/example/{e["thread_id"]}/{e["event_id"]}.json'
+        self.assertFalse(board.concerns_session([(path(stray),'b')],parts,self.ME,load))           # another session's request
+        self.assertTrue(board.concerns_session([(path(new),'b')],parts,self.ME,load))              # a request to me
+        self.assertTrue(board.concerns_session([(path(hand),'b')],parts,self.ME,load))             # a handover to me
+        self.assertTrue(board.concerns_session([('events/example/2026-01-02-sw-a/x.json','b')],parts,self.ME,load))   # my thread
+        def broken(rel,blob): raise ValueError('locked')
+        self.assertTrue(board.concerns_session([(path(stray),'b')],parts,self.ME,broken))          # unreadable = read again
+
+
+class SessionWatch(unittest.TestCase):
+    """watch --session without --request, through the transport: the turns waiting at the start are known, a post that
+    gives the session no turn does not wake it (and, on the default transport, does not make it read the whole board),
+    and a new request addressed to it does."""
+    def setUp(self):
+        Transport.setUp(self); self.procs=[]; self.handles=[]
+    def tearDown(self):
+        for p in self.procs:
+            if p.poll() is None: p.kill(); p.wait()
+        for h in self.handles: h.close()
+        Transport.tearDown(self)
+
+    def start(self, *extra):
+        import os, sys
+        self.out=self.base/'watch.out'; self.err=self.base/'watch.err'
+        env=dict(os.environ,AGENT_BOARD_WATCH_TRACE='1')
+        o,e=self.out.open('w'),self.err.open('w'); self.handles+=[o,e]
+        p=subprocess.Popen([sys.executable,str(board.ENGINE/'board.py'),'watch','--root',str(self.root),'--agent','claude',
+                            '--session','role-w-worker','--interval','1','--max-minutes','2',*extra],
+                           stdout=o,stderr=e,text=True,env=env)
+        self.procs.append(p)
+        return p
+
+    def wait_for(self, cond, limit=60):
+        import time
+        end=time.time()+limit
+        while time.time()<end:
+            if cond(): return True
+            time.sleep(0.3)
+        return False
+
+    def test_wakes_on_a_new_request_only(self):
+        import time
+        known=_thread_events('2026-01-02-sw-a',0,'role-w-worker'); board.post(self.root,known)
+        p=self.start()
+        self.assertTrue(self.wait_for(lambda: 'を既知として見張る' in self.err.read_text()),self.err.read_text())
+        self.assertIn('1 件',self.err.read_text())
+        board.post(self.root,_thread_events('2026-01-02-sw-b',1,'role-other'))      # another session's request
+        n=event('note',2,agent='claude',thread='2026-01-02-sw-z'); n['request_id']=n['event_id']; board.post(self.root,n)
+        time.sleep(6)
+        self.assertIsNone(p.poll(),self.out.read_text()+self.err.read_text())
+        if bt.transport()!='clone':
+            self.assertEqual(self.err.read_text().count('watch: read '),1,self.err.read_text())   # no full read for those posts
+        new=_thread_events('2026-01-02-sw-c',3,'role-w-worker'); board.post(self.root,new)
+        self.assertTrue(self.wait_for(lambda: p.poll() is not None),self.err.read_text())
+        out=self.out.read_text()
+        self.assertEqual(p.returncode,0,self.err.read_text())
+        self.assertIn(f"📨 example/2026-01-02-sw-c [引受待ち]",out); self.assertIn(f"--request {new['event_id']} --sync",out)
+        self.assertNotIn(known['event_id'],out)
+        self.assertIn('watch --root',out.splitlines()[-1]); self.assertNotIn('--request',out.splitlines()[-1])
+
+    def test_thread_flags_need_request(self):
+        import sys
+        for extra in (['--since','x'],['--quiet-kind','note']):
+            p=subprocess.run([sys.executable,str(board.ENGINE/'board.py'),'watch','--root',str(self.root),'--agent','claude',
+                              '--session','role-w-worker',*extra],capture_output=True,text=True)
+            self.assertEqual(p.returncode,2,p.stderr); self.assertIn('--request と使う',p.stderr)
+
+
+class SessionWatchClone(SessionWatch):
+    """The same through the previous transport (AGENT_BOARD_TRANSPORT=clone): a full read every interval."""
+    def setUp(self):
+        import os
+        self._saved=os.environ.get('AGENT_BOARD_TRANSPORT'); os.environ['AGENT_BOARD_TRANSPORT']='clone'
+        super().setUp()
+    def tearDown(self):
+        import os
+        super().tearDown()
+        if self._saved is None: os.environ.pop('AGENT_BOARD_TRANSPORT',None)
+        else: os.environ['AGENT_BOARD_TRANSPORT']=self._saved
+
+
 if __name__=='__main__': unittest.main()

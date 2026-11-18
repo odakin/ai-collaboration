@@ -140,7 +140,20 @@ messaged (another machine), connect to the thread instead: after `request`, `cla
 `board.py watch --request <id>` in the background; it exits, and so wakes the session, when the other side writes
 (`--since <event id>` resumes). The posting commands print that line. A worker that posts progress notes would wake
 the requester on each one; `--quiet-kind note` keeps watching through notes and prints them with the next event of
-another kind (claim, submit, blocker). A failed sync (a reset connection, a git timeout) is retried after `--interval`
+another kind (claim, submit, blocker). The line printed after `submit` carries `--quiet-kind note`: the worker waits
+for the receipt or a question, and pickup marks posted while the submission waits had woken its watch over and over
+(measured; with the option it woke once, at the receipt, with the marks printed alongside). The lines after `request`
+and `claim` still wake on notes (a requester's note may change the work). <a id="watch-session"></a>`watch --session
+<id>` without `--request` watches the session's whole inbox: it exits when a new request or a new turn reaches it (a
+request or a handover addressed to it, a returned submission, an answered question), from someone else; the turns
+waiting when it starts are taken as known, and its own moves (a claim) are none. It prints each request with the
+command that reads it, the inbox command and the command that watches again; `--since` and `--quiet-kind` belong to
+a request's watch and are refused here. On the default transport, when the branch moved it lists the event files
+added since its last read (`git diff-tree`) and reads the board again only when one of them is in a thread where the
+session is the assignee or the reviewer, or is a request or a handover addressed to it (a role's watch runs for hours
+and every post on the board moves the branch, measured). A role waiting for its next request watches this way
+instead of reading the inbox on a timer (measured: a role's watch needed a request id, so a new request to the role
+woke nothing). A failed sync (a reset connection, a git timeout) is retried after `--interval`
 instead of ending the watch; a request that cannot be found still ends it. When the time runs out while the sync is
 still failing, the watch says it could not check for new posts instead of reporting none (read again with
 `show --sync`). Between reads the watch asks the remote for the branch head (`ls-remote`, one round trip) every
@@ -385,10 +398,12 @@ when the project wires it: [#boards-and-audiences](#boards-and-audiences)).
 designated reviewer can do so; the owner may record a `human` handover when that session is unavailable. Agents must
 not use the `human` identity without an explicit owner instruction. An assignee handover clears the old claim (review
 or return a pending submission first); a reviewer handover keeps the submission and moves it to the new inbox.
-<a id="handover-does-not-reach-launch"></a>`launch --request` reads the request's own addressee, not an assignee
-handover posted after it: a request first addressed to a live session and then handed over to a role is refused as
-not addressed to a role. To open a worker window for it, post a new request to the role in a new thread (one thread
-holds one request) and withdraw the old request once the new one is accepted (measured).
+<a id="handover-does-not-reach-launch"></a>`launch --request` reads the addressee after any assignee handover
+(the value the request's state carries), so a request first addressed to a live session and then handed over to a
+Claude role opens that role's worker window (measured: when it read the request's own addressee, such a request was
+refused as not addressed to a role and was posted again in a new thread). A handover carries no launch details: a
+request handed over to a Codex role is refused for its missing `launch-*` lines, and is posted again to the role in a
+new thread (one thread holds one request; withdraw the old request once the new one is accepted).
 
 Runners and dashboards read `inbox --json`: actionable requests and scoped error rows, warnings on stderr, `[]` when
 nothing waits. Each row carries the latest valid `question`, `answer`, `submission` and `review` with their own
@@ -501,12 +516,20 @@ it asks for: `--stage policy` (the deliverable is a policy only), `--stage imple
 policy: add `--policy-quote '<the owner's confirming words>'` and/or `--policy-ref <the committed policy file>`; either
 one alone also means `implement`), or `--stage exempt` (work that needs no policy stage: `--stage-reason '<item 1-8 of
 #no-policy-stage>: <one line>'`; a reason alone also means `exempt`). The marks go into the request's `details` as
-`policy-<key>: <value>` lines, so the owner can later read how often each stage was used.
+`policy-<key>: <value>` lines, so the owner can later read how often each stage was used. `inbox` and `show` print
+them in one line under the completion conditions (`方針の段の印: <stage> / 方針の file = … / 本人の確認 =「…」`, or
+`なし` for an ordinary request without them), and `--json` rows carry them as `policy_stage` (`{stage, ref, quote,
+reason}`, `{}` without marks, `null` for a restricted request, whose marks live in the spec). Measured: the views did
+not show them, and a worker told to check the mark wrote that the request had none.
 
 A board whose `board.json` sets `policy_stage_check` (`{"rule": "<where the rule is written>", "confirmed_words":
 ["<the board's own words that say a policy was confirmed>", ...]}`) prints one notice line on `request` (never a
-refusal) for: an unmarked request; `implement` with neither a quote nor a file, or with a file that does not exist;
-`exempt` without an item number. An unmarked request whose summary, acceptance or named spec asks for a draft of text
+refusal) for: an unmarked request; `implement` with neither a quote nor a file, or with a file the reviewer's
+approval cannot read (`<repo>/<path>` committed at HEAD in a repository directly under the work root, the reading of
+[`approve-edit`](#edit-approval); a file that is there but written another way gets the form to write; a
+collaborators board has no approval, so a path relative to the source is enough there; measured: the post read the
+path relative to the source and the approval read it from the work root, so a path without the repository's name
+passed the post and was refused at the approval); `exempt` without an item number. An unmarked request whose summary, acceptance or named spec asks for a draft of text
 to be sent (a reply, a response letter, a mail) and says neither that it is the policy stage nor that its policy was
 confirmed gets the notice in that form (the reply-drafting net, words as decided: 返信案, 返答の案, 英文の答え,
 `draft`). Calibrated on an owner board's past requests (measured): in a spec's body the bare `draft` also fires on
@@ -580,12 +603,19 @@ A board whose `board.json` sets `accept_review_form` (`{"rule": "<where the rule
   (measured: follow-ups made from acceptances' out-of-scope rests widened a protection beyond what the owner had
   confirmed).
 
+These fields belong to the receipt: `submit` refuses them (`--checked`, `--verdict`, `--decided`, `--owner-ruling`,
+`--no-questions`, `--leftover`) before anything is read or posted, and the worker writes the checks it ran and the
+rest it left in `--summary` or in the results file (measured: submit accepted them and kept none, so the review ran
+the checks again).
+
 The engine adds, and writes into the event's `details` as `review-*` lines together with the above:
 
 - `review-prior`: the posts in other threads that name this request, its spec or a deliverable of its submissions (by
   a dated file name; generic names such as `SESSION.md` are skipped), printed before posting with any owner quote they
   carry (measured: a reviewer whose context had been compacted put back to the owner questions the owner had already
-  answered under a follow-up request built on the same results file).
+  answered under a follow-up request built on the same results file). The engine's own notes (a touch or untouch
+  declaration, a launch or pickup mark) decide nothing and are left out (measured: an untouch note that only listed
+  the deliverables' file names came out as a decision built on the work).
 - `review-nth` and `review-compactions`: the acceptance's position among the acceptances and revisions of the window
   that `--session-name` names (its first word, the native id; without it, the session environment
   `CLAUDE_CODE_SESSION_ID` / `CODEX_THREAD_ID`), and the context compactions that window's transcript on this machine

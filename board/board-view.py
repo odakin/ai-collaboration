@@ -323,7 +323,7 @@ def workflow_row(project, thread, state, *, reader=None):
     w = state.get('workflow') or {}
     row = {key: w.get(key) for key in ('status', 'label', 'waiting_on', 'next_action',
         'request_id', 'reply_to', 'title', 'acceptance', 'requester', 'reviewer', 'assignee',
-        'submission', 'question', 'answer', 'review', 'claim_expired', 'lease_until')}
+        'submission', 'question', 'answer', 'review', 'claim_expired', 'lease_until', 'policy_stage')}
     row.update(project=project, thread=thread,
         actionable=bool(reader and same_session(w.get('waiting_on'), reader) and not w.get('errors')),
         deliverables=w.get('deliverables') or [],
@@ -375,11 +375,49 @@ def note_lines(w, mode='inbox'):
     return lines
 
 
+POLICY_MARK_KEYS = (('policy-stage', 'stage'), ('policy-ref', 'ref'), ('policy-quote', 'quote'),
+                    ('policy-stage-reason', 'reason'))   # board.py policy_stage_details writes these `details` lines
+
+
+def policy_marks(request):
+    """The policy-stage marks of a request (`policy-*` lines of its details, CONTRACT.md#policy-stage-check) as
+    {stage, ref, quote, reason} (the keys present), {} for an ordinary request without them, None for a restricted request
+    (its marks live in the spec). Measured: the views did not show them, and a worker told to check the mark wrote that the
+    request had none."""
+    if not request or request.get('source_policy') == 'encrypted-metadata-only':
+        return None
+    found = {}
+    for line in str(request.get('details') or '').splitlines():
+        key, sep, value = line.partition(': ')
+        for name, field in POLICY_MARK_KEYS:
+            if sep and key == name and field not in found:
+                found[field] = value.strip()
+    return found
+
+
+def policy_mark_line(marks):
+    """One line for inbox / show with a request's policy-stage marks (policy_marks, carried in the derived workflow as
+    `policy_stage`), or None when there are none to say (a restricted request, a thread without a request)."""
+    if marks is None:
+        return None
+    if not marks:
+        return '    方針の段の印: なし (依頼の details に policy-stage の行が無い)'
+    clip = lambda s: s if len(s) <= 200 else s[:199] + '…'
+    parts = [marks.get('stage') or '(段の名なし)']
+    if marks.get('ref'): parts.append('方針の file = ' + marks['ref'])
+    if marks.get('quote'): parts.append('本人の確認 =「' + clip(marks['quote']) + '」')
+    if marks.get('reason'): parts.append('段を立てない理由 = ' + clip(marks['reason']))
+    return '    方針の段の印: ' + ' / '.join(parts)
+
+
 def handoff_lines(w, notes='inbox'):
     """Render the actual handoff messages, not just the original request title. `notes` = 'inbox' or 'all' (note_lines)."""
     lines = []
     if w.get('acceptance'):
         lines.append('    完了条件: ' + w['acceptance'])
+    marks = policy_mark_line(w.get('policy_stage'))
+    if marks:
+        lines.append(marks)
     for reference in (w.get('request') or {}).get('references') or []:
         lines.append('    依頼資料: ' + reference)
     lines.extend(note_lines(w, notes))
@@ -462,7 +500,7 @@ def derive(events: list[dict], now: dt.datetime) -> dict:
                     reviewer=w["reviewer"],
                     claim_expired=w['claim_expired'], lease_until=(w['claim'] or {}).get('lease_until'),
                     deliverables=(w["submission"] or {}).get("deliverables", []),
-                    request=event_brief(w['request']), submission=event_brief(w['submission']),
+                    request=event_brief(w['request']), policy_stage=policy_marks(w['request']), submission=event_brief(w['submission']),
                     question=event_brief(w['question']), answer=event_brief(w['answer']), review=event_brief(w['review']),
                     notes=[note_brief(n) for n in w['notes']], claim_id=(w['claim'] or {}).get('event_id'),
                     reply_to=(w["submission"] if w["status"] == "submitted" else w["blocker"] if w["status"] == "blocked" else w["claim"] or w["request"] or {}).get("event_id"))
