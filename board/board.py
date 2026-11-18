@@ -1216,21 +1216,37 @@ SPEC_PATH_WORD=re.compile(r'[~\w.\-]*/[\w.\-/]*\.(?:md|txt|json|ya?ml|tex)\b',re
 SPEC_FILES_MAX=40                              # files spec_changes looks at for one request
 
 
+RULE_DOC_DIRS=('conventions',)   # directories of rule documents (spec_files leaves them out, except the spec itself)
+
+
+def rule_doc(p, root):
+    """Whether the resolved path `p` lies in a rule-document directory (RULE_DOC_DIRS) below the workspace `root`."""
+    try: parts=p.relative_to(root).parts[:-1]
+    except ValueError: parts=p.parts[:-1]
+    return any(d in RULE_DOC_DIRS for d in parts)
+
+
 def spec_files(req, ws):
     """The request's spec files below the workspace `ws` (its references and its policy-ref, read like review_prior; when
     they name none, the paths its summary and acceptance name, read from the workspace or the request's project
     checkout) and the
     files their markdown links point to below the spec's own directory (one hop), as resolved paths, the spec files
-    first."""
+    first. Rule documents (rule_doc) are left out, except the first file named = the request's spec itself."""
     refs=list(req.get('references') or [])+re.findall(r'^policy-ref:\s*(\S+)',req.get('details') or '',re.M)
     first=list(dict.fromkeys(p for p in (_ref_path(r,ws) for r in refs) if p))
+    # The spec itself (the first reference) is watched wherever it is; the rule documents a request names besides it
+    # (a `conventions/` directory) are left out: other sessions edit them all the time (measured: the largest share of
+    # the warnings left after the narrowing below).
+    root=Path(ws).resolve()
+    first=first[:1]+[p for p in first[1:] if not rule_doc(p,root)]
     proj=(req.get('project') or {}).get('key') or ''
-    # the summary's paths only when the references name no spec: a summary also names the rules it follows, and those
-    # change all the time (measured: read alongside the references, they made the largest share of the warnings)
+    # the summary's paths only when the references name no spec, and never a rule document: a summary also names the
+    # rules it follows, and those change all the time (measured: read alongside the references they made the largest
+    # share of the warnings, and a standing request's summary named only its rule)
     for t in ([] if first else SPEC_PATH_WORD.findall(' '.join(str(x) for x in (req.get('summary'),req.get('acceptance')) if x))):
         for cand in ([t] if t.startswith(('/','~')) else [t]+([f'{proj}/{t}'] if proj and proj!='restricted' else [])):
             p=_ref_path(os.path.expanduser(cand),ws)
-            if p and p not in first: first.append(p); break
+            if p and p not in first and not rule_doc(p,root): first.append(p); break
     out=list(first)
     for p in first:
         try: text=p.read_text(encoding='utf-8',errors='replace')
@@ -1242,7 +1258,7 @@ def spec_files(req, ws):
             except (OSError, ValueError): continue
             # only the spec's own materials (below its directory, where its decision records sit): the general rule
             # documents a spec links for context change all the time (measured: they made most of the warnings)
-            if q not in out and q.is_relative_to(p.parent.resolve()) and q.is_file(): out.append(q)
+            if q not in out and q.is_relative_to(p.parent.resolve()) and q.is_file() and not rule_doc(q,root): out.append(q)
     return out[:SPEC_FILES_MAX]
 
 

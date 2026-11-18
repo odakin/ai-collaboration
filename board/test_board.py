@@ -4099,6 +4099,8 @@ class SpecChanges(unittest.TestCase):
                                                ' 一般の規則 = [rules](../rules/general.md)\n')
         (self.repo/'plans/decision.md').write_text('判断 1\n'); (self.repo/'plans/work.md').write_text('作業\n')
         (self.repo/'rules').mkdir(); (self.repo/'rules/general.md').write_text('規則\n')
+        (self.repo/'conventions').mkdir(); (self.repo/'conventions/rule.md').write_text('規則の文書。 関連 = [other](other.md)\n')
+        (self.repo/'conventions/other.md').write_text('別の規則\n')
         self.commit('2026-01-01T00:00:00Z','spec and decision')
     def tearDown(self): self.tmp.cleanup()
     def commit(self, when, msg, *paths):
@@ -4124,6 +4126,24 @@ class SpecChanges(unittest.TestCase):
                          ['proj/plans/decision.md'])            # with references, a rule the summary names is not a spec
         hint=board.spec_change_hint(ch)
         self.assertEqual(len(hint),1); self.assertIn('proj/plans/decision.md',hint[0]); self.assertIn('ruling after the request',hint[0])
+
+    def test_rule_documents_left_out(self):
+        # A rule document the request names besides its spec (a conventions/ directory) is not watched: other sessions
+        # edit them all the time. The spec itself is watched wherever it is, also when it is a rule document.
+        (self.repo/'conventions/rule.md').write_text('規則の文書 (別の窓が直した)。 関連 = [other](other.md)\n')
+        h_rule=self.commit('2026-01-02T00:40:00Z','rule edited by another session')
+        with_rule=self.req(references=['proj/plans/spec.md','proj/conventions/rule.md'])
+        self.assertEqual(board.spec_changes(with_rule,self.ws),[])
+        (self.repo/'plans/spec.md').write_text('依頼書 (差し替え)。 判断の記録 = [decision](decision.md)\n')
+        h_spec=self.commit('2026-01-02T01:00:00Z','spec replaced')
+        self.assertEqual([(p,c) for p,c,_,_ in board.spec_changes(with_rule,self.ws)],[('proj/plans/spec.md',h_spec[:8])])
+        (self.repo/'conventions/other.md').write_text('別の規則 (直した)\n'); self.commit('2026-01-02T01:10:00Z','other rule edited')
+        spec_is_rule=self.req(references=['proj/conventions/rule.md'])
+        self.assertEqual([(p,c) for p,c,_,_ in board.spec_changes(spec_is_rule,self.ws)],[('proj/conventions/rule.md',h_rule[:8])])
+        # a summary that names the rule it follows (no references) does not make the rule the spec
+        named=self.req(references=[],summary='規則 = proj/conventions/rule.md、 依頼書 = proj/plans/spec.md')
+        self.assertEqual([p for p,_,_,_ in board.spec_changes(named,self.ws)],['proj/plans/spec.md'])
+        self.assertEqual(board.spec_changes(self.req(references=[],summary='規則 = proj/conventions/rule.md のとおり'),self.ws),[])
 
     def test_own_work_is_left_out(self):
         (self.repo/'plans/decision.md').write_text('判断 1 (worker が直した)\n'); h=self.commit('2026-01-02T01:00:00Z','worker fix')

@@ -586,14 +586,16 @@ decision record the spec points to and sends a message. `submit` therefore lists
 was posted to its spec files (its references and its `policy-ref`; when those name none, the paths its summary and
 acceptance name, read from the work root or the request's project checkout) and to the files their markdown links
 point to below the spec's own directory (one hop: its decision records and materials, not the general rule documents
-it links for context), prints one warning naming the first, and keeps them as `spec-changed-after-request:` lines in
+it links for context). Rule documents (a file in a `conventions/` directory) are left out wherever they are named,
+except the spec itself (the first file the request names), which is watched wherever it is. It prints one warning
+naming the first, and keeps them as `spec-changed-after-request:` lines in
 the submission's `details` for the review. The worker's own commits are left out (a commit named in `--deliverable`
 as `<repo>@<hash>` or whose hash appears in the summary, and a file named in `--deliverable`). It never refuses.
 Measured: an owner's ruling that came after a request reached the worker only as commits to the decision record its
 spec linked (the spec was named only in the request's summary), and the first version was submitted without it.
 Calibrated on an owner board's history: the warning catches that case and comes up on about one submission in five
-(mostly specs changed during the work, and rule documents a request named as references); in aggregate it does not
-predict a revise, so it stays a warning and a record.
+(mostly specs and their decision records changed during the work; leaving the rule documents out took off most of
+the rest); in aggregate it does not predict a revise, so it stays a warning and a record.
 
 ### <a id="accept-review-form"></a>The review form of an acceptance
 
