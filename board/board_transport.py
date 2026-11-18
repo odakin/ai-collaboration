@@ -34,6 +34,7 @@ from __future__ import annotations
 import contextlib
 import errno
 import hashlib
+import json
 import math
 import os
 import shutil
@@ -439,6 +440,52 @@ class Repo:
             pass
 
 
+class Tracked:
+    """The board at the branch's tracking ref (refs/remotes/origin/<branch>), read without the checkout: for tools that
+    are not board.py (hooks, watchers, dashboards). The tracking ref moves with every push from this machine and every
+    fetch; the checkout moves only by fast-forward, which can stall (measured: a stalled checkout hid a reviewer's claim
+    for hours and a Stop hook kept bouncing on it, while the tracking ref already held the claim). Blobs are read
+    through the transport's cache (decrypted once per blob id), so a thread costs one `ls-tree` and a few file reads."""
+
+    def __init__(self, root):
+        self.repo = Repo(root)
+        self.sha = self.repo.remote_sha()
+        if not self.sha: raise ValueError('no tracking ref (fetch or post once)')
+
+    def tree(self, rel: str = 'events') -> dict:
+        """{path below the board: blob id} of the *.json below `rel` (`events`, `events/<project>`,
+        `events/<project>/<thread>`) at the tracking ref."""
+        pre = self.repo.prefix
+        out = git(self.repo.top, 'ls-tree', '-r', '-z', '--full-tree', self.sha, '--', pre + rel.strip('/')).stdout.decode()
+        rows = {}
+        for rec in out.split('\0'):
+            if not rec: continue
+            meta, path = rec.split('\t', 1)
+            if meta.split()[1] == 'blob' and path.startswith(pre) and path.endswith('.json'): rows[path[len(pre):]] = meta.split()[2]
+        return rows
+
+    def event(self, rel: str, blob: str):
+        """The event at `rel` (a path `tree` returned) as a dict; None when it is unreadable or not an object."""
+        try: e = json.loads(self.repo.blob(self.sha, rel, blob).decode('utf-8'))
+        except (ValueError, UnicodeDecodeError, OSError, subprocess.SubprocessError): return None
+        return e if isinstance(e, dict) else None
+
+    def events(self, rel: str = 'events') -> list:
+        """[(path below the board, event)] below `rel`, by path; unreadable files are skipped."""
+        out = []
+        for path, blob in sorted(self.tree(rel).items()):
+            e = self.event(path, blob)
+            if e is not None: out.append((path, e))
+        return out
+
+
+def tracked(root):
+    """`Tracked(root)`, or None when the board cannot be read at its tracking ref (not a board's repository, no origin,
+    no tracking ref yet, git failed): the caller then reads its working tree as before."""
+    try: return Tracked(root)
+    except (ValueError, OSError, subprocess.SubprocessError): return None
+
+
 def _selftest() -> int:
     import json, sys
 
@@ -506,6 +553,14 @@ def _selftest() -> int:
         _check(not r.fast_forward(c4, 'owner') and head_of() == c4, 'interrupted-ff: staged work kept')
         assert git(root, 'diff', '--cached', '--name-only').stdout.decode().split() == ['board.json']
         git(root, 'reset', '-q', '--', 'board.json'); git(root, 'checkout', '-q', '--', 'board.json')
+        # reading the board at the tracking ref: an event pushed but not fast-forwarded is read, the checkout is untouched
+        rel6 = 'events/p/t/20260101T000005Z--e6.json'; c5 = r.commit(c4, rel6, r.write_blob(rel6, ev(6))); assert r.push(c5)
+        tb = tracked(root)
+        got = dict(tb.events('events/p/t')) if tb else {}
+        _check(tb is not None and tb.sha == c5 and got.get(rel6, {}).get('i') == 6 and rel1 in got
+               and head_of() == c4 and not (root / rel6).exists(), 'tracked: reads events the checkout has not reached')
+        _check(set(tb.tree('events/p')) == set(got) and tb.tree('events/q') == {} and tracked(base / 'not-a-repo') is None,
+               'tracked: tree by prefix, None outside a repository')
         r.notify(c3); assert r.notified() == c3
         assert r.fetched_age() < 60                                                          # push stamped the machine
         # persistent materialisation: built once, hard-linked, reused by path; a second commit gets its own directory
