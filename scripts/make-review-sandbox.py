@@ -109,7 +109,9 @@ Rules for any assistant working here:
 
 LEDGER_DIR = ".sandbox-ledger"          # under the root, outside every sandbox
 INPUT_NAMES = ("CLAUDE.md", "AGENTS.md", "REVIEW-SPEC.md")
-RESULT_NAMES = ("REVIEW-RESULTS.md", "ledger.yaml", "HANDOFF.md")
+# DONE = 封じた sandbox の中からの返送の印 (外の marker dir に書けない作業者の --record が書く = claude-config の
+# surface-spawn-results.py。 headless の起動の行が終わりに書く形もある)。 結果の file と同じに回収し、 status が「終えた」 と出す
+RESULT_NAMES = ("REVIEW-RESULTS.md", "ledger.yaml", "HANDOFF.md", "DONE")
 RULE_DIRS = ("notes", "checks", "scratch")
 OUTSIDE_DIR = "outside-rules"
 # a sandbox without a ledger: a root-level file no newer than CLAUDE.md + this is an input (create writes all at once)
@@ -604,6 +606,7 @@ def sandbox_state(root: Path, slug: str, find_in: Path | None = None, _index: di
     mine = reviewer_files(inv)
     st.update(ledger=led is not None, written=len(mine), code=reviewer_code(inv), outside=inv["outside"],
               trees=inv["trees"], literature=len(inv["literature"]), rounds=[r["dir"] for r in _rounds(led)],
+              done="DONE" in inv["results"],
               last_write=max((inv["mtime"].get(r, 0) for r in mine), default=None))
     cols = (led or {}).get("collections") or []
     closed = (led or {}).get("closed")
@@ -651,13 +654,15 @@ def state_line(st: dict) -> str:
             f" {len(st['outside'])}), last write {_age(st['last_write'])}")
     if s == "empty":
         return f"{st['slug']}: nothing written yet"
+    finished = " The reviewer wrote DONE (finished)." if st.get("done") else ""
     if s == "uncollected":
-        return f"{st['slug']}: NOT COLLECTED — {tail} → collect {st['slug']} --into <receipt dir>"
+        return f"{st['slug']}: NOT COLLECTED — {tail}{finished} → collect {st['slug']} --into <receipt dir>"
     if s == "collected":
         return f"{st['slug']}: collected {st['collected_at']} into {st['into']}, unchanged since"
     if s == "changed_after_collect":
         return (f"{st['slug']}: WRITTEN TO AFTER THE COLLECTION of {st['collected_at']} (into {st['into']}):"
-                f" {len(st['changed'])} file(s) new or changed, e.g. {_some(st['changed'], 3)} → collect again")
+                f" {len(st['changed'])} file(s) new or changed, e.g. {_some(st['changed'], 3)}"
+                f"{finished if 'DONE' in st['changed'] else ''} → collect again")
     if s == "closed":
         return f"{st['slug']}: closed {st['closed_at']} ({st['reason']}), unchanged since"
     if s == "changed_after_close":
@@ -1002,6 +1007,23 @@ def selftest() -> int:
         # the default round directory follows the rounds already recorded
         with contextlib.redirect_stdout(io.StringIO()):
             ok(add(root, "r1", [rspec]) == sa / "round3")
+
+        # ---- DONE: the return marker a sealed reviewer writes inside the sandbox when it cannot write outside ----
+        sd = create(root, "d1", spec, [inc])
+        (sd / "REVIEW-RESULTS.md").write_text("done\n", encoding="utf-8")
+        ok("finished" not in state_line(sandbox_state(root, "d1")), "no DONE = not said to be finished")
+        (sd / "DONE").write_text('token: "TOK-X"\nstatus: done\n', encoding="utf-8")
+        st = sandbox_state(root, "d1")
+        ok(st["state"] == "uncollected" and st["done"] and "wrote DONE (finished)" in state_line(st)
+           and "DONE" not in st["outside"], st)
+        dd = Path(td) / "dest-d"
+        with contextlib.redirect_stdout(io.StringIO()) as buf:
+            collect(root, "d1", dd)
+        ok((dd / "DONE").exists() and not (dd / OUTSIDE_DIR).exists() and "outside the rule places" not in buf.getvalue(),
+           "DONE is collected as a result file, not as a file outside the rule places")
+        ok(sandbox_state(root, "d1")["state"] == "collected")
+        (sd / "DONE").write_text('token: "TOK-X"\nstatus: done\nround: 2\n', encoding="utf-8")
+        ok("wrote DONE (finished)" in state_line(sandbox_state(root, "d1")), "a DONE rewritten after the collection is named")
     print(f"selftest OK ({n_checks} checks)")
     return 0
 
