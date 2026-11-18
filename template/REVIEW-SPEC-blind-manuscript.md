@@ -100,4 +100,4 @@ When `REVIEW-RESULTS.md` and `HANDOFF.md` are written, run the requester's retur
 <RETURN-COMMAND> --token <TOKEN> --status done --task "<task name without lineage words>" --result-path <absolute path of this sandbox>/ --summary "<one line: what was written, where the verdict is>"
 ```
 
-Running it does not require reading anything outside this directory. Do not contact anyone else; the requester's next session surfaces the marker automatically.
+Running it does not require reading anything outside this directory. Do not contact anyone else; the requester's next session surfaces the marker automatically. If this directory is the only place you may write, the command writes the same marker to `./DONE` and says so: that is the return, so do not try another way to write outside. If it fails, save the command line in `./scratch/return-command.txt` and say so in the results.

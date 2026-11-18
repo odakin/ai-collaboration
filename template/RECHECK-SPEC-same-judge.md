@@ -32,3 +32,5 @@ Write `<round dir>/RECHECK-RESULTS.md` (new file; sections 1 and 2, then what re
 ```
 <return command with the token>
 ```
+
+If the command says it wrote `./DONE` (this directory is the only place you may write), that is the return: do not try another way to write outside. If it fails, save the command line in `./scratch/return-command.txt` and say so in `<round dir>/RECHECK-RESULTS.md`.
