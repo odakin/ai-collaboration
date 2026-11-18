@@ -623,8 +623,9 @@ board directory>", "<argument>", ...], "rule": "<where the rule is written>"}`. 
 effort and model refusals, so a refused request runs nothing), the engine runs the script with the request's own
 command line after `--`, the board directory in `AGENT_BOARD_ROOT` and `AGENT_BOARD_REQUEST_DESK=0` (so a desk that
 posts requests of its own does not run itself again). The desk's last stdout line is `{"env": {...}}`; the engine
-applies only `AGENT_BOARD_DEFAULT_REVIEWER` and `AGENT_BOARD_REVIEWER_SEPARATE` from it (an explicit `--reviewer` still
-wins), and the desk's stderr reaches the requester. A missing script, a non-zero exit or unreadable output leaves the
+applies only `AGENT_BOARD_DEFAULT_REVIEWER`, `AGENT_BOARD_REVIEWER_SEPARATE` and, for a `--dialogue` request,
+`AGENT_BOARD_DIALOGUE_DESK` ([the window's copy-and-typeset desk](#dialogue-desk)) from it (an explicit `--reviewer`
+still wins), and the desk's stderr reaches the requester. A missing script, a non-zero exit or unreadable output leaves the
 request as it would be without the desk, with one line. `AGENT_BOARD_REQUEST_DESK=0` in the requester's environment
 skips the desk. The engine refuses the field on a collaborators board: the command would run on the requester's
 machine, and that board's `board.json` is written by others. This is where an owner's per-window reviewer wiring
@@ -1066,6 +1067,18 @@ python3 board_asks.py digest --root <board> --session S
   check to the owner). Refused before anything is posted: `--dialogue` with `--worktree`, with `--surface agent`, and
   on a request to a Codex role (its hand-off does not read the mark). The division of work itself =
   [claude-config multi-session-coordination.md#research-dialogue-and-conductor](../../claude-config/conventions/multi-session-coordination.md#research-dialogue-and-conductor).
+  <a id="dialogue-desk"></a>**The window's copy-and-typeset desk**: on an owner board, the board's
+  [request desk](#request-desk) may name the requester's resident copy-and-typeset desk for a dialogue request
+  (`AGENT_BOARD_DIALOGUE_DESK` = that desk's role id; it usually posts the desk's own standing request first, the way it
+  raises a reviewer). The engine takes only a role id, writes it into the request's `details` as
+  `dialogue-desk: <role id>` (so `launch --request` on another machine names the same desk; the launch record keeps it
+  too), and the hand-off text then names the desk, not the requester, as the receiver of what the window places and of
+  each decided item. The requester starts the desk as its child and sends the dialogue window the desk's session id;
+  until then the window sends to the requester, which forwards. A candidate for a protected file that the owner
+  answered, questions about the operation and anything else the window notices still go to the requester. Without the
+  value (no desk, another board, the desk could not be raised) the text is as above. Why: when the conductor received
+  each hand-over itself, every hand-over started a conductor turn, and the conductor copied, typeset and committed in
+  its own window turn after turn; once a resident desk received them, the conductor's own hand work stopped (measured).
   The text itself: "You are the board worker for role `<role id>`, request
   `<request event id>`, spec `<path>`; execute it yourself. This window must run on <model> at <effort> effort.
   Work in the repository's own working tree on its main branch: do not call EnterWorktree or create a branch; commit by

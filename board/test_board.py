@@ -2689,6 +2689,18 @@ class DialogueWorker(EffortFlag):
                   'the requester writes the result file'):
             self.assertIn(x,d)
         self.assertTrue(d.split('\n3. ',1)[1].startswith('Do the research and drafting'))
+        self.assertNotIn('copy-and-typeset desk',d)                                        # no desk named = the requester receives
+        k=board.handoff_text(Path('/fixture/board'),'role-fixture-dialogue',rid,'fixture/spec.md','fixture-model','high',
+                             surface='desktop',project='fixture',policy='ordinary',dialogue='role-fixture-build-desk')
+        for x in self.WORKER_ONLY: self.assertNotIn(x,k)
+        step3=k.split('\n3. ',1)[1]
+        self.assertIn('send its path to the copy-and-typeset desk (role `role-fixture-build-desk`)',k)
+        self.assertIn('to the copy-and-typeset desk (role `role-fixture-build-desk`) in one SendMessage',step3)
+        self.assertIn('until it has, send to the requester',step3)                          # before the desk is up
+        self.assertIn('A candidate for a protected file that the owner answered',step3)       # still the requester's (rule 9 b)
+        self.assertIn('the requester writes the result file',step3)
+        self.assertEqual(board.handoff_text(Path('/fixture/board'),'role-fixture-dialogue',rid,'fixture/spec.md','fixture-model','high',
+                                            surface='desktop',project='fixture',policy='ordinary',dialogue='not a role'),d)
         bg=board.handoff_text(Path('/fixture/board'),'role-fixture-dialogue',rid,'fixture/spec.md','fixture-model','high',
                               policy='ordinary',dialogue=True)
         self.assertNotIn('push to main',bg); self.assertNotIn('discuss them here',bg)      # the desktop questions line only on desktop
@@ -3478,7 +3490,8 @@ class RequestDesk(EffortFlag):
           'if os.environ.get("DESK_FAIL"): sys.exit(1)\n'
           'print("ℹ️ desk note", file=sys.stderr)\n'
           'print(json.dumps({"env": {"AGENT_BOARD_DEFAULT_REVIEWER": "role-eproj-desk-reviewer",'
-          ' "AGENT_BOARD_REVIEWER_SEPARATE": "1", "AGENT_BOARD_LAUNCH_MODEL": "other"}}))\n')
+          ' "AGENT_BOARD_REVIEWER_SEPARATE": "1", "AGENT_BOARD_LAUNCH_MODEL": "other",'
+          ' "AGENT_BOARD_DIALOGUE_DESK": os.environ.get("DESK_DIALOGUE", "")}}))\n')
 
     def setUp(self):
         super().setUp()
@@ -3522,7 +3535,45 @@ class RequestDesk(EffortFlag):
         self.assertIn('desk note',p.stderr)                                    # the desk's lines reach the requester
         self.assertEqual([h['target']['session_id'] for h in hand],['role-eproj-desk-reviewer'])
         self.assertIn(board.SEPARATE_REVIEWER_LINE,(req.get('details') or '').splitlines())
-        self.assertEqual(board.DESK_ENV_KEYS,(board.DEFAULT_REVIEWER_ENV,board.SEPARATE_REVIEWER_ENV))
+        self.assertEqual(board.DESK_ENV_KEYS,(board.DEFAULT_REVIEWER_ENV,board.SEPARATE_REVIEWER_ENV,board.DIALOGUE_DESK_ENV))
+        self.assertFalse(any(l.startswith(board.DIALOGUE_DESK_PREFIX) for l in (req.get('details') or '').splitlines()))  # not a dialogue request
+
+    def dialogue(self, thread, role, *extra):
+        p=self.cli('request',*self.post_args(),'--thread',thread,'--to','claude','--to-session',role,'--dialogue',*extra)
+        rid=self.rid(p.stdout)
+        with board.snapshot(self.root,fresh=True) as snap: req=next(e for e in board.read(snap) if e['event_id']==rid)
+        return p,rid,req
+
+    def test_dialogue_desk_names_the_receiver(self):
+        """CONTRACT.md#dialogue-desk: the desk's role id goes into the dialogue request's details and into the window's
+        hand-off text as the receiver of its hand-overs; `launch --request` elsewhere reads it from the details; a value
+        that is not a role id is dropped; without the desk's value the text names the requester as before."""
+        import os
+        self.turn_on()
+        os.environ['DESK_DIALOGUE']='role-eproj-build-desk'
+        try:
+            p,rid,req=self.dialogue('2026-01-01-desk-dlg-a','role-eproj-dialogue','--surface','desktop')
+        finally: os.environ.pop('DESK_DIALOGUE',None)
+        lines=(req.get('details') or '').splitlines()
+        self.assertIn(board.DIALOGUE_LINE,lines); self.assertIn(board.DIALOGUE_DESK_PREFIX+'role-eproj-build-desk',lines)
+        prompt=json.loads((board.outbox_dir(self.root)/(rid+'.start_session.json')).read_text())['prompt']
+        self.assertIn('copy-and-typeset desk (role `role-eproj-build-desk`)',prompt)
+        self.assertIn('sends you the desk\'s session id',prompt); self.assertNotIn('send its path to the requester',prompt)
+        self.assertEqual(board.launch_record(self.root,rid)['dialogue'],'role-eproj-build-desk')
+        # another machine: no launch record, no --dialogue on the launch line = the details name the desk
+        for f in board.outbox_dir(self.root).glob(rid+'.*'): f.unlink()
+        self.cli('launch','--root',str(self.root),'--agent','claude','--session','claude-win-9','--request',rid,'--surface','desktop',
+                 '--expect-model','claude-opus-5-5','--effort','xhigh')
+        prompt=json.loads((board.outbox_dir(self.root)/(rid+'.start_session.json')).read_text())['prompt']
+        self.assertIn('copy-and-typeset desk (role `role-eproj-build-desk`)',prompt)
+        # a value that is not a role id is dropped; no value = the requester receives, as before
+        for val,thread in (('not a role; rm -rf /','2026-01-01-desk-dlg-b'),('','2026-01-01-desk-dlg-c')):
+            os.environ['DESK_DIALOGUE']=val
+            try: p,rid,req=self.dialogue(thread,'role-eproj-dialogue2','--surface','desktop')
+            finally: os.environ.pop('DESK_DIALOGUE',None)
+            self.assertFalse(any(l.startswith(board.DIALOGUE_DESK_PREFIX) for l in (req.get('details') or '').splitlines()))
+            prompt=json.loads((board.outbox_dir(self.root)/(rid+'.start_session.json')).read_text())['prompt']
+            self.assertIn('send its path to the requester',prompt); self.assertNotIn('copy-and-typeset desk',prompt)
 
     def test_explicit_reviewer_wins(self):
         self.turn_on()

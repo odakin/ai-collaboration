@@ -33,6 +33,8 @@ DEFAULT_REVIEWER_ENV='AGENT_BOARD_DEFAULT_REVIEWER'   # request: reviewer sessio
 SEPARATE_REVIEWER_ENV='AGENT_BOARD_REVIEWER_SEPARATE'  # request: `1` = the requesting window may not accept it (owner wiring for a window that has a separate reviewer); CONTRACT.md#separate-reviewer
 REQUEST_DESK_ENV='AGENT_BOARD_REQUEST_DESK'      # request: `0` = do not run the board's request desk (board.json request_desk); set for the desk's own posts; CONTRACT.md#request-desk
 SEPARATE_REVIEWER_LINE='review-separate: yes'          # written into such a request's details; accept reads it there, not in its own environment
+DIALOGUE_DESK_ENV='AGENT_BOARD_DIALOGUE_DESK'           # request --dialogue on an owner board: the role id of the requester's resident copy-and-typeset desk (set by the board's request desk); the dialogue window hands its decided items there (CONTRACT.md#dialogue-desk)
+DIALOGUE_DESK_PREFIX='dialogue-desk: '                  # the request's details line that carries that role id, so `launch --request` on any machine names the same desk
 DIALOGUE_LINE='worker-kind: dialogue'                  # request --dialogue: written into the request's details, so `launch --request` on any machine gives the research dialogue window its own hand-off (CONTRACT.md#dialogue-worker-handoff)
 LAUNCH_CONFIG_DIR_ENV='AGENT_BOARD_LAUNCH_CONFIG_DIR'  # request to a role: the CLI config dir the worker runs under (a logged-in account); owner wiring
 LAUNCH_MODEL_ENV='AGENT_BOARD_LAUNCH_MODEL'            # request to a role: default --model (else --expect-model, else the requester's own model)
@@ -1530,7 +1532,8 @@ def event_from(a, events):
             if separate_reviewer():
                 ev['details']='\n'.join(x for x in (ev.get('details'),SEPARATE_REVIEWER_LINE) if x)
             if getattr(a,'dialogue',False):
-                ev['details']='\n'.join(x for x in (ev.get('details'),DIALOGUE_LINE) if x)
+                desk=dialogue_desk_env()
+                ev['details']='\n'.join(x for x in (ev.get('details'),DIALOGUE_LINE,DIALOGUE_DESK_PREFIX+desk if desk else '') if x)
     if kind in ('accept','revise') and ack_lines:
         ev['details']='\n'.join(x for x in (ev.get('details'),*ack_lines) if x)[:4000]   # schema maxLength
     if kind=='handover':
@@ -1575,16 +1578,54 @@ DIALOGUE_SCOPE=(" You are a research dialogue window: do research and drafting w
     " requester too.")
 
 
-def dialogue_step_three(scope, src, submit_tail):
+DIALOGUE_DESK_ROLE=re.compile(r'^role-[a-z0-9][a-z0-9-]*[a-z0-9]$')
+
+
+def dialogue_desk_env():
+    """The copy-and-typeset desk's role id the board's request desk set for this request (DIALOGUE_DESK_ENV), or ''.
+    Only a role id is taken: the value goes into the request's details and into the worker's hand-off text."""
+    r=(os.environ.get(DIALOGUE_DESK_ENV) or '').strip()
+    return r if DIALOGUE_DESK_ROLE.match(r) else ''
+
+
+def dialogue_desk_in(details):
+    """The desk's role id from a request's details (DIALOGUE_DESK_PREFIX line), or ''."""
+    for line in (details or '').splitlines():
+        if line.startswith(DIALOGUE_DESK_PREFIX):
+            r=line[len(DIALOGUE_DESK_PREFIX):].strip()
+            if DIALOGUE_DESK_ROLE.match(r): return r
+    return ''
+
+
+def dialogue_scope(desk=''):
+    """DIALOGUE_SCOPE, or, with a copy-and-typeset desk (CONTRACT.md#dialogue-desk), the same scope with the desk as
+    the receiver of what the window hands over. Measured: when the conductor received each hand-over itself, every
+    hand-over started a conductor turn and the conductor copied, typeset and committed in its own window, turn after
+    turn; once a resident desk received them, the conductor's hand work stopped."""
+    if not desk: return DIALOGUE_SCOPE
+    return (" You are a research dialogue window: do research and drafting with the owner here, and nothing else."
+            " Do not write any file in a repository, do not run git (no pull, commit or push), do not apply edits to protected"
+            " files and do not post board notes: put what you hand over (a decided draft, a judgment, a check script you ran) in"
+            f" the shared notes folder or your scratchpad and send its path to the copy-and-typeset desk (role `{desk}`), the"
+            " requester's resident child that moves it into the repository, typesets and checks it, commits and pushes. Hand"
+            " the requester (the conductor) anything else you notice (a stale record, a tool that misbehaves, a chore) in one"
+            " line, without looking into it yourself; work you are unsure about goes to the requester too.")
+
+
+def dialogue_step_three(scope, src, submit_tail, desk=''):
     """Step 3 of a research dialogue window's hand-off: the research and drafting with the owner, the hand-over of each
     decided item to the requester, and the one submit when the owner closes the window (the requester writes the result
     file). The worker steps' policy-first stop is left out: the request itself is the owner's word to open the window
     (claude-config conventions/policy-before-implementation.md#no-policy-stage), and a dialogue window that read the stop
     could have handed back a policy instead of talking with the owner."""
+    to=(f"the copy-and-typeset desk (role `{desk}`)" if desk else "the requester")
+    via=(" The requester starts that desk as its child and sends you the desk's session id; until it has, send to the"
+         " requester, which forwards. A candidate for a protected file that the owner answered, questions about the"
+         " operation and anything else go to the requester." if desk else '')
     return ("Do the research and drafting the spec describes with the owner in this window. Hand each decided draft or"
-            " judgment to the requester in one SendMessage: the target (file and lines, or thread), the base version, the decided"
+            f" judgment to {to} in one SendMessage: the target (file and lines, or thread), the base version, the decided"
             " text, the owner's words verbatim, what is still open and the checks it needs (a long text goes in one file in the"
-            " shared notes folder or your scratchpad, and the message names its path). When the owner says to close this window,"
+            f" shared notes folder or your scratchpad, and the message names its path).{via} When the owner says to close this window,"
             " send the requester the list of what was decided, what is still open and what the closing sweep should keep; the"
             " requester writes the result file and returns its path. Then `submit` with the same --root, --session, --request"
             f"{scope}{src},{submit_tail}")
@@ -1610,7 +1651,8 @@ def handoff_text(root, role, request_id, spec, model, effort, surface='backgroun
     from the child starts a turn in an idle requester (measured). Step 0 holds back the request and its materials only;
     a session's own start-up reads are not the task. The claim and submit steps carry the whole command: a worker told
     only to `claim` with a session name found --root, --request, --project and --policy by refused posts (measured).
-    A research dialogue window (dialogue = request --dialogue) gets DIALOGUE_SCOPE instead of the working-tree line, its
+    A research dialogue window (dialogue = request --dialogue: True, or the role id of the requester's copy-and-typeset
+    desk = CONTRACT.md#dialogue-desk, which then receives the window's hand-overs) gets DIALOGUE_SCOPE instead of the working-tree line, its
     own step 3 and DIALOGUE_ASK: the working-tree line told it to commit and push, and the desktop questions line told it
     not to ask the owner in its window and to apply guard-stopped files there, while the window is where the owner
     discusses the research and the conductor does the files, Git and records (measured: a dialogue window moved material
@@ -1670,8 +1712,9 @@ def handoff_text(root, role, request_id, spec, model, effort, surface='backgroun
     src,claim_tail,submit_tail,restricted=restricted_handoff_parts(policy,source,f"<your native session id, 8 chars> ({model or '<model>'})")
     if restricted: plain=''
     if dialogue:
-        tree=DIALOGUE_SCOPE; ask=DIALOGUE_ASK if surface=='desktop' else ''
-        step3=dialogue_step_three(scope,src,submit_tail)
+        desk=dialogue if isinstance(dialogue,str) and DIALOGUE_DESK_ROLE.match(dialogue) else ''
+        tree=dialogue_scope(desk); ask=DIALOGUE_ASK if surface=='desktop' else ''
+        step3=dialogue_step_three(scope,src,submit_tail,desk)
     else:
         step3=f"{POLICY_FIRST_HANDOFF}; when done, `submit` with the same --root, --session, --request{scope}{src},{submit_tail}"
     return (f"You are the board worker for role `{role}`, request `{request_id}`, spec `{spec or '(the request itself)'}`; execute it yourself.{run}{tree}\n"
@@ -2038,7 +2081,7 @@ def desktop_plan(root, role, request_id, spec, expect, session, title=None, proj
     write_launch_record(root,request_id,role=role,spec=spec,model=model,effort=effort,surface='desktop',title=args['title'],
                         name=name,requester=session,detach=bool(detach),**({'reason':reason} if reason else {}),
                         **({'effort_quote':effort_quote} if effort_quote else {}),**({'model_quote':model_quote} if model_quote else {}),
-                        **({'worktree':True} if worktree else {}),**({'dialogue':True} if dialogue else {}))
+                        **({'worktree':True} if worktree else {}),**({'dialogue':dialogue} if dialogue else {}))
     return args,path
 
 
@@ -2111,7 +2154,7 @@ def launch_plan(root, role, request_id, spec, expect, session, project=None, pol
     write_launch_record(root,request_id,role=role,spec=spec,model=model,effort=effort,surface='background',requester=session,
                         **({'reason':reason} if reason else {}),**({'effort_quote':effort_quote} if effort_quote else {}),
                         **({'model_quote':model_quote} if model_quote else {}),**({'worktree':True} if worktree else {}),
-                        **({'dialogue':True} if dialogue else {}))
+                        **({'dialogue':dialogue} if dialogue else {}))
     cli=os.environ.get(LAUNCH_CLI_ENV) or 'claude'
     rc_off=os.environ.get(LAUNCH_REMOTE_CONTROL_ENV,'').strip() not in ('1','follow')
     settings=launch_cli_settings(rc_off,worktree)
@@ -2153,6 +2196,7 @@ def announce_launch(a, ev, audience):
     if a.command!='request' or a.to!='claude' or not (a.to_session or '').startswith('role-'): return None
     dialogue=bool(getattr(a,'dialogue',False))
     dnote=dialogue_name_note(dialogue,a.to_session,getattr(a,'title',None),ev.get('summary'))
+    if dialogue: dialogue=dialogue_desk_in(ev.get('details')) or True   # the desk's role id travels in `dialogue` (handoff_text)
     if dnote: print(dnote)
     # Default surface: on an owner board a desktop requester gets the desktop arguments (the owner sees that worker in
     # the app; a background CLI session is listed nowhere), whatever entry path called the engine (measured: a session
@@ -2560,6 +2604,9 @@ def launch_claude_role(a, req, events):
     if surface=='agent': raise ValueError('launch: --surface desktop か background (subagent に窓は要らない)')
     project=req['project']['key']; policy=req['source_policy']; spec=handoff_spec(a,req,rec)
     dialogue=bool(getattr(a,'dialogue',False) or DIALOGUE_LINE in (req.get('details') or '').splitlines() or rec.get('dialogue'))
+    if dialogue:
+        dialogue=(dialogue_desk_in(req.get('details'))
+                  or (rec['dialogue'] if isinstance(rec.get('dialogue'),str) and DIALOGUE_DESK_ROLE.match(rec['dialogue']) else '') or True)
     dialogue_gate(dialogue,surface,a.worktree)
     dnote=dialogue_name_note(dialogue,role,a.title,req.get('summary'))
     if dnote: print(dnote)
@@ -2607,13 +2654,14 @@ def launch(argv, env, cwd=None):
     return (p.stdout or '').strip()
 
 
-DESK_ENV_KEYS=(DEFAULT_REVIEWER_ENV,SEPARATE_REVIEWER_ENV)   # the only variables a request desk may set
+DESK_ENV_KEYS=(DEFAULT_REVIEWER_ENV,SEPARATE_REVIEWER_ENV,DIALOGUE_DESK_ENV)   # the only variables a request desk may set
 
 
 def run_request_desk(a, cfg, argv=None):
     """An owner board's request desk (board.json `request_desk`, CONTRACT.md#request-desk): a Python script the board's
-    owner names, run before a request is built, that may set the request's default reviewer and the separate-reviewer
-    mark (DESK_ENV_KEYS, read from the last stdout line `{"env": {...}}`). It runs whether the requester called a
+    owner names, run before a request is built, that may set the request's default reviewer, the separate-reviewer
+    mark and, for a research dialogue window, its copy-and-typeset desk (DESK_ENV_KEYS, read from the last stdout line
+    `{"env": {...}}`). It runs whether the requester called a
     forwarder or this engine directly: measured, a requester that called the engine directly skipped a forwarder's
     desk, and the requesting window stayed the reviewer of its request. Owner boards only (a collaborators board's
     board.json is written by others; validate refuses the field there). The desk gets the request's command line after
