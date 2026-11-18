@@ -1,5 +1,5 @@
 {
-  "_comment": "board_asks.py の Stop の網の直し (前の Stop からの文だけを読む・同じ段を 2 度差し戻さない・報告と別の窓への案内と答え方の案内を問いと読まない・差し戻しの続きの扱い・印の使い方の検査・方針の問いの関門・推定の解き方 = 問い返しを答えに数えない・確かめの語・確かめた答えの記録・推定を捨てる道・推定が残る間の知らせ・確かめの行の選び方・別の答えで推定を捨てる記録・置き換えた推定の語・問いと推す答えの向きの門・言い直しの記録の前の推す答え) の selftest が、 直した箇所を 1 つずつ外した版でそれぞれ落ちるか",
+  "_comment": "board_asks.py の Stop の網の直し (前の Stop からの文だけを読む・同じ段を 2 度差し戻さない・報告と別の窓への案内と答え方の案内を問いと読まない・差し戻しの続きの扱い・印の使い方の検査・方針の問いの関門・推定の解き方 = 問い返しを答えに数えない・確かめの語・確かめた答えの記録・推定を捨てる道・推定が残る間の知らせ・確かめの行の選び方・別の答えで推定を捨てる記録・置き換えた推定の語・問いと推す答えの向きの門・言い直しの記録の前の推す答え・外への発信の在りかを下書きとして受ける・対話係の依頼の worker の方針の確認・第三者に聞く一覧・報告の形の「番号で答えていた」) の selftest が、 直した箇所を 1 つずつ外した版でそれぞれ落ちるか",
   "target": "board_asks.py",
   "run": "env BOARD_ASKS_SELFTEST_VERBOSE=1 python3 {} --selftest",
   "fail_marker": "FAIL ",
@@ -117,8 +117,8 @@
       "name": "「印で答えてもらうのは、 もうしません」 の打ち消しを見ない",
       "pairs": [
         [
-          "        if not NEGATED_AFTER.match(u[m.end():]):\n",
-          "        if True:\n"
+          "not NEGATED_AFTER.match(u[m.end():]) and not REPORTED_TAIL",
+          "not REPORTED_TAIL"
         ]
       ],
       "expect_fail": [
@@ -141,7 +141,7 @@
       "name": "方針の問いを、 依頼の worker からも立てさせる",
       "pairs": [
         [
-          "            if any(_same_session(x, me) for x in workers) and not any(_same_session(x, me) for x in authors):",
+          "            if (not dialogue and any(_same_session(x, me) for x in workers)\n                    and not any(_same_session(x, me) for x in authors)):",
           "            if False:"
         ]
       ],
@@ -572,6 +572,114 @@
       ],
       "expect_pass": [
         "向き: 打ち消しで聞く理由を書けば立ち"
+      ]
+    },
+    {
+      "name": "外への発信の在りかも判定の道具に回す (直す前の門)",
+      "pairs": [
+        [
+          "    if ground == 'outbound':\n        # 外への発信の承認は",
+          "    if False:\n        # 外への発信の承認は"
+        ]
+      ],
+      "expect_fail": [
+        "外への発信の問いは在りかを下書きの file として受け"
+      ],
+      "expect_pass": [
+        "変更の在りかがあれば理由に依らず判定の道具を通す"
+      ]
+    },
+    {
+      "name": "対話係の依頼の worker の方針の確認も断る (直す前の門)",
+      "pairs": [
+        [
+          "(not dialogue and any(_same_session(x, me) for x in workers)",
+          "(any(_same_session(x, me) for x in workers)"
+        ]
+      ],
+      "expect_fail": [
+        "研究の対話係の依頼の worker は方針の確認を立てられる"
+      ],
+      "expect_pass": [
+        "その依頼の worker (claim した session) は方針の確認を立てない"
+      ]
+    },
+    {
+      "name": "第三者に聞く一覧の段も本人への問いに数える (直す前の網)",
+      "pairs": [
+        [
+          "                and not under_third):",
+          "                ):"
+        ]
+      ],
+      "expect_fail": [
+        "本人の呼び名でない人に聞く一覧"
+      ],
+      "expect_pass": [
+        "本人の呼び名の見出しの下の問いは差し戻す"
+      ]
+    },
+    {
+      "name": "本人の呼び名が無くても名字とさんの見出しを第三者と読む",
+      "pairs": [
+        [
+          "(bool(names) and bool(HONORIFIC_TAIL.search(who)))",
+          "bool(HONORIFIC_TAIL.search(who))"
+        ]
+      ],
+      "expect_fail": [
+        "本人の呼び名が無ければ、 人に聞く一覧も今どおり差し戻す"
+      ]
+    },
+    {
+      "name": "本人の呼び名の見出しも第三者と読む",
+      "pairs": [
+        [
+          "    if '本人' in who or any(n in who for n in names):\n",
+          "    if '本人' in who:\n"
+        ]
+      ],
+      "expect_fail": [
+        "本人の呼び名の見出しの下の問いは差し戻す"
+      ]
+    },
+    {
+      "name": "第三者の一覧の後の箇条書きでない段も外す",
+      "pairs": [
+        [
+          "        elif not (under_third and LIST_ITEM_RE.match(first)):\n            under_third = False\n",
+          ""
+        ]
+      ],
+      "expect_fail": [
+        "一覧の後の箇条書きでない段の本人への問いは差し戻す"
+      ]
+    },
+    {
+      "name": "報告の形 (番号で答えていた) も答え方の頼みと読む (直す前の網)",
+      "pairs": [
+        [
+          " and not REPORTED_TAIL.match(u[m.end():])",
+          ""
+        ]
+      ],
+      "expect_fail": [
+        "過去の報告は差し戻さない: 番号で答えを求めていた"
+      ],
+      "expect_pass": [
+        "「番号で教えて」 を差し戻す"
+      ]
+    },
+    {
+      "name": "「答えていただけますか」 も報告の形と読む",
+      "pairs": [
+        [
+          "い(?:た(?!だ)|る|ます|まし)",
+          "い(?:た|る|ます|まし)"
+        ]
+      ],
+      "expect_fail": [
+        "「番号で答えていただけますか」 を差し戻す"
       ]
     }
   ]

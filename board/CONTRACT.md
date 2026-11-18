@@ -870,9 +870,12 @@ python3 board_asks.py digest --root <board> --session S
   `conventions/actor-attribution.md#prior-record-before-recommending`).
 - **A gate before asking**: every ask names its ground (a protected part of the owner's document, a rule change that
   needs a ruling, an outbound message, the owner's own choice, a policy check before implementation, a fact only the
-  owner knows). A change named by `--evidence` is judged by a validator (`BOARD_ASKS_VALIDATOR`) whatever the ground:
-  a change that needs no ruling is refused with "apply it and report", including asks to ratify such a change after
-  the fact (measured). The validator runs outside the ledger's lock and is given the asking session (the write-time
+  owner knows). A change named by `--evidence` is judged by a validator (`BOARD_ASKS_VALIDATOR`) whatever the ground
+  but outbound: a change that needs no ruling is refused with "apply it and report", including asks to ratify such a
+  change after the fact (measured). An outbound ask approves a send, not a change: its evidence is the draft file (a
+  mail draft, the inbox record, the task) and the gate only checks that the file exists (measured: asks to approve a
+  mail were refused as "a change that needs no ruling"). The validator only refuses asks, so leaving it out makes no
+  approval of a change. The validator runs outside the ledger's lock and is given the asking session (the write-time
   guard's net for rules the agent declined in that conversation reads it). When the write-time guard stops a change
   the validator called free, `--denied '<the guard's reason>'` makes the ask and keeps the reason on it. The reason is
   the guard's own refusal copied from the asking window's tool results: an account of it, or of something another
@@ -909,7 +912,9 @@ python3 board_asks.py digest --root <board> --session S
   in the task field counts), and when the request's event is on neither this board nor a board beside it. The
   requester, a session that took over the requester's work (a conductor's successor) and the reviewer may put it
   (measured: requiring the posting session refused a successor). Choices inside a worker's policy file are settled at
-  the requester's review, not asked of the owner one by one.
+  the requester's review, not asked of the owner one by one. A research dialogue window's request (`request
+  --dialogue`, `worker-kind: dialogue` in its details) is the exception: its worker talks with the owner directly, so
+  it may put the policy check (measured: the dialogue window had no way to ask the owner its policy).
 - **Binding an answer**: the owner may answer by a label this session showed (upper case: `v3` is a version), or by
   position when the latest reply shows only the ask block and the reply before shows no open ask. A quantity ("2件",
   "1つだけ") is not a position, and an affirmation binds only as a short answer on its own. A line that asks back or
@@ -956,13 +961,19 @@ python3 board_asks.py digest --root <board> --session S
   block (an addendum cannot remove the earlier unlabelled list from the screen). Not counted: drafts in code blocks,
   quoted lines and phrases in quotes; reported words ("worker が決めてほしいと言った…"); a sentence that sends the
   owner to answer in another window ("その窓で答えてください"; "この窓で" still asks); an instruction on how to
-  answer with no question in the sentence ("普段の言葉で答えてください"); a one-line heading is read with the
-  paragraph under it.
+  answer with no question in the sentence ("普段の言葉で答えてください"); a list of questions headed for someone
+  other than the owner (a heading "<person>さんに聞くこと" over the questions the owner will put to a collaborator,
+  with the list items under it; measured) when the addressee is a role word (共同研究者・共著者・依頼元 …) or a person
+  with an honorific who is none of the owner's names (`board.json` `owner_names`, or env `BOARD_ASKS_OWNER_NAMES`;
+  without them a person is still counted, since the owner is called by a family name with さん too); a one-line
+  heading is read with the paragraph under it.
 - **Labels used as numbers are sent back once**: a reply that tells the owner to answer by a label, a number or an
   ordinal (「H14 送って」 と返して / 番号で教えて / 「1 つ目」 か「2 つ目」 で), names two or more labels in a sentence
   without the content of their questions ("H3・H12・H13 は…"), or puts a label at the head of a line is sent back with
   a request to restate only those sentences by content. Quotes are cited, not used, and are not counted (one form is
-  still read as used: forms listed in parentheses after a past-tense report, measured).
+  still read as used: forms listed in parentheses after a past-tense report, measured). A verb that goes on in a past
+  or ongoing form ("番号で答えていた返事" = a report of what someone did) is not a request ("番号で答えていただけますか"
+  still is; measured).
 - **An approval ask re-listed without its file names and heads is sent back once**: when a reply names an open ask
   of ground `rule` or `protected` (bare, in a block, or in a range such as `H91〜H93`) whose text carries a candidate's
   SHA-256 head (8+ hex characters with a letter), the reply must also show each file name and each head (8

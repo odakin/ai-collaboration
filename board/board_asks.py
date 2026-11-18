@@ -18,9 +18,12 @@ What it is:
   The ask block puts the question first and the label after it; the owner is never asked to type a label.
 - Before an ask is made it passes a **gate**: the ground must be one the owner alone can decide (GROUNDS); a policy
   check before implementation is asked once per piece of work (`request:<id>`, or `session:<own id>` for a window
-  without a board request) and is refused from a worker of that request (its assignee or claimant); and a change named
-  by `--evidence` is judged by a validator whatever the ground — a change that needs no ruling is refused ("apply it
-  and report"), including asks to ratify such a change (measured). The validator is a separate program
+  without a board request) and is refused from a worker of that request (its assignee or claimant) unless the request
+  is a research dialogue window's (`worker-kind: dialogue` in its details: that window talks with the owner directly);
+  and a change named by `--evidence` is judged by a validator whatever the ground but outbound — a change that needs no
+  ruling is refused ("apply it and report"), including asks to ratify such a change (measured). An outbound ask (a
+  send's approval, not a ruling on a change) takes its evidence as the draft file and only checks that it exists
+  (measured: asks to approve a mail were refused as "a change that needs no ruling"). The validator is a separate program
   (`BOARD_ASKS_VALIDATOR`, default = `owner-ask-validate.py` in a sibling `claude-config/scripts/`) so this engine does
   not depend on any one user's protection engines: without one, such asks are made and the output says the gate could
   not judge. An ask (and a reword) with a recommended answer also passes a **direction check**: an answer whose verb
@@ -115,7 +118,7 @@ GROUNDS = {
     'rule': '規則の文書の変更で事前の裁定が要るもの・設定・hook',
     'outbound': '外への発信 (送信・投稿・公開) の承認',
     'choice': '本人が選ぶもの (共同研究者の提案を採るか・案の間の好み・お金・家庭・人に連絡する・常駐させる)',
-    'policy': '実装の前の方針の確認 (1 つの作業に 1 回。 その依頼の worker からは立てない)',
+    'policy': '実装の前の方針の確認 (1 つの作業に 1 回。 その依頼の worker からは立てない。 研究の対話係の依頼の worker は立てる)',
     'fact': '本人しか知らない事実',
 }
 JUDGED = ('rule', 'protected')
@@ -479,6 +482,29 @@ def _recent_reviewed(root, me, hours=REVIEW_WINDOW_H):
     return out
 
 
+def _draft_present(evidence):
+    """(ok, message) for an outbound ask's evidence: the draft file (`<repo>@worktree:<path>`, `<repo>@<commit>:<path>` or
+    `<repo>@candidate=<absolute path>:<path>`) exists. Its change is not judged (an outbound ask approves a send)."""
+    repo, sep, rest = (evidence or '').partition('@')
+    rev, sep2, rel = rest.partition(':')
+    if not (sep and sep2 and repo and rel):
+        return False, ('在りかの形が読めない (<repo>@worktree:<path> / <repo>@<commit>:<path> /'
+                       ' <repo>@candidate=<全文の絶対 path>:<path>)')
+    if rev.startswith('candidate='):
+        ok = Path(os.path.expanduser(rev.split('=', 1)[1])).is_file()
+    elif rev == 'worktree':
+        ok = (Path(repo) / rel).is_file()
+    else:
+        try:
+            ok = subprocess.run(['git', '-C', repo, 'cat-file', '-e', f'{rev}:{rel}'], capture_output=True,
+                                timeout=VALIDATOR_TIMEOUT).returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            ok = False
+    if not ok:
+        return False, f'在りかの下書きの file が無い ({evidence[:160]}。 下書きの file を指して立て直す)'
+    return True, '外への発信の在りかは下書きの file として受けた (変更の裁定の要否は判定しない)'
+
+
 def gate(ground, evidence=None, *, applied=False, validator=None, session=None, denied='', root=None):
     """(ok, message). ok=False = do not ask; the message says why and what to do instead. A change named by evidence is
     judged whatever the ground (a rule change asked under another ground passes the same validator). The asking session
@@ -495,6 +521,11 @@ def gate(ground, evidence=None, *, applied=False, validator=None, session=None, 
     evidence, err = _resolve_evidence(evidence, root)
     if err:
         return False, err
+    if ground == 'outbound':
+        # 外への発信の承認は file の変更の裁定でなく送信の承認 = 判定の道具 (その変更に本人の裁定が要るか) に回さない。 在りかは
+        # 下書きの file として受け、 在るかだけを確かめる (実測: メールの下書き・受信の記録・TODO を在りかに置いた送信の承認の問いが
+        # 「本人の裁定の要らない変更」 と読まれて断られ続けた。 判定の道具は問いを断る側の網なので、 外しても承認の抜け道にならない)
+        return _draft_present(evidence)
     kind = ground if ground in JUDGED else ('protected' if re.search(r'\.tex$', evidence) else 'rule')
     v = Path(validator) if validator else _validator()
     if not v.exists():
@@ -531,10 +562,14 @@ def _ids_of(addr, task=''):
     return [i for i in ids if i]
 
 
+DIALOGUE_LINE = 'worker-kind: dialogue'   # board.py の同名の行 = request --dialogue (研究の対話係の依頼) の details に書く印
+
+
 def _request_parties(root, request_id):
-    """(authors, workers) of a request on this board or a board beside it, or None when its event cannot be found.
-    authors = the session that posted it; workers = its assignee, sessions it was handed over to as assignee, and the
-    sessions that claimed it (each with the native ids in the task field)."""
+    """(authors, workers, dialogue) of a request on this board or a board beside it, or None when its event cannot be
+    found. authors = the session that posted it; workers = its assignee, sessions it was handed over to as assignee, and
+    the sessions that claimed it (each with the native ids in the task field); dialogue = the request is a research
+    dialogue window's (its details carry DIALOGUE_LINE)."""
     if not root or not request_id:
         return None
     root = Path(root).expanduser()
@@ -560,7 +595,7 @@ def _request_parties(root, request_id):
                         workers += _ids_of(e.get('actor'), (e.get('actor') or {}).get('task'))
                     elif e.get('kind') == 'handover' and e.get('handover_role') == 'assignee':
                         workers += _ids_of(e.get('target'))
-            return authors, workers
+            return authors, workers, DIALOGUE_LINE in str(ev.get('details') or '').splitlines()
     return None
 
 
@@ -731,8 +766,11 @@ def _decide(root, st, it, me):
                 return 'refused', {'status': 'refused', 'text': text, 'message': (
                     f'依頼 {rids[0]} の event を手元の掲示板 (--root と、 その隣の掲示板) で見つけられない ='
                     ' その依頼の worker かを確かめられない。 依頼の掲示板を最新にしてから立て直す')}
-            authors, workers = parties
-            if any(_same_session(x, me) for x in workers) and not any(_same_session(x, me) for x in authors):
+            authors, workers, dialogue = (tuple(parties) + (False,))[:3]
+            # 研究の対話係の依頼 (request --dialogue) の worker は本人と直接話す窓 = 方針の確認も本人に立てる (実測: 対話係の窓が
+            # 本人に方針を問うと Stop の網が台帳の印を求め、 台帳は worker からは立てないと断り、 問う口が無かった)
+            if (not dialogue and any(_same_session(x, me) for x in workers)
+                    and not any(_same_session(x, me) for x in authors)):
                 return 'refused', {'status': 'refused', 'text': text, 'message': (
                     '方針の確認の問いは、 その依頼の worker (宛先・claim した session) からは立てない。'
                     ' 方針の中の選択は依頼元に submit して検収で決める (本人に立てない)')}
@@ -1284,6 +1322,19 @@ QUOTE_TYPE_RE = re.compile(rf'「([^「」\n]*)」\s*(?:と|で|か)\s*(?:「([^
 # only a request form ("番号で教えてください"), not the name of a matter ("番号で答えが返ってくる件") or a line number (行番号)
 BY_NUMBER_RE = re.compile(r'(?<!行)(?:番号|印|記号|符号|ラベル)\s*で\s*(?:答えて|教えて|返して|お答え|お返事|どうぞ|選んで|指定して|伝えて|書いて|打って)')
 NEGATED_AFTER = re.compile(r'^.{0,12}?(?:やめ|ない|不要|要ら|しな|なくて|ません|ず[、。])')
+# the verb goes on in a past or ongoing form = a report of what someone did, not a request to the owner
+# ("…本人が実際に番号で答えていた返事も含まれていました" was sent back, measured); "答えていただけますか" still asks
+REPORTED_TAIL = re.compile(r'^(?:い(?:た(?!だ)|る|ます|まし)|お(?:り|ら))')
+# a heading over questions for someone other than the owner ("<共同研究者の名>さんに聞くこと" over the questions the owner will put
+# to a collaborator in a meeting) heads no ask of the owner (measured). The addressee is a role word, or a person with
+# an honorific who is none of the owner's names (board.json `owner_names` / env BOARD_ASKS_OWNER_NAMES); without the
+# owner's names a person is still counted (the owner is called by a family name with さん too, measured)
+LIST_HEAD_RE = re.compile(r'^\s*(?:#{1,6}\s*)?(?:[-*・]\s*)?(?:\*\*)?\s*(?P<who>[^\n*:：「」]{1,24}?)\s*(?:に|へ)\s*'
+                          r'(?:聞く|聞きたい|尋ねる|確かめる|確認する|伺う|質問する|問う|決めてほしい|答えてほしい)'
+                          r'(?:こと|事|もの|点|質問)?\s*(?:\*\*)?\s*[:：]?\s*(?:\*\*)?\s*$')
+THIRD_PARTY_ROLES = re.compile(r'共同研究者|共著者|先方|編集者|編集部|査読者|\breferee|\beditor|依頼元|検収係|指揮役|\bworker', re.I)
+HONORIFIC_TAIL = re.compile(r'(?:さん|先生|氏|様|くん|君)$')
+LIST_ITEM_RE = re.compile(r'^\s*(?:[-*・]|\d{1,2}\s*[.)、]|[(（]\d{1,2}[)）]|[①-⑳])\s*')
 ORDINAL_TOKEN = re.compile(r'\d{1,2}\s*(?:つ目|番目|番)')
 OWN_MARK = 'board-asks:'   # the start of this hook's Stop reasons (the app records them as "Stop hook feedback: board-asks: …")
 SEEN_MAX = 400
@@ -1358,6 +1409,35 @@ def owner_ask_in(para):
             continue
         return m.group(0)
     return None
+
+
+def owner_names(root=None):
+    """The names the owner is called by: env BOARD_ASKS_OWNER_NAMES (comma separated), else board.json `owner_names` of
+    the board at root, else none (fail-open: an unreadable board names none)."""
+    env = os.environ.get('BOARD_ASKS_OWNER_NAMES')
+    if env is not None:
+        return [n.strip() for n in env.split(',') if n.strip()]
+    if not root:
+        return []
+    try:
+        sys.path.insert(0, str(HERE))
+        import board_config as bc
+        return [n for n in (bc.load(root).get('owner_names') or []) if isinstance(n, str) and n.strip()]
+    except Exception:
+        return []
+
+
+def third_party_list(para, names=()):
+    """True when the paragraph is a list of questions headed for someone other than the owner (LIST_HEAD_RE on its first
+    line): the addressee is a role word, or a person with an honorific who is none of the owner's names (names)."""
+    lines = (para or '').strip().splitlines()
+    m = LIST_HEAD_RE.match(lines[0]) if lines else None
+    if not m:
+        return False
+    who = m.group('who').strip()
+    if '本人' in who or any(n in who for n in names):
+        return False
+    return bool(THIRD_PARTY_ROLES.search(who)) or (bool(names) and bool(HONORIFIC_TAIL.search(who)))
 
 
 def paragraphs(text):
@@ -1441,7 +1521,7 @@ def label_usage(text, labels, heads):
         if ORDINAL_TOKEN.search(inner) or (kl and re.search(kl, inner)):
             out.append(('type', m.group(0)))
     for m in BY_NUMBER_RE.finditer(u):
-        if not NEGATED_AFTER.match(u[m.end():]):
+        if not NEGATED_AFTER.match(u[m.end():]) and not REPORTED_TAIL.match(u[m.end():]):
             out.append(('type', _sentence_at(u, m.start()).strip()))
     if kl:
         flat = re.sub(r'〔問\s*([A-Z]\d{1,5})〕', r' \1 ', u)
@@ -1716,8 +1796,16 @@ def hook_stop(root, data, path=None):
     g = pending_guess(recs, session, st)
     allowed = set(known) | set((g or {}).get('candidates') or [])
     loose = []
+    names = owner_names(root)
+    under_third = False   # inside a question list headed for someone else (its heading, then its list items)
     for para in paragraphs(prose_only(text)):
-        if owner_ask_in(para) and not BLOCK_RE.search(para) and not bare_labels(para, sorted(allowed)):
+        first = para.strip().splitlines()[0] if para.strip() else ''
+        if LIST_HEAD_RE.match(first):
+            under_third = third_party_list(para, names)
+        elif not (under_third and LIST_ITEM_RE.match(first)):
+            under_third = False
+        if (owner_ask_in(para) and not BLOCK_RE.search(para) and not bare_labels(para, sorted(allowed))
+                and not under_third):
             k = _key('loose', para)
             if k not in seen and k not in new:
                 new.append(k)
@@ -2015,6 +2103,18 @@ def selftest():
             check(r5[0]['status'] == 'refused' and r6[0]['status'] == 'made' and r6[0]['label'] == 'H3', f'判定の道具が要らないと言えば立てない {r5} {r6}')
             r5b = ask(None, [{'text': '理由を選び直した規則', 'ground': 'choice', 'evidence': f'{rr}@HEAD:free'}], session='s1', path=led, validator=stub)
             check(r5b[0]['status'] == 'refused', '変更の在りかがあれば理由に依らず判定の道具を通す')
+            # outbound = a send's approval: the evidence is the draft file (judged by the stub it would be "needs no ruling")
+            (rr / 'draft-free.txt').write_text('メールの下書き\n', encoding='utf-8')
+            ro = ask(None, [{'text': 'この下書きのメールを事務に送るか', 'ground': 'outbound', 'keys': ['todo:x:mail'],
+                             'evidence': f'{rr}@worktree:draft-free.txt'}], session='s1', path=led, validator=stub)
+            check(ro[0]['status'] == 'made' and '下書きの file' in ro[0]['message'],
+                  f'外への発信の問いは在りかを下書きの file として受け、 判定の道具に回さない {ro}')
+            ro2 = ask(None, [{'text': '無い下書きのメールを送るか', 'ground': 'outbound', 'keys': ['todo:x:mail2'],
+                              'evidence': f'{rr}@worktree:no-such-draft.txt'}], session='s1', path=led, validator=stub)
+            check(ro2[0]['status'] == 'refused' and '下書きの file が無い' in ro2[0]['message'],
+                  f'外への発信の在りかの下書きの file が無ければ立てない {ro2}')
+            check(_draft_present(f'{rr}@candidate={rr / "draft-free.txt"}:x.txt')[0] and not _draft_present('nonsense')[0],
+                  '候補の写しの形の在りかも受け、 形の読めない在りかは断る')
             r5c = ask(None, [{'text': '在りかの誤り', 'ground': 'rule', 'evidence': f'{rr}@HEAD:bad'}], session='s1', path=led, validator=stub)
             check(r5c[0]['status'] == 'refused' and '読めない' in r5c[0]['message'], '判定の道具の誤りを理由として返す')
             r5d = ask(None, [{'text': '守りが止めた規則', 'ground': 'rule', 'evidence': f'{rr}@HEAD:free', 'denied': '断った件の網'}],
@@ -2201,6 +2301,20 @@ def selftest():
             check(rw[0]['status'] == 'made' and '--ground policy' in rw[0]['message'], '方針の語を別の理由で問うと注意を添える')
             rwk = ask(board, [{'text': '方針の中の選択', 'ground': 'policy', 'keys': pk}], session='feedf00d-2222', path=led)
             check(rwk[0]['status'] == 'refused' and 'worker' in rwk[0]['message'], f'その依頼の worker (claim した session) は方針の確認を立てない {rwk}')
+            # a research dialogue window's request (worker-kind: dialogue): its worker talks with the owner = may put the policy check
+            drid = '20260101T000200Z-claude-d1a10g'
+            (board / 'events' / 'proj' / 'th2').mkdir(parents=True)
+            (board / 'events' / 'proj' / 'th2' / f'R1--{drid}.json').write_text(json.dumps(
+                {'kind': 'request', 'event_id': drid, 'request_id': drid, 'assignee': {'agent': 'claude', 'session_id': 'role-x-dialogue'},
+                 'details': 'policy-stage: exempt\nworker-kind: dialogue', 'actor': {'agent': 'claude', 'session_id': 'role-x-y', 'task': 'deadbeef (opus)'}}),
+                encoding='utf-8')
+            (board / 'events' / 'proj' / 'th2' / 'C1--20260101T000300Z-claude-d1a20g.json').write_text(json.dumps(
+                {'kind': 'claim', 'event_id': '20260101T000300Z-claude-d1a20g', 'request_id': drid,
+                 'actor': {'agent': 'claude', 'session_id': 'role-x-dialogue', 'task': 'ab12cd34 (fable)'}}), encoding='utf-8')
+            rdl = ask(board, [{'text': '対話係の窓の方針でよいか', 'ground': 'policy', 'keys': [f'request:{drid}']}], session='ab12cd34-5555', path=led)
+            check(rdl[0]['status'] == 'made', f'研究の対話係の依頼の worker は方針の確認を立てられる {rdl}')
+            check(_request_parties(board, rid)[2] is False and _request_parties(board, drid)[2] is True,
+                  '対話係の印は依頼の details の行で読む (印の無い依頼の worker は今どおり断る = 上の試験)')
             rp = ask(board, [{'text': '方針でよいか', 'ground': 'policy', 'keys': pk}], session='deadbeef-1111', path=led)
             check(rp[0]['status'] == 'made', f'role id で出した依頼でも、 task の中の native id の session は立てられる {rp}')
             check(ask(board, [{'text': '方針でよいか', 'ground': 'policy', 'keys': pk}], session='deadbeef-1111', path=led)[0]['status'] == 'reused',
@@ -2260,6 +2374,36 @@ def selftest():
             write_tr(('x', '下書きです。\n```\n担当者様\nこの形で進めてよいですか。\n```\n> 引用: よいですか\n'))
             check(hook_stop(None, {'session_id': 's6', 'transcript_path': str(tr)}, path=led) is None,
                   '下書き (code block) と引用の中の問いは本人への問いに数えない')
+            # a question list headed for someone else (questions the owner will put to a collaborator) is not an ask of the
+            # owner; the owner's own heading, and an ask after the list, are still sent back (names here are fictional)
+            stop_s = lambda sid: hook_stop(None, {'session_id': sid, 'transcript_path': str(tr)}, path=led) or ''
+            third = ('会議で話す骨組みです。\n\n### 乙山さんに聞くこと\n\n- 境界の扱いはこの形でよいですか\n\n'
+                     '- 次の会議はいつがいいですか\n')
+            saved_on = os.environ.pop('BOARD_ASKS_OWNER_NAMES', None)
+            os.environ['BOARD_ASKS_OWNER_NAMES'] = '甲野'
+            try:
+                write_tr(('x', third))
+                check(stop_s('tp1') == '', '本人の呼び名でない人に聞く一覧 (見出しとその下の箇条書きの段) は本人への問いに数えない')
+                write_tr(('x', '### 甲野さんに決めてほしいこと\n\n- 境界の扱いはこの形でよいですか\n'))
+                check('の印' in stop_s('tp2'), '本人の呼び名の見出しの下の問いは差し戻す')
+                write_tr(('x', third + '\n上の順で聞いてよいですか\n'))
+                check('の印' in stop_s('tp3'), '一覧の後の箇条書きでない段の本人への問いは差し戻す')
+                write_tr(('x', '**本人に聞くこと**\n- 境界の扱いはこの形でよいですか\n'))
+                check('の印' in stop_s('tp4'), '「本人に聞くこと」 の見出しの下の問いは差し戻す')
+            finally:
+                os.environ.pop('BOARD_ASKS_OWNER_NAMES', None)
+            write_tr(('x', third))
+            check('の印' in stop_s('tp5'), '本人の呼び名が無ければ、 人に聞く一覧も今どおり差し戻す (本人も名字とさんで呼ばれる)')
+            write_tr(('x', '**共同研究者に聞くこと**\n- 境界の扱いはこの形でよいですか\n'))
+            check(stop_s('tp6') == '', '役の語 (共同研究者・依頼元など) の宛先の一覧は、 本人の呼び名が無くても数えない')
+            ob = Path(td) / 'owner-board'
+            ob.mkdir()
+            (ob / 'board.json').write_text(json.dumps({'board_format': 1, 'audience': 'owner', 'encryption': 'none',
+                                                        'owner_names': ['甲野']}), encoding='utf-8')
+            check(owner_names(ob) == ['甲野'] and owner_names(Path(td) / 'nowhere') == [] and owner_names(None) == [],
+                  '本人の呼び名は掲示板の設定から読み、 読めなければ無し')
+            if saved_on is not None:
+                os.environ['BOARD_ASKS_OWNER_NAMES'] = saved_on
             check(hook_prompt(None, {'session_id': 's7', 'transcript_path': str(tr), 'prompt': '<system-reminder>x'}, path=led) is None,
                   '注入の文は答えに数えない')
             write_tr(('x', '規則は「送る前に よいですか と聞く」 です。 説明だけです。'))
@@ -2338,6 +2482,8 @@ def selftest():
             check('番号で答えさせる' not in stop12(), '勧めどおりの追記は、 印を番号のように使う検査に当たらない')
             write_tr(('x', '違う所があれば、 番号で教えてください。'))
             check('番号で答えさせる' in stop12(), '「番号で教えて」 を差し戻す')
+            write_tr(('x', '違う所があれば、 番号で答えていただけますか。'))
+            check('番号で答えさせる' in stop12(), '「番号で答えていただけますか」 を差し戻す (報告の形「答えていた」 と分ける)')
             write_tr(('x', f'答えは「{la} 1 つ目」 か「{la} 2 つ目」 でどうぞ。'))
             check('番号で答えさせる' in stop12(), '序数の答え方を差し戻す')
             # approval asks re-listed without their file names and heads (measured: the owner's answers could not be recorded)
@@ -2388,6 +2534,7 @@ def selftest():
                                      '本人は「送って」 と返せば足ります。',
                                      f'本人は「{la} 1 つ目」 と返した。',
                                      '番号で答えが返ってくる件を調べる worker を起こしました。',
+                                     '番号で答えを求めていた返事や、 本人が実際に番号で答えていた返事も含まれていました。',
                                      '本人の「いまだに行番号で答えを返してくる」 の件です。',
                                      f'返事が中身を書かずに印だけで呼んだ (「{la}・{lb_} は…」)。',
                                      # lb_ (not la): a key already sent back above would hide a send-back here

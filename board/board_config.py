@@ -80,7 +80,7 @@ CONFIG = 'board.json'
 GITCRYPT_MAGIC = b'\x00GITCRYPT'
 AUDIENCES = {'owner', 'collaborators'}
 ENCRYPTIONS = {'git-crypt', 'none'}
-FIELDS = {'board_format', 'name', 'audience', 'encryption', 'branch', 'sources', 'readable', 'labels', 'description', 'launch_effort_floor', 'launch_model_allow', 'policy_stage_check', 'accept_review_form', 'request_desk', 'ask_prior_search', 'title_fallback'}
+FIELDS = {'board_format', 'name', 'audience', 'encryption', 'branch', 'sources', 'readable', 'labels', 'description', 'launch_effort_floor', 'launch_model_allow', 'policy_stage_check', 'accept_review_form', 'request_desk', 'ask_prior_search', 'title_fallback', 'owner_names'}
 EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')   # a worker's reasoning effort, lowest first
 KEY_RE = re.compile(r'[a-z0-9][a-z0-9-]{1,63}')
 
@@ -166,6 +166,9 @@ def validate(cfg: dict) -> dict:
     arf = cfg.get('accept_review_form')
     if arf is not None and not (isinstance(arf, dict) and set(arf) <= {'rule'} and isinstance(arf.get('rule', ''), str)):
         problems.append('accept_review_form is {"rule": "<where the rule is written>"}')
+    on = cfg.get('owner_names')   # the names the owner is called by (board_asks: a question list headed for anyone else is not an ask of the owner)
+    if on is not None and not (isinstance(on, list) and all(isinstance(n, str) and n.strip() for n in on)):
+        problems.append('owner_names is a list of the names the owner is called by (["<family name>", ...])')
     desk = cfg.get('request_desk')
     if desk is not None:
         if not (isinstance(desk, dict) and set(desk) <= {'command', 'rule'} and isinstance(desk.get('command'), list)
