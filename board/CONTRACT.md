@@ -256,6 +256,11 @@ Operating facts (measured):
   it from about two seconds to under one (measured). On an owner board whose working tree is clean, a post also fast-forwards the local
   checkout, so other sessions on this machine read it without `--sync`; a board inside a shared project never moves
   the project's checkout, so there the working tree is stale right after a post — read back with `--sync`.
+  Tools other than board.py (hooks, watchers, dashboards) read events with `board_transport.tracked(root)` (the branch's
+  tracking ref, moved by every post from this machine and every fetch) and fall back to the working tree only when it
+  returns None: the fast-forward stops while tracked files are dirty, and a reader of the working tree then misses newer
+  claims and requests (measured). A fast-forward whose HEAD update died after the index was written is finished by the
+  next one.
   `AGENT_BOARD_TRANSPORT=clone` selects the previous transport (a temporary clone, decrypting every file) for one
   release; the events, paths and commits are the same either way.
 - Inside the Codex sandbox (`workspace-write`) there is no network unless the thread was given it: `--sync`,
