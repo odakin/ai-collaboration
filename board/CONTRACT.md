@@ -194,7 +194,7 @@ stdio) makes the thread with model, effort, sandbox, working directory and writa
 history with one launch record (no turn and no model call: a thread with no history has no rollout file, and the app
 cannot open it) and exits; the hand-off is queued with `codex queue`; the app opens `codex://threads/<id>?hostId=local`,
 takes the thread as its writer and runs the queued hand-off as a turn. The owner sees the progress in the app and can
-talk to the worker there; the requester reads the board. The pinned values hold on the app's turn except network,
+talk to the worker there; the requester reads the board. The pinned values hold on the app's first turn except network,
 which takes the machine's Codex default (off): the board engine's worker subcommands (`inbox`, `show`, `watch`,
 `claim`, `note`, `blocker`, `finding`, `submit`, `release`, `handover`, `touch`, …; not `request`, `launch`, `accept`,
 `revise`) run outside the sandbox by a Codex rule that `codex-app-launch.py --allow-board-engine` installs when it is
@@ -213,7 +213,9 @@ anything starts; a repository's `.git` stays read-only unless its git dir is nam
 option, since its worker has no such sandbox); the thread's name in the app = `--title`, else the
 summary's first clause (a restricted request: the role, since its summary is the engine's fixed text), then the model (not added again when the title already ends with the same model and effort). The thread runs unattended (approval `never`), asks the requester's questions as
 a `blocker`, and starts with step 0 = `codex-app-launch.py check-self` (its own model and effort in Codex's local
-record). Being in Codex's local store, the thread is reachable by `codex queue` ([#codex-reach](#codex-reach)): the app
+record). That check, not the pin, tells which model is running: a later turn queued into the thread can run on another
+model than the pinned one (measured once: from the first queued turn after the machine's default model had changed
+since the launch; whether the app or the owner switched it is not settled). Being in Codex's local store, the thread is reachable by `codex queue` ([#codex-reach](#codex-reach)): the app
 takes a queued message as the thread's next turn (measured). On an owner board with the launch default the request
 starts the worker at once; `--no-launch` prints the line only. **Which machine**: the request's `details` carry
 `launch-host`, `launch-model`, `launch-effort`, `launch-cwd`, `launch-writable-root` (one line per directory),
