@@ -715,28 +715,29 @@ rule guard stops) to a reviewer role (claude-config `conventions/agent-rule-owne
 reviewer writes its approval of one candidate as a note to the submission, and the worker passes that note's event id
 to the guard's `apply --reviewer-approval <event id>` instead of the owner's words:
 
-Write it as one simple command with literal paths (a line continuation `\` is fine; no `;`, `&&`, `|`, redirect,
-variable or substitution): the guard counts only that form as the reviewer's posting, and only when its tool result
-shows `posted <event id>` = let it finish in the foreground (a long tool timeout; a posting moved to the background
-leaves no such line in the transcript, and piping it into `tail` both breaks the form and can hide the line, measured).
-A habitual `2>&1` counts too: the guard reads `>&` as an output redirect, so any command of the reviewer's that names
-the file or the candidate with `2>&1` after the pickup counts as writing them, and that window can no longer approve
-on that request (measured). Approve the candidates of the worker's final submission: the board takes one submission
+Write it as one simple command with literal paths (a line continuation `\` and a trailing `2>&1` are fine; no `;`,
+`&&`, `|`, other redirects, variables or substitution): the guard counts only that form as the reviewer's posting, and
+only when its tool result shows `posted <event id>` = let it finish in the foreground (a long tool timeout; a posting
+moved to the background leaves no such line in the transcript, and piping it into `tail` both breaks the form and can
+hide the line, measured). Approve the candidates of the worker's final submission: the board takes one submission
 at a time, so a partial submission made only to get an approval needs a `revise` before the final one can be posted
-(measured). The candidate and the lines it adds are checked across the reviewer's whole transcript, commands from
-before the pickup included, so a long-running reviewer window can lose the ability to approve through unrelated
-earlier work (measured): a glob in an option value of a command that is not a reading form (`--include='*.sh'` in a
-`grep … | head`) counts as naming every candidate whose file name it matches, and an added line of six characters or
-more (a common `import sys`) counts as the reviewer's own when it appears in the text of an earlier command (a
-`python3 -c` string). A candidate whose path ends with the target's repository-relative path makes that relative
-name count before the pickup too, so the worker names candidates flatly (`<repo>__<dir>__<name>`) in a new
-directory (measured). That directory is the request's own: it holds only that submission's files (its candidates and
+(measured). The guard counts only the reviewer's calls that write the file or the candidate: an editing tool on that
+file, and a shell command that names it (or a directory above it) as where something is written = the target of an
+output redirect (not `/dev/null` or a descriptor copy such as `2>&1`), the destination of a copy or move, an argument
+of a command that is not a reading form (a script, an interpreter, `sed -i`, a git command that can rewrite the
+working tree), or a path or content such a command receives through a variable, a pipe, a heredoc or a process
+substitution while the same command names the file literally. Arguments of reading commands, `cd` and variable
+assignments do not count, so a reading command may carry `;`, `&&`, `|`, redirects and variables. The candidate is
+checked across the reviewer's whole transcript, commands from before the pickup included (measured: before the check
+was narrowed to writes, a long-running reviewer window lost the ability to approve through unrelated earlier reading
+commands and a common line it had typed). A candidate whose path ends with the target's repository-relative path
+makes that relative name count before the pickup too, so the worker names candidates flatly (`<repo>__<dir>__<name>`)
+in a new directory (measured). That directory is the request's own: it holds only that submission's files (its candidates and
 the absolute paths the submit lists as deliverables; `.DS_Store` aside). The guard refuses a candidate kept in a shared
 folder before it reads the reviewer's transcript, because a note the reviewer writes into that folder would count as
-writing the candidate (measured). Any other command of the
-reviewer's that names the file, the candidate or a directory above the file must be made of reading commands only
-(the rule text lists them); review against copies made with `cp` to an absolute destination outside the
-repository and the candidate's directory, not links.
+writing the candidate (measured). Name the file and the candidate only in reading commands (the rule text lists
+them; a `python3 -c` whose code opens the file counts as writing it); review against copies made with `cp` to an
+absolute destination outside the repository and the candidate's directory, not links.
 
 ```sh
 python3 board.py approve-edit --root <board> --agent claude --session <the request's reviewer role> \
