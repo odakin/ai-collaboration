@@ -42,6 +42,7 @@ cold-eyes とは「書いた本人と別の目」 で検品させることだが
 | 事前登録 rubric、 **check 対象の式 label の列挙** | 疑っている式、 「hard error」 「係数が怪しい」 等の方向づけ |
 | 出力形式 (severity 分類・表の列)、 止まる規律 | 係数の候補値、 「前 version では X だった」 |
 | 返送 spine と token | 著者が既に直した点、 共著者の状態、 論文の来歴 |
+| 人間の読み手にとっての読みやすさの判定を、 物理・数の判定と別の節で頼む (読み手が止まる箇所・定義の前に出る記号・段の飛び)。 severity は物理・数の所見と分けて付けさせる | 著者が読みにくいと思っている箇所、 前の版の読みやすさの評価 |
 | 対象 = referee copy の path (原本を並べない) | 対象の中に残った来歴 (前回の verdict・訂正の一覧・results への path・依頼者の発言) — spec に書かなくても対象が運ぶ。 依頼の前に [`check-review-target.py`](../scripts/check-review-target.py) |
 | 組版の検査を頼むなら「overfull / underfull と、 長い式の番号が下の行に回る配置 (= amsmath の標準、 claude-config [`latex.md#align-split-tag-orphan`](../../claude-config/conventions/latex.md#align-split-tag-orphan)) は、 数と位置の報告のみ、 severity なし」 と明記 (= 層1 [`edit-intent-record.md#overfull-not-a-gate`](edit-intent-record.md#overfull-not-a-gate)、 2026-09-12 に should-fix で返って受領側が語順変更を提案した再発) | overfull を直す提案 (改稿 pass でも triage でも採らない) |
 
