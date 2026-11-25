@@ -879,6 +879,7 @@ answered questions into a one-line "done" (measured).
 python3 board_asks.py ask    --root <board> --about '<what it is about>' [--effect '<what changes>'] --text '<question>' --recommend '<answer>' --ground <why the owner> [--prior-term <word>... --prior '<earlier decisions, amounts, promises and where>'] [--key todo:<repo>:<id>] [--evidence <repo>@<rev>:<path>] [--reword '<what changed>'] [--negation-reason '<why>']
 python3 board_asks.py answer --root <board> --label H12 --quote '<owner words>' --binding label|order|confirmed|guess [--reading '<one line>']
 python3 board_asks.py list   --root <board> [--open] [--session S] [--label H12 ...] [--block]
+python3 board_asks.py group-reading --root <board> [--session S] [--label H12 ...]
 python3 board_asks.py digest --root <board> --session S
 ```
 
@@ -1005,6 +1006,21 @@ python3 board_asks.py digest --root <board> --session S
   settles a guess from words the agent copies. A guess whose candidates were all answered or withdrawn elsewhere stops
   nothing. The messages name only the ways the code takes: they are built from the same words the selftest tries one
   by one.
+- <a id="grouped-owner-asks"></a>**Confirming several answers at once**. Put `--groupable` on an internal `choice`
+  or a preparatory `policy` when it has a recommended answer and carries no separate approval. A reword requires its
+  own `--groupable`. The hook excludes outbound actions, payments and commitments, protected changes and permission
+  requests. Older asks without the field still use their individual answer routes.
+  Show the complete `list --open --block --session <this session>` output for the selected asks as one reply. A short
+  collective answer such as 「全部おすすめで」 to this list starts a guess. An existing guess can carry its displayed
+  scope forward. A count such as 「両方」 must match that scope, and an answer for the whole list keeps all its items.
+  `group-reading` prints the exact one-line reading with each question and recommendation. For a guess whose answer
+  gave no whole-list scope, `--label` selects the intended candidate questions. The owner sees the one line as its own
+  reply, with other approval text and controls on different turns. A subsequent short affirmative, including `yoi`,
+  settles that line. The hook checks the displayed revisions, open status, and the pending guess under the ledger lock
+  before appending one answer with the original words, confirmation, displayed reading and every bound label.
+  A changed revision or an ineligible item prevents the whole confirmation. `Stop` asks for all bound questions by
+  content in the first reporting line. Sending and recording or applying protected approvals require a separate owner
+  turn. The hook keeps those operations separate even after the grouped questions are settled.
 - **Asking without a label is sent back once**: a paragraph of the reply that asks the owner and carries no ask label
   is sent back, even beside a labelled one. The addendum says the question is now in the ledger and pastes the tool's
   block (an addendum cannot remove the earlier unlabelled list from the screen). Not counted: drafts in code blocks,

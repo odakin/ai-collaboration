@@ -425,8 +425,8 @@
       "name": "確かめの行が無くても、 候補が 1 つなら肯定で結ぶ (直す前)",
       "pairs": [
         [
-          "(not named and len(cands) == 1 and line)",
-          "(not named and len(cands) == 1)"
+          "(not named and len(original) == len(cands) == 1 and line)",
+          "(not named and len(original) == len(cands) == 1)"
         ]
       ],
       "expect_fail": [
@@ -486,8 +486,8 @@
       "name": "候補の印に「のこと」「の方」 だけが続く確かめを、 本人自身の答えとして記録する",
       "pairs": [
         [
-          "        if LABEL_ONLY_REST.fullmatch(rest) or is_confirm(",
-          "        if is_confirm("
+          "    return LABEL_ONLY_REST.fullmatch(rest) or is_confirm(",
+          "    return is_confirm("
         ]
       ],
       "expect_fail": [
@@ -680,6 +680,42 @@
       ],
       "expect_fail": [
         "「番号で答えていただけますか」 を差し戻す"
+      ]
+    },
+    {
+      "name": "まとめ確定のとき対象外の問いを除く検査を外す",
+      "pairs": [
+        [
+          " or not _groupable(a) or versions[lb] != _group_revision(a):",
+          " or versions[lb] != _group_revision(a):"
+        ]
+      ],
+      "expect_fail": [
+        "混在する一括指定から一部を黙って落とさない: outbound"
+      ]
+    },
+    {
+      "name": "まとめ確定のとき表示した問いの版との照合を外す",
+      "pairs": [
+        [
+          " or versions[lb] != _group_revision(a):",
+          ":"
+        ]
+      ],
+      "expect_fail": [
+        "読み合わせ後の版を台帳の書き込みロック内でも照合する"
+      ]
+    },
+    {
+      "name": "まとめた返事を別の承認に使える",
+      "pairs": [
+        [
+          "    if _group_turn_marker(session).is_file() and (what := approval_effect(tool, inp)):",
+          "    if False and (what := approval_effect(tool, inp)):"
+        ]
+      ],
+      "expect_fail": [
+        "まとめ確定の後は通常の作業を進め、保護承認と送信は別に確認する"
       ]
     }
   ]

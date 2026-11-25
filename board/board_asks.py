@@ -47,6 +47,10 @@ What it is:
   drops the guess (`dismissed`, the asks stay open); an answer by label or order is recorded after a `dismissed` for
   the guess, and a new guess keeps the earlier words (`earlier`). The ways are named in the messages from
   SETTLE_AFFIRM / SETTLE_DISMISS, and the selftest tries each one.
+- A grouped confirmation starts from the single complete displayed list. The agent may mark eligible internal
+  choices and preparatory policies with --groupable. group-reading prints the exact line the owner sees.
+  One reply can confirm all the items in that line. Their revisions and the pending answer are checked under
+  the ledger lock. Sending and protected approval still need a separate owner turn.
 - Every new ask says **what it is about** (`--about`: one sentence on where the matter came from = who, when, which
   case, in the owner's words: no file names, paths, flags, English identifiers, commit heads or labels) and may say
   **what changes** if the owner decides it (`--effect`); the block is composed in that order, then the question.
@@ -81,6 +85,7 @@ CLI:
                                    [--reading '<one line>'] [--recorded <path or repo@commit>]
     python3 board_asks.py withdraw --root <board> --label H12 --reason '<why>'
     python3 board_asks.py list     --root <board> [--open] [--session S] [--json]
+    python3 board_asks.py group-reading --root <board> [--label H12 ...] [--session S]
     python3 board_asks.py show     --root <board> --label H12
     python3 board_asks.py digest   --root <board> --session S [--max-chars 8000]
     python3 board_asks.py hook-prompt|hook-pretool|hook-stop|hook-precompact|hook-sessionstart --root <board>
@@ -275,6 +280,7 @@ def state(recs):
                 for k in ('recommend', 'about', 'effect', 'prior', 'prior_terms', 'prior_hits'):
                     if r.get(k):
                         a[k] = r[k]
+                a['groupable'] = r.get('groupable') is True
     return asks
 
 
@@ -792,6 +798,8 @@ def _decide(root, st, it, me):
             if prob:
                 return 'refused', {'status': 'refused', 'text': text, 'label': same['label'], 'message': prob}
             return 'reworded', {'status': 'reworded', 'label': same['label'], 'text': text, 'ground': same.get('ground', ''),
+                                'groupable': it.get('groupable') is True, 'evidence': same.get('evidence'),
+                                'denied': same.get('denied'), 'applied': same.get('applied'),
                                 'recommend': (it.get('recommend') or same.get('recommend') or '').strip()[:MAX_TEXT],
                                 'about': about, 'effect': (it.get('effect') or same.get('effect') or '').strip()[:MAX_TEXT],
                                 'prior': prior, 'prior_terms': terms,
@@ -845,6 +853,10 @@ def ask(root, items, *, session=None, agent='claude', project='', path=None, val
     for it in items:
         kind, payload = _decide(root, st0, it, me)
         if kind in ('ask', 'reworded'):
+            if payload.get('groupable') and not _groupable(payload):
+                refused = dict(payload, status='refused', message=GROUPABLE_HELP)
+                pre.append(('refused', refused, None, None))
+                continue
             nreason = (it.get('negation_reason') or '').strip()
             dok, dmsg, flagged = direction_gate(payload.get('text'), payload.get('recommend'), nreason, direction)
             if not dok:
@@ -884,11 +896,16 @@ def ask(root, items, *, session=None, agent='claude', project='', path=None, val
                 out.append(payload)
                 continue
             if kind == 'reworded':
+                if payload.get('groupable') and not _groupable(payload):
+                    out.append(dict(payload, status='refused', message=GROUPABLE_HELP))
+                    continue
                 new.append({'type': 'reword', 'label': payload['label'], 'text': payload['text'], 'recommend': payload['recommend'],
                             'about': payload.get('about', ''), 'effect': payload.get('effect', ''),
                             'prior': payload.get('prior', ''), 'prior_terms': payload.get('prior_terms') or [],
                             'prior_hits': payload.get('prior_hits'),
                             'reason': payload['reason'][:MAX_TEXT], 'session': me, 'created_at': now_iso()})
+                if payload.get('groupable'):
+                    new[-1]['groupable'] = True
                 if payload.get('negation_reason'):
                     new[-1]['negation_reason'] = payload['negation_reason']
                 new.append({'type': 'shown', 'labels': [payload['label']], 'session': me, 'created_at': now_iso()})
@@ -913,6 +930,8 @@ def ask(root, items, *, session=None, agent='claude', project='', path=None, val
                            prior_hits=payload.get('prior_hits'), prior_weighty=payload.get('prior_weighty'))
             if payload.get('negation_reason'):
                 rec['negation_reason'] = payload['negation_reason']
+            if payload.get('groupable'):
+                rec['groupable'] = True
             new.append(rec)
             out.append({'status': 'made', 'label': label, 'text': rec['text'], 'recommend': rec['recommend'], 'message': msg,
                         'ground': rec['ground'], 'about': rec['about'], 'effect': rec['effect'], 'prior': rec.get('prior', ''),
@@ -947,8 +966,12 @@ def format_block(results):
     return '\n'.join(lines)
 
 
+class StaleGroup(ValueError):
+    pass
+
+
 def answer(root, labels, quote, binding, *, reading='', recorded='', session=None, candidates=None, path=None,
-           from_hook=False, defer=False, confirm='', earlier=None):
+           from_hook=False, defer=False, confirm='', earlier=None, group=None, expected_guess=None):
     """Record an answer. A settling answer while this session has a pending guess comes only from the binding hook
     (the owner's words); a hand-written one is refused. `dismissed` (the guess is dropped, its asks stay open: the
     guessed words were not an answer, or the owner answered otherwise) comes only from the hook. `confirm` = the owner's
@@ -971,8 +994,16 @@ def answer(root, labels, quote, binding, *, reading='', recorded='', session=Non
         if binding in SETTLED and not from_hook and pending_guess(recs, me, st):
             raise ValueError('結び先の決まらない本人の答えがある間は、 確定の記録は本人の次の発言 (hook) だけが書く。'
                              ' 本人に「〜と読みました。よいですか」 と確かめる')
+        if expected_guess is not None:
+            pending = pending_guess(recs, me, st)
+            if (pending != expected_guess or not from_hook or binding != 'confirmed'
+                    or not reading or reading != _group_reading(pending, st, labels)):
+                raise StaleGroup(GROUP_CHANGED)
+        if group is not None and (not from_hook or binding != 'guess'):
+            raise ValueError('まとめ確認の候補は本人の発言 (hook) だけが書く')
         rec = {'type': 'answer', 'labels': list(labels) if binding not in ('guess', 'dismissed') else [],
-               'quote': (quote or '')[:MAX_QUOTE], 'binding': binding, 'reading': (reading or '')[:MAX_TEXT],
+               'quote': (quote or '')[:MAX_QUOTE], 'binding': binding,
+               'reading': (reading or '') if expected_guess is not None else (reading or '')[:MAX_TEXT],
                'recorded': recorded, 'candidates': list(candidates or []), 'session': me, 'created_at': now_iso()}
         if confirm:
             rec['confirm'] = confirm[:MAX_QUOTE]
@@ -980,13 +1011,17 @@ def answer(root, labels, quote, binding, *, reading='', recorded='', session=Non
             rec['earlier'] = [(e or '')[:MAX_QUOTE] for e in earlier][-5:]
         if defer:
             rec['defer'] = True
+        if group is not None:
+            rec['group'] = group
+        marker = guess_marker(me)
+        if binding == 'guess':
+            marker.write_text(rec['created_at'])
+        if expected_guess is not None:
+            _group_turn_marker(me).write_text(json.dumps([_key('prompt', confirm), _key('reading', reading)]))
         _append(p, [rec])
-    marker = guess_marker(me)
-    if binding == 'guess':
-        marker.write_text(rec['created_at'])
-    else:
-        with contextlib.suppress(FileNotFoundError):
-            marker.unlink()
+        if binding != 'guess':
+            with contextlib.suppress(FileNotFoundError):
+                marker.unlink()
     return rec
 
 
@@ -1015,9 +1050,8 @@ def mark_shown(root, labels, *, session=None, path=None):
 
 # ---------- binding the owner's words ----------
 
-ALL_WORDS = ('全部', 'ぜんぶ', 'すべて', '全て', '両方', 'どれも', 'いずれも')
 AFFIRM_ONLY = re.compile(r'^\s*(はい|うん|ok|okay|おけ|いいよ|いいです|よし|了解|それで(いい|よい|ok)?|おすすめ(で|どおり)?|推しで|'
-                         r'(全部|ぜんぶ|すべて|両方)(おすすめ|推し)?で?(いい|ok)?|送って|進めて|当てて|入れて)'
+                         r'送って|進めて|当てて|入れて)'
                          r'\s*(で|です|ね|よ|。|！|!|、|お願い(します)?|ください)*\s*$', re.I)
 # Confirming a reading the agent stated (only while a guess is pending; an answer to an ask still needs AFFIRM_ONLY:
 # "そうですね" also opens a hesitation, measured in review as closing a single shown ask). A few words in a row and on
@@ -1066,10 +1100,29 @@ SETTLE_HOW = (' 本人の短い肯定 (' + ''.join(f'「{w}」' for w in SETTLE_
 DEFER_RE = re.compile(r'後で|あとで|保留|待って|考える|考えさせて|まだ決め|検討する|今度')
 ORDINAL_RE = re.compile(r'^\s*([0-9]{1,2}|[①-⑳])')
 POSITION_RE = re.compile(r'^\s*(上の|下の|前者|後者|最初の|最後の|[一二三四五1-9]つ目|[1-9]番目)')
-QTY_ALL_RE = re.compile(r'^\s*[0-9]{1,2}\s*(つ|通|か所|箇所|点|件|本|個)\s*(とも|全部|ぜんぶ|すべて)')
 QTY_RE = re.compile(r'^\s*[0-9]{1,2}\s*(つ|通|か所|箇所|点|件|本|個|人|回|日|時|分|月|年|週|枚|頁|行|章|節|円|%)')
 NOT_ORDINAL_AFTER = re.compile(r'^[0-9]{1,2}\s*([/:]|[.][0-9])')
 CIRCLED = ''.join(chr(0x2460 + i) for i in range(20))   # circled digits one to twenty
+
+# The group grammar reads the whole message. An action word by itself cannot confirm a reading.
+GROUP_ALL = re.compile(
+    r'(?:(?P<count>[1-9][0-9]?)\s*(?:つ|通|か所|箇所|点|件|本|個)\s*(?:とも|全部|ぜんぶ|すべて)'
+    r'|(?P<pair>両方)|全部|ぜんぶ|すべて|全て|どれも|いずれも)'
+    r'\s*(?:(?:おすすめ|推し)(?:どおり)?\s*|案どおり\s*)?(?:で\s*)?(?:(?:進めて|当てて)\s*)?'
+    r'(?:いい(?:です)?|よい(?:です)?|良い(?:です)?|よし|ok)?[。.!！]*', re.I)
+GROUP_INTENT = re.compile(r'(?:それで|おすすめで?|推しで|当てて|進めて)[。.!！]*')
+GROUP_AFFIRM = re.compile(
+    r'(?:はい|うん|okay?|おけ|いい(?:です|よ)|よい(?:です)?|良い(?:です)?|よし|了解|合って(?:る|ます)|その(?:通り|とおり))'
+    r'[\s、,.。！!]*(?:(?:お願いします|進めて(?:ください)?)[\s、,.。！!]*)?', re.I)
+GROUP_LATIN_AFFIRM = re.compile(r'yoi[。.!！]*', re.I)
+
+
+def _whole_count(text):
+    """None for other messages, 0 for 'all', or the explicitly stated group size."""
+    match = GROUP_ALL.fullmatch(unicodedata.normalize('NFKC', text or '').strip())
+    if match:
+        return 2 if match.group('pair') else int(match.group('count') or 0)
+    return None
 
 
 def _ordinals(text, n):
@@ -1115,6 +1168,8 @@ def bind(text, shown_now, shown_prev, open_labels, other_numbered_now=False, kno
             if lb in open_set and lb in knownset and lb not in into:
                 into.append(lb)
     first = t.strip().splitlines()[0] if t.strip() else ''
+    if len(named) > 1 and _label_confirmation(t):
+        return {'binding': 'guess', 'labels': [], 'candidates': named, 'defer': False}
     if named:
         return {'binding': 'label', 'labels': named, 'candidates': [], 'defer': bool(DEFER_RE.search(first))}
     t = '\n'.join(ln for ln in t.strip().splitlines() if not QUERY_LINE.search(ln))   # asking back is not answering
@@ -1122,7 +1177,8 @@ def bind(text, shown_now, shown_prev, open_labels, other_numbered_now=False, kno
     defer = bool(DEFER_RE.search(first))
     now = [lb for lb in shown_now if lb in open_set]
     prev = [lb for lb in shown_prev if lb in open_set and lb not in now]
-    wants_all = bool(QTY_ALL_RE.match(first)) or (any(w in first for w in ALL_WORDS) and bool(AFFIRM_ONLY.match(first)))
+    whole = _whole_count(text)
+    wants_all = whole is not None
     nums = _ordinals(t, len(now))
     positional = bool(POSITION_RE.match(first))
     affirm = bool(AFFIRM_ONLY.match(first))
@@ -1135,7 +1191,7 @@ def bind(text, shown_now, shown_prev, open_labels, other_numbered_now=False, kno
     safe = bool(now) and not other_numbered_now and not prev and not positional
     if safe and nums and max(nums) <= len(now):
         return {'binding': 'order', 'labels': [now[k - 1] for k in nums], 'candidates': [], 'defer': defer}
-    if safe and not nums and (wants_all or (affirm and len(now) == 1)):
+    if safe and not nums and len(now) == 1 and (affirm or whole in (0, 1)):
         return {'binding': 'order', 'labels': list(now), 'candidates': [], 'defer': defer}
     return {'binding': 'guess', 'labels': [], 'candidates': now + prev, 'defer': False}
 
@@ -1188,7 +1244,7 @@ def _texts(rec):
     return None, []
 
 
-def windows(transcript, tail_bytes=4 << 20):
+def windows(transcript, tail_bytes=4 << 20, *, include_controls=False):
     """(latest window, previous window) of assistant text, split at the owner's messages (read from the file's tail)."""
     rows = []
     try:
@@ -1205,6 +1261,15 @@ def windows(transcript, tail_bytes=4 << 20):
             if not isinstance(rec, dict) or rec.get('isSidechain'):
                 continue
             role, texts = _texts(rec)
+            if include_controls and role == 'assistant':
+                content = (rec.get('message') or {}).get('content')
+                if isinstance(content, list) and any(
+                        isinstance(b, dict) and b.get('type') == 'tool_use'
+                        and str(b.get('name', '')).casefold().endswith(
+                            ('wrap_up', 'askuserquestion', 'ask_user_question', 'send_user_message_question',
+                             'request_user_input', 'request_user_input_async', 'request_permissions'))
+                        for b in content):
+                    texts.append('[owner-asks: visible question or approval control]')
             for tx in texts:
                 if role == 'user' and (not tx.strip() or tx.lstrip().startswith(NOT_HUMAN)):
                     continue
@@ -1245,7 +1310,7 @@ EFFECT_PATH_DEFAULT = [r'/todo/[^/]+\.ya?ml$', r'(^|/)DESIGN\.md$', r'rulings\.m
 BOARD_CMDS = ('accept', 'request', 'revise', 'handover', 'claim', 'submit', 'note', 'show', 'inbox', 'watch', 'touch',
               'touching', 'untouch', 'release', 'blocker', 'update', 'finding', 'abandoned', 'launch', 'pickup', 'init', 'boards')
 BOARD_EFFECT_CMDS = ('accept', 'request', 'revise', 'handover')
-ASKS_FREE_CMDS = ('ask', 'list', 'show', 'digest')
+ASKS_FREE_CMDS = ('ask', 'list', 'show', 'digest', 'group-reading')
 
 
 def _segments(cmd):
@@ -1303,6 +1368,26 @@ def effect(tool, inp):
     return None
 
 
+def approval_effect(tool, inp):
+    """Operations that need their own authority after a grouped decision."""
+    if re.search(r'__(?:send_email|send_message|post_message|publish)$', tool):
+        return tool
+    if tool != 'Bash':
+        return None
+    for segment in _segments((inp or {}).get('command')):
+        tokens = _tokens(segment)
+        if any(_subcommand(tokens, script) in ('approve', 'apply')
+               for script in ('agent-rule-guard.py', 'manuscript-claim-guard.py')):
+            return '保護された変更の承認の記録・適用'
+        if _subcommand(tokens, 'board.py') == 'approve-edit':
+            return '掲示板の変更承認'
+        if re.search(r'(?:send_mail|send-inline-image-mail|send-announce|discord-post)\.py\b[^\n]*\s--send(?:\s|$)', segment):
+            return '外への送信'
+        if _subcommand(tokens, 'codex-mail.py') == 'send' and '--dry-run' not in tokens:
+            return '外への送信'
+    return None
+
+
 ASK_RE = re.compile(r'決めてほしい|決めてください|答えてください|教えてください|してよいですか|でよいですか|よいですか|いいですか|どうしますか|はい\s*[/／]\s*直す|ご判断')
 # An asking phrase that does not ask the owner here (each measured in a send-back of the Stop check):
 # reported words ("worker が決めてほしいと言った細かい 4 つは、 検収で決まり…"),
@@ -1357,6 +1442,27 @@ def _state_file(session):
 def guess_marker(session):
     """A file that exists while this session's latest answer is a guess: a hook can test it before starting Python."""
     return _state_dir() / f'{_safe(session)}.guess'
+
+
+def _group_turn_marker(session):
+    return _state_dir() / f'{_safe(session)}.group-answer'
+
+
+def _advance_group_turn(session, prompt, reply):
+    marker = _group_turn_marker(session)
+    # An answer to a displayed group line must stay separate from an approval even if another
+    # window already closed every candidate while this reply was visible.
+    text = unicodedata.normalize('NFKC', prompt).strip()
+    if (GROUP_AFFIRM.fullmatch(text) or GROUP_LATIN_AFFIRM.fullmatch(text) or _whole_count(text) is not None):
+        if any(line.startswith(GROUP_PREFIX) and line.endswith(GROUP_SUFFIX) for line in reply.splitlines()):
+            marker.write_text(json.dumps([_key('prompt', prompt), _key('reading', reply.strip())]))
+            return
+    if not marker.exists():
+        return
+    with contextlib.suppress(FileNotFoundError, ValueError):
+        prompt_key, reading_key = json.loads(marker.read_text())
+        if prompt_key != _key('prompt', prompt) or (reply.strip() and reading_key != _key('reading', reply.strip())):
+            marker.unlink()
 
 
 def _bound_file(session):
@@ -1547,6 +1653,123 @@ def label_usage(text, labels, heads):
     return uniq
 
 
+GROUPABLE_HELP = ('--groupable は内向きの choice か政策・作業方針の検討の policy で、 おすすめがあり、'
+                  ' 送信・公開・支払い・候補の適用・道具の許可など別の承認を兼ねない問いだけに使える。')
+GROUP_CHANGED = 'まとめ確認の問いか推す答えが変わった。 いま開いている問いを改めて示す。'
+GROUP_PREFIX = 'まとめ確認 — '
+GROUP_SUFFIX = '。以上をこの案で進めると読みました。よいですか'
+GROUP_HELP = ('まとめるなら、 掲示板の問いとおすすめをそのまま使う。'
+              ' board_asks.py group-reading (--label で対象を選べる) の一行だけを本人に見せ、'
+              '「はい」「よい」「yoi」 のいずれかで確かめる。 別の承認の表示・問い・箱は別の返事で扱う。')
+GROUP_LIMIT = 3000
+GROUP_ITEM_LABEL = re.compile(r' \(([A-Z]\d{1,5})\)」')
+GROUP_BLOCKED_WORDS = re.compile(
+    r'送(?:信|る|って|付)|発送|公開|投稿|支払|決済|振込|承認|認可|権限|保護|設定|規則|添付|返信|メール|連絡|約束|'
+    r'フック|道具の許可|@|[¥$€]\s*\d|\d\s*(?:円|万円|ドル)|'
+    r'\b(?:send|sending|email|mail|publish|publication|post|pay|payment|approve|approval|permission|'
+    r'protected|guard|hook|config|settings|sha-?256)\b', re.I)
+
+
+def _groupable(ask):
+    if (ask.get('groupable') is not True or ask.get('ground') not in ('choice', 'policy')
+            or not (ask.get('recommend') or '').strip()
+            or any(ask.get(key) for key in ('evidence', 'denied', 'applied'))):
+        return False
+    text = unicodedata.normalize('NFKC', '\n'.join(
+        ask.get(key) or '' for key in ('about', 'effect', 'text', 'recommend', 'prior')))
+    return not (GROUP_BLOCKED_WORDS.search(text) or _FILE_TOKEN.search(text.lower()) or _HEAD_TOKEN.search(text.lower()))
+
+
+def _group_revision(ask):
+    # Include the reword history so changing something and then putting it back still invalidates the display.
+    payload = {key: val for key, val in ask.items() if key != 'answers'}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def _group_display(reply, previous, st, session):
+    """The single complete output of list --open --block, visible as the latest assistant reply."""
+    labels = labels_in(reply)
+    others = set(labels_in(prose_only(previous))) - set(labels)
+    if not labels or any(st.get(lb, {}).get('status') == 'open' for lb in others):
+        return []
+    rows = [st.get(lb, {}) for lb in labels]
+    if any(a.get('status') != 'open' or not _same_session(a.get('session'), session) for a in rows):
+        return []
+    displayed = format_block([dict(a, status='made', message='') for a in rows])
+    return labels if reply.strip() == displayed.strip() else []
+
+
+def _group_reading(guess, st, labels):
+    if not guess or not labels or len(set(labels)) != len(labels):
+        return ''
+    group = guess.get('group') or {}
+    versions = group.get('versions') or {}
+    if group.get('whole') and (set(labels) != set(versions) or group.get('count') not in (0, len(labels))):
+        return ''
+    if any(lb not in versions or lb not in (guess.get('candidates') or []) for lb in labels):
+        return ''
+    pieces = []
+    for lb in labels:
+        a = st.get(lb, {})
+        if a.get('status') != 'open' or not _groupable(a) or versions[lb] != _group_revision(a):
+            return ''
+        question, recommendation = (' '.join(a[key].split()) for key in ('text', 'recommend'))
+        pieces.append(f'「{question} → {recommendation} ({lb})」')
+    line = GROUP_PREFIX + '、'.join(pieces) + GROUP_SUFFIX
+    if len(line) <= GROUP_LIMIT and GROUP_ITEM_LABEL.findall(line) == list(labels):
+        return line
+    return ''
+
+
+def _label_confirmation(text):
+    rest = LABEL_RE.sub(' ', text)
+    return LABEL_ONLY_REST.fullmatch(rest) or is_confirm(re.sub(r'^[\sではがを、。,]*', '', rest))
+
+
+def _group_prompt(prompt, w0, w1, res, guess, st, session):
+    """A grouped result and its displayed reading, or None to use the ordinary single-question path."""
+    t = unicodedata.normalize('NFKC', prompt).strip()
+    group = (guess or {}).get('group') or {}
+    whole = _whole_count(t)
+    affirmed = GROUP_AFFIRM.fullmatch(t) or GROUP_LATIN_AFFIRM.fullmatch(t)
+    reply = w0.strip()
+    repeated = group.get('whole') and t == unicodedata.normalize('NFKC', guess['quote']).strip()
+    if group and (affirmed or repeated):
+        labels = GROUP_ITEM_LABEL.findall(reply)
+        if reply.startswith(GROUP_PREFIX) and reply == _group_reading(guess, st, labels):
+            return dict(binding='confirmed', labels=labels, candidates=[], defer=False), reply, ''
+        if group.get('whole') or GROUP_PREFIX in reply or GROUP_LATIN_AFFIRM.fullmatch(t):
+            return None, '', GROUP_CHANGED if GROUP_PREFIX in reply else GROUP_HELP
+    # A command such as "send" or a mixed assent cannot use the old one-question fallback on a group line.
+    if (group and (GROUP_PREFIX in reply or group.get('whole')) and is_confirm(t)
+            and (not GROUP_INTENT.fullmatch(t) or res['binding'] != 'guess')):
+        return None, '', GROUP_HELP
+    if whole is None and not (res['binding'] == 'guess' and GROUP_INTENT.fullmatch(t)):
+        return None, '', ''
+    if res['binding'] == 'order' and not guess:
+        return None, '', ''  # ordinary answer to a single displayed question
+
+    visible = _group_display(w0, w1, st, session)
+    versions = {lb: _group_revision(st[lb]) for lb in visible}
+    if whole is not None and not visible and group.get('versions'):
+        prev_versions = group['versions']
+        if not set(bare_labels(reply, st)) - set(prev_versions):
+            versions = prev_versions
+    candidates = list(versions) or res['candidates'] or (guess or {}).get('candidates') or []
+    if not candidates:
+        return None, '', ''
+    if whole is None and not versions:
+        if len(candidates) != 1 or candidates[0] not in labels_in(prose_only(w0)):
+            return None, '', ''
+        a = st[candidates[0]]
+        if not _same_session(a.get('session'), session):
+            return None, '', ''
+        versions = {candidates[0]: _group_revision(a)}
+    scope = {'versions': versions, 'whole': whole is not None, 'count': whole}
+    earlier = ((guess.get('earlier') or []) + [guess['quote']]) if guess else []
+    return dict(binding='guess', labels=[], candidates=candidates, defer=False, group=scope, earlier=earlier), '', ''
+
+
 def _confirm_line(w0, cands):
     """The agent's confirming line in its latest reply and the candidates it names. Ask blocks shown again
     (〔問 H12〕) are questions, not readings, and are skipped. The confirming line is a line that says what it read
@@ -1572,7 +1795,8 @@ def _settle(g, res, prompt, w0, open_labels):
     label or order, a new guess, or nothing); why = what to tell the agent when the words settle nothing ('' when
     there is nothing to say); drop = the owner answered otherwise (by label or order): the guess is dropped on the
     record before that answer is recorded, and the agent is told."""
-    cands = [lb for lb in (g.get('candidates') or []) if lb in open_labels]
+    original = g.get('candidates') or []
+    cands = [lb for lb in original if lb in open_labels]
     t = unicodedata.normalize('NFKC', prompt or '').strip()
     first = t.splitlines()[0] if t else ''
     answered = res['binding'] in ('label', 'order')
@@ -1581,9 +1805,10 @@ def _settle(g, res, prompt, w0, open_labels):
             return res, '', True   # "前のは答えじゃない。 H26 は延ばさない": drop the guess, record the answer
         return {'binding': 'dismissed', 'labels': [], 'candidates': cands, 'defer': False}, '', False
     if res['binding'] == 'label' and set(res['labels']) & set(cands):
-        rest = LABEL_RE.sub(' ', t)
         # "H34 です" / "H34 のこと" / "H34 の方" / "H34 で合ってる" only say which one: they confirm the reading
-        if LABEL_ONLY_REST.fullmatch(rest) or is_confirm(re.sub(r'^[\sではがを、。,]*', '', rest)):
+        if _label_confirmation(t):
+            if len(res['labels']) != 1 or (g.get('group') or {}).get('whole'):
+                return dict(binding='none', labels=[], candidates=[], defer=False), GROUP_HELP, False
             return dict(res, binding='confirmed'), '', False
         return res, '', True   # "H34 は延ばさない" is the owner's own answer: it replaces the guess
     if not is_confirm(t):
@@ -1592,8 +1817,8 @@ def _settle(g, res, prompt, w0, open_labels):
         if res['binding'] == 'guess':
             return dict(res, earlier=(g.get('earlier') or []) + [g.get('quote') or '']), '', False
         return res, '本人の今の発言は、 確かめへの答え (短い肯定か、 答えではないという語) に読めなかった。', False
-    line, named = _confirm_line(w0, cands)
-    if len(named) == 1 or (not named and len(cands) == 1 and line):
+    line, named = _confirm_line(w0, original)
+    if (len(named) == 1 and named[0] in cands) or (not named and len(original) == len(cands) == 1 and line):
         if NOT_ANSWER_READ.search(unquoted(line)):
             return {'binding': 'dismissed', 'labels': [], 'candidates': cands, 'defer': False}, '', False
         return {'binding': 'confirmed', 'labels': named or cands, 'candidates': [], 'defer': False}, '', False
@@ -1614,17 +1839,27 @@ def hook_prompt(root, data, path=None):
     p = Path(path) if path else ledger_path(root)
     prefix(p)   # keep the configured letter next to the ledger for hand-run asks
     recs = load(p)
+    w0, w1 = windows(data.get('transcript_path') or '', include_controls=True)
+    _advance_group_turn(session, prompt, w0)
     st = state(recs)
     open_labels = [lb for lb, a in st.items() if a['status'] == 'open']
     if not open_labels:
         return None
-    w0, w1 = windows(data.get('transcript_path') or '')
     known = shown_by(recs, session)
     now, prev = labels_in(w0), labels_in(w1)
     g = pending_guess(recs, session, st)
     res = bind(prompt, now, prev, open_labels, numbered_outside_blocks(w0), known=known)
     quote, confirm, earlier, drop = prompt, '', [], False
-    if g:
+    grouped, reading, group_why = _group_prompt(prompt, w0, w1, res, g, st, session)
+    if group_why:
+        return f'🔒 board-asks: まとめ確認の答えはまだ結んでいない。 {group_why}'
+    if grouped:
+        res = grouped
+        if reading:
+            quote, confirm, earlier = g['quote'], prompt, g.get('earlier') or []
+        else:
+            earlier = res.get('earlier') or []
+    elif g:
         res, why, drop = _settle(g, res, prompt, w0, open_labels)
         if res['binding'] in ('confirmed', 'dismissed'):
             quote, confirm = g.get('quote') or '', prompt   # the guessed words are the answer; these confirmed them
@@ -1644,17 +1879,31 @@ def hook_prompt(root, data, path=None):
                candidates=[lb for lb in (g.get('candidates') or []) if lb in open_labels], earlier=g.get('earlier'),
                reading='本人が印か並びで別に答えた')
         dropped = (f'推定「{(g.get("quote") or "")[:60]}」 は、 本人が別に答えたので捨てた (その候補の問いは開いたまま)。 ')
-    answer(root, res['labels'], quote, res['binding'], session=session, candidates=res['candidates'], path=p,
-           from_hook=True, defer=res.get('defer', False), confirm=confirm, earlier=earlier)
+    try:
+        pending = answer(root, res['labels'], quote, res['binding'], session=session, candidates=res['candidates'],
+                         path=p, from_hook=True, defer=res.get('defer', False), confirm=confirm, earlier=earlier,
+                         reading=reading, group=res.get('group'), expected_guess=g if reading else None)
+    except StaleGroup:
+        return f'board-asks: {GROUP_CHANGED}'
     if res['binding'] == 'dismissed':
         return (f'board-asks: 本人の語「{quote[:60]}」 は答えでないと確かめた。 推定を捨て、 止めを解いた'
                 ' (問いは開いたまま、 答えとしては記録していない)。 本人の頼み (問い返し・聞き直し) に答える')
     if res['binding'] == 'guess':
         heads = '; '.join(f"{st[lb]['text'][:40]} ({lb})" for lb in res['candidates'][:6])
         extra = ' 返事の中に問いの段のほかにも番号つきの見出し・一覧がある。' if numbered_outside_blocks(w0) else ''
+        scope = res.get('group')
+        if scope:
+            line = _group_reading(pending, st, res['candidates'])
+            how = GROUP_HELP
+            if scope['whole'] and not line:
+                how = ('まとめる範囲か、 まとめてよい問いを確かめられない。 '
+                       '問いの中身を示し直し、 個別に答える問いとまとめる問いを本人に分かるようにする。')
+        else:
+            line = ''
+            how = CONFIRM_HOW + SETTLE_HOW
         return (f'🔒 board-asks: 本人の答えの結び先が決まらない (候補: {heads}).{extra}'
                 ' 送る・決定を記録する・別の session に頼む・session を起こす・畳む操作は止まる。 返事の 1 行目で、 '
-                + CONFIRM_HOW + SETTLE_HOW + ' 読む・調べる・下書きは止めない')
+                + how + ' 読む・調べる・下書きは止めない' + (f'\n{line}' if line else ''))
     heads = '; '.join(f"{st[lb]['text'][:40]} ({lb})" for lb in res['labels'])
     with contextlib.suppress(OSError):
         _bound_file(session).write_text(json.dumps(res['labels']))
@@ -1672,18 +1921,27 @@ def hook_prompt(root, data, path=None):
 def hook_pretool(root, data, path=None):
     """PreToolUse: while this session's latest answer is an open guess, stop effective actions. A deny reason or None."""
     session = data.get('session_id') or _me(None)
-    recs = load(Path(path) if path else ledger_path(root))
+    tool, inp = data.get('tool_name') or '', data.get('tool_input') or {}
+    if _group_turn_marker(session).is_file() and (what := approval_effect(tool, inp)):
+        return (f'🔒 board-asks: まとめ確認への答えを別の承認に使えないため、 {what} は止めた。 '
+                '送る内容や保護された候補を別の返事で示し、その承認を受ける。')
+    p = Path(path) if path else ledger_path(root)
+    recs = load(p)
     g = pending_guess(recs, session)
     if not g:
-        with contextlib.suppress(FileNotFoundError):
-            guess_marker(session).unlink()   # settled elsewhere: let the entry stop starting Python
-        return None
-    eff = effect(data.get('tool_name') or '', data.get('tool_input') or {})
+        with _locked(p):
+            g = pending_guess(load(p), session)
+            if not g:
+                with contextlib.suppress(FileNotFoundError):
+                    guess_marker(session).unlink()   # settled elsewhere: let the entry stop starting Python
+                return None
+    eff = (approval_effect(tool, inp) if g.get('group') else None) or effect(tool, inp)
     if not eff:
         return None
     c = ', '.join(g.get('candidates') or [])
+    advice = GROUP_HELP if g.get('group') else CONFIRM_HOW + SETTLE_HOW
     return (f'🔒 board-asks: 本人の答え「{(g.get("quote") or "")[:60]}」 の結び先が決まっていない (候補 {c}) ので、 {eff} は止めた。'
-            ' 先に返事の 1 行目で、 ' + CONFIRM_HOW + SETTLE_HOW)
+            ' 先に返事の 1 行目で、 ' + advice)
 
 
 def _first_line(text):
@@ -1784,14 +2042,22 @@ def hook_stop(root, data, path=None):
     seen = _seen(sf)
     new = []
     msgs = []
-    if bound and not data.get('stop_hook_active') and not bare_labels(_first_line(w0), bound):
+    recs = load(p)
+    st = state(recs)
+    first_line = _first_line(w0)
+    named = bare_labels(first_line, bound)
+    missing_content = []
+    if len(bound) > 1:
+        for lb in bound:
+            question = ' '.join(st.get(lb, {}).get('text', '').split())
+            if not question or (question not in first_line and not (_content_words(question) & _content_words(first_line))):
+                missing_content.append(lb)
+    if bound and not data.get('stop_hook_active') and (set(named) != set(bound) or missing_content):
         k = _key('bound', ','.join(bound) + _first_line(w0))
         if k not in seen:
             new.append(k)
             msgs.append(f'返事の 1 行目に、 本人の答えを結んだ問いの中身と、 その後ろに印 ({", ".join(bound)}) を書いていない'
                         ' (例: 「〈問いの中身〉 (H12) への答えと読みました」)')
-    recs = load(p)
-    st = state(recs)
     known = [lb for lb in shown_by(recs, session) if lb in st] + [lb for lb in labels if lb in st]
     g = pending_guess(recs, session, st)
     allowed = set(known) | set((g or {}).get('candidates') or [])
@@ -1911,7 +2177,7 @@ def _print(obj):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description='questions to the board owner and the owner answers (CONTRACT.md#owner-asks)')
-    ap.add_argument('cmd', nargs='?', choices=['ask', 'answer', 'withdraw', 'list', 'show', 'digest', 'hook-prompt',
+    ap.add_argument('cmd', nargs='?', choices=['ask', 'answer', 'withdraw', 'list', 'show', 'digest', 'group-reading', 'hook-prompt',
                                                'hook-pretool', 'hook-stop', 'hook-precompact', 'hook-sessionstart'])
     ap.add_argument('--root', default='.')
     ap.add_argument('--session')
@@ -1932,6 +2198,7 @@ def main(argv=None):
     ap.add_argument('--prior-term', action='append', default=[],
                     help='前の記録を引いた主題の語 (複数可、 全部の問いに共通)。 掲示板が名指す検索をこの語で回す')
     ap.add_argument('--applied', action='store_true')
+    ap.add_argument('--groupable', action='store_true', help=GROUPABLE_HELP)
     ap.add_argument('--reask', default='', help='同じ問いに本人の答えが既にあっても問い直す理由 (何が変わったか)')
     ap.add_argument('--reword', default='', help='開いた問いを同じ印のまま言い直す (同じ key、 何を変えたか)')
     ap.add_argument('--denied', default='', help='その変更を書く時の守りが止めた理由 (判定の道具が「要らない」 と言っても立てる)')
@@ -1972,7 +2239,7 @@ def main(argv=None):
                       'evidence': (a.evidence[i] if len(a.evidence) == n else (a.evidence[0] if a.evidence else '')),
                       'about': a.about[i] if a.about else '', 'effect': a.effect[i] if a.effect else '',
                       'prior': a.prior[i] if a.prior else '', 'prior_terms': a.prior_term,
-                      'applied': a.applied, 'reask': a.reask, 'denied': a.denied, 'reword': a.reword,
+                      'applied': a.applied, 'groupable': a.groupable, 'reask': a.reask, 'denied': a.denied, 'reword': a.reword,
                       'not_from_review': a.not_from_review, 'negation_reason': a.negation_reason}
                      for i, t in enumerate(a.text)]
             res = ask(a.root, items, session=a.session, agent=a.agent, project=a.project)
@@ -2020,6 +2287,15 @@ def main(argv=None):
         if a.cmd == 'digest':
             print(digest(a.root, _me(a.session), a.max_chars))
             return 0
+        if a.cmd == 'group-reading':
+            recs = load(ledger_path(a.root))
+            st = state(recs)
+            guess = pending_guess(recs, _me(a.session), st)
+            line = _group_reading(guess, st, a.label or (guess or {}).get('candidates') or [])
+            if not line:
+                raise ValueError('選んだ問いはまとめて確かめられない。 ' + GROUP_CHANGED)
+            print(line)
+            return 0
         data = json.loads(sys.stdin.read() or '{}')
         if a.cmd == 'hook-prompt':
             msg = hook_prompt(a.root, data)
@@ -2050,6 +2326,183 @@ def main(argv=None):
 
 
 # ---------- selftest ----------
+
+def _group_selftest(check):
+    def fixture(path, count=3, change=None):
+        path.mkdir()
+        ledger, transcript = path / 'asks.jsonl', path / 'turns.jsonl'
+        os.environ['BOARD_ASKS_STATE_DIR'] = str(path / 'state')
+        session = 'group-test'
+        labels = [f'Q{i + 1}' for i in range(count)]
+        questions = ('資料を日付順に並べるか', '見出しを短くするか', '別表を一枚にまとめるか')
+        items = [dict(type='ask', label=lb, text=question, recommend='その案で進める',
+                      ground='choice', groupable=True, session=session)
+                 for lb, question in zip(labels, questions)]
+        if change:
+            items[-1].update(change)
+        _append(ledger, items)
+        args = {'session_id': session, 'transcript_path': str(transcript)}
+
+        def message(role, words):
+            _append(transcript, [{'type': role, 'message': {'role': role, 'content': words}}])
+
+        def records():
+            return load(ledger)
+
+        def prompt(text):
+            out = hook_prompt(path, dict(args, prompt=text), path=ledger)
+            message('user', text)
+            return out or ''
+
+        def guess():
+            return pending_guess(records(), session)
+
+        def reading(selected=None):
+            return _group_reading(guess(), state(records()), selected or labels)
+
+        def deny(tool='SendMessage', **tool_input):
+            return hook_pretool(path, dict(args, tool_name=tool, tool_input=tool_input), path=ledger)
+
+        message('user', '問いを見せて')
+        shown = format_block([dict(item, status='made') for item in items])
+        return labels, shown, ledger, message, prompt, records, guess, reading, deny, args
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        labels, shown, led, msg, prompt, records, guess, reading, deny, args = fixture(root / 'main')
+        msg('assistant', shown)
+        prompt('それで')
+        check(bool(deny()) and bool(reading()), 'まとめ確認前は三問を候補に残し、操作を止める')
+        msg('assistant', reading())
+        prompt('全部おすすめでいい')
+        text = reading()
+        check(bool(text) and guess()['earlier'] == ['それで'], '全部の答えを元の推定から更新する')
+        check(not reading(labels[:2]), '全部の答えでは対象の一部だけを選べない')
+        try:
+            answer(root, labels, 'はい', 'confirmed', session=args['session_id'], path=led)
+        except ValueError:
+            cli_denied = True
+        else:
+            cli_denied = False
+        check(cli_denied, '手入力 CLI から未確定のまとめ答えを確定できない')
+        msg('assistant', text)
+        result = prompt('はい。お願いします。')
+        final = records()[-1]
+        check(final.get('labels') == labels and final.get('confirm') == 'はい。お願いします。'
+              and final.get('quote') == '全部おすすめでいい' and final.get('reading') == text
+              and all(lb in result for lb in labels), '一行の確かめで答え、確認、読み、全件を一度に記録する')
+        guarded = 'python3 /synthetic/agent-rule-guard.py approve --latest'
+        check(not deny() and deny('Bash', command=guarded) and deny('mcp__gmail-test__send_email'),
+              'まとめ確定の後は通常の作業を進め、保護承認と送信は別に確認する')
+        msg('assistant', '資料を日付順に並べるか (Q1) の答えを記録しました。')
+        check('Q2' in (hook_stop(root, args, path=led) or ''), 'Stop は確定した問いを一部だけ言った返事を差し戻す')
+        msg('assistant', '今回の作業をまとめました。')
+        prompt('次の案を見せて')
+        check(not deny('Bash', command=guarded), '別の本人入力が来れば次の承認への引き継ぎを妨げない')
+
+        negatives = [
+            ('quoted', lambda line: '> ' + line, 'はい'),
+            ('code', lambda line: '~~~\n' + line + '\n~~~', 'はい'),
+            ('two-lines', lambda line: line + '\n' + line, 'はい'),
+            ('labels', lambda line: 'Q1、Q2、Q3 への答えと読みました。', 'はい'),
+            ('label-repeated', lambda line: line.replace('(Q2)', '(Q1)'), 'はい'),
+            ('approval', lambda line: line + '\n候補 sample.md の a3b4c5d6 を承認しますか', 'はい'),
+            ('question', lambda line: line, '全部でいい？'),
+            ('negation', lambda line: line, '全部ではない'),
+            ('defer', lambda line: line, 'よい、でも保留'),
+            ('ask-again', lambda line: line, 'yoi、でも二つ目は聞き直して'),
+            ('bare-command', lambda line: line, '進めて'),
+        ]
+        for name, edit, words in negatives:
+            _, shown, _, msg, prompt, records, guess, reading, deny, _ = fixture(root / name)
+            msg('assistant', shown)
+            prompt('全部おすすめで')
+            msg('assistant', edit(reading()))
+            prompt(words)
+            check(bool(guess()) and bool(deny()) and not any(r.get('binding') == 'confirmed' for r in records()),
+                  f'まとめ確認の範囲を広げない: {name}')
+
+        for count, displayed, acceptance in ((3, '全部おすすめで', 'ＹＯＩ！'), (2, '両方', 'はい'), (3, '全部おすすめで', '全部おすすめで')):
+            path = root / f'positive-{count}-{acceptance}'
+            labels, shown, _, msg, prompt, records, _, reading, _, _ = fixture(path, count)
+            msg('assistant', shown)
+            prompt(displayed)
+            msg('assistant', reading())
+            prompt(acceptance)
+            prompt(acceptance)
+            check(sum(r.get('binding') == 'confirmed' and r.get('labels') == labels for r in records()) == 1,
+                  f'まとめ答えの別表現・再送時の二重記録を防ぐ: {displayed} / {acceptance}')
+
+        for count, words in ((2, '三件とも'), (2, '3件とも'), (3, '両方')):
+            _, shown, _, msg, prompt, records, _, reading, _, _ = fixture(root / f'count-{words}', count)
+            msg('assistant', shown)
+            prompt(words)
+            check(not reading() and not any(r.get('labels') for r in records() if r.get('type') == 'answer'),
+                  f'答えにある件数を守る: {words}')
+
+        for name, unsafe in (
+                ('outbound', {'ground': 'outbound'}),
+                ('rule', {'ground': 'rule'}),
+                ('protected', {'ground': 'protected'}),
+                ('legacy', {'groupable': False}),
+                ('external-choice', {'recommend': '先方へ連絡する'}),
+                ('wrong-session', {'session': 'other-window'})):
+            labels, shown, _, msg, prompt, records, guess, reading, deny, _ = fixture(root / name, change=unsafe)
+            msg('assistant', shown)
+            prompt('全部おすすめで')
+            check(not reading() and not reading(labels[:2]), f'混在する一括指定から一部を黙って落とさない: {name}')
+            msg('assistant', 'Q1、Q2、Q3 への答えと読みました。')
+            prompt('はい')
+            check(bool(guess()) and bool(deny()) and not any(r.get('binding') == 'confirmed' for r in records()),
+                  f'別の承認の問いは閉じない: {name}')
+
+        labels, shown, led, msg, prompt, records, guess, reading, deny, _ = fixture(root / 'race')
+        msg('assistant', shown)
+        prompt('全部')
+        text = reading()
+        msg('assistant', text)
+        _append(led, [{'type': 'reword', 'label': labels[1], 'text': '見出しを残すか', 'groupable': True}])
+        prompt('はい')
+        check(bool(guess()) and bool(deny()) and not any(r.get('binding') == 'confirmed' for r in records()),
+              '表示後の言い直しで古い版へのまとめ確定を止める')
+        _append(led, [{'type': 'reword', 'label': labels[1], 'text': '見出しを短くするか', 'groupable': True}])
+        try:
+            answer(root, labels, guess()['quote'], 'confirmed', session='group-test', path=led, from_hook=True,
+                   reading=text, expected_guess=guess(), confirm='はい')
+        except StaleGroup:
+            saw_stale = True
+        else:
+            saw_stale = False
+        check(saw_stale, '読み合わせ後の版を台帳の書き込みロック内でも照合する')
+        msg('assistant', text)
+        prompt('はい')
+        check(bool(guess()) and bool(deny()) and not any(r.get('binding') == 'confirmed' for r in records()),
+              '言い直しから元の文に戻っても古い表示で確定しない')
+        withdraw(root, labels[2], '他の窓で取り下げ', path=led)
+        msg('assistant', text)
+        prompt('はい')
+        check(bool(guess()) and bool(deny()), '取り下げ後に残りだけ確定しない')
+
+        labels, shown, led, msg, prompt, records, guess, reading, deny, args = fixture(root / 'subset')
+        msg('assistant', shown)
+        prompt('それで')
+        msg('assistant', reading(labels[:1]))
+        prompt('yoi')
+        st = state(records())
+        check(st[labels[0]]['status'] == 'answered' and st[labels[1]]['status'] == 'open',
+              '一問を明示した読み合わせにも yoi が使え、他の問いを閉じない')
+        msg('assistant', format_block([dict(st[labels[1]], status='made')]))
+        prompt('yoi')
+        check(state(records())[labels[1]]['status'] == 'open', '推定も確かめの行も無い一問に yoi を結ばない')
+
+        _, shown, _, msg, prompt, records, guess, _, _, _ = fixture(root / 'two-displays')
+        blocks = shown.splitlines()
+        msg('assistant', '\n'.join(blocks[:2]))
+        msg('user', 'もう一つ見せて')
+        msg('assistant', '\n'.join(blocks[2:]))
+        prompt('全部')
+        check(guess() and not guess()['group']['versions'], '別々に見せた並びを「全部」で合わせない')
+
 
 def selftest():
     ok = True
@@ -2219,9 +2672,9 @@ def selftest():
             b = bind('1 OK', ['H3'], ['H1'], ['H1', 'H3'])
             check(b['binding'] == 'guess' and b['candidates'] == ['H3', 'H1'], f'前の返事にも開いた問いがあれば推定 {b}')
             check(bind('3 OK', o2, [], o2)['binding'] == 'guess', '並びの外の番号は推定')
-            check(bind('全部おすすめで', o2, [], o2)['labels'] == o2, '全部 = 直前の問い全部')
-            check(bind('3 つとも案どおり', ['H1', 'H2', 'H4'], [], ['H1', 'H2', 'H4'])['labels'] == ['H1', 'H2', 'H4'],
-                  '「3 つとも」 は数の答え = 全部')
+            check(bind('全部おすすめで', o2, [], o2)['candidates'] == o2, '全部 = 直前の問いを候補にする')
+            check(bind('3 つとも案どおり', ['H1', 'H2', 'H4'], [], ['H1', 'H2', 'H4'])['candidates'] == ['H1', 'H2', 'H4'],
+                  '「3 つとも」 は数を明示したまとめ答えの候補')
             check(bind('2件メールが来てるので見て', o2, [], o2)['binding'] == 'none', '「2件…」 は答えでない')
             check(bind('1つだけ聞きたいんだけど', o2, [], o2)['binding'] == 'none', '「1つだけ…」 は答えでない')
             check(bind('それで、どうなった？', ['H1'], [], ['H1'])['binding'] == 'none', '肯定の語で始まる問い返しは答えでない')
@@ -2858,6 +3311,7 @@ def selftest():
                 check(r[0]['status'] == 'refused', f'向き: 既定の部品 (隣の claude-config) でも止まる {r}')
             else:
                 print('skip: 隣の claude-config に向きの部品が無い = 既定の部品の試験を回していない')
+        _group_selftest(check)
     finally:
         for k, v in saved.items():
             if v is None:
