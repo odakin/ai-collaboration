@@ -97,6 +97,15 @@ encrypted board), builds one commit on top of the fetched commit in a temporary 
 is revalidated against the new state (at most three attempts); a competing live claim is rejected. An exact event is
 kept locally for idempotent recovery after an ambiguous network outcome.
 
+**Acknowledgments during delivery**: an intervening note can change the evidence a reviewer must read while
+leaving the workflow state at `submitted`. Revalidating the transition alone would allow that review to close
+the request. Commit order determines which notes follow the review's target, including same-second posts and
+posts from a slow clock. The retry validates the acknowledged IDs against its own parent commit. The outbox keeps
+the base and IDs alongside the event because ordinary event details have a length limit and restricted events omit
+details. This also keeps the event format readable by older clients. The [posting contract](CONTRACT.md#accept-ack-newer)
+defines when a retry requires preparing a fresh event. [The regression tests](test_board.py) place a correction
+between preparing a review and its first push in each transport.
+
 **Why not a temporary clone any more** (measured on a board of ~1000 events): the first transport cloned the
 remote and ran `git-crypt unlock` over every tracked file, one process per file at 24 ms each, twice per post —
 a minute per post, a second more every day, and a `watch` that spent a quarter of its time cloning. The cost was the
