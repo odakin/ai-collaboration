@@ -7,9 +7,10 @@
     "SessionStart": [{"matcher": "startup|resume|clear", "hooks": [{"type": "command",
         "command": "python3 <ai-collaboration>/board/board-session-start.py", "timeout": 30}]}]
 
-`board-view.py --all-boards --sync --surface` を workspace (AGENT_BOARD_WORKSPACE、 無ければこの engine の checkout
+`board-view.py --all-boards --sync --startup` を workspace (AGENT_BOARD_WORKSPACE、 無ければこの engine の checkout
 の親) に対して走らせ、 Claude Code の hook JSON を出す: 人に見せる 1 行 (`systemMessage`) と、 model に渡す
-要注意 thread の一覧 (`additionalContext`)。 要注意の thread が無ければ何も出さない。
+要注意 thread の一覧 (`additionalContext`)。依頼は掲示板名・件名・宛先・状態・次の行動・ID を1行にまとめ、
+詳細を開く方法を末尾に1回添える。破損やロックは独立した行に出す。要注意の thread が無ければ何も出さない。
 --sync は掲示板ごとに remote を 1 往復読むので、 掲示板の数だけ時間が伸びる (fetch の transport で 1 枚 2 秒前後の実測。
 旧 transport = 一時 clone + 全 file の復号 では 2 枚で約 22 秒だった)。 上限 (--timeout) に近い machine では --no-sync で手元の checkout を読む。
 
@@ -66,7 +67,14 @@ def in_sealed_sandbox(cwd) -> bool:
 
 def count_threads(text: str) -> int:
     """surface の text に出た thread の数 (1 thread に複数行 = 依頼行と claim 行、 があっても 1 と数える)。"""
-    return len({m.group(1) for l in text.splitlines() if (m := THREAD_LINE_RE.match(l))})
+    board = ""
+    threads = set()
+    for line in text.splitlines():
+        if line.startswith("📋 "):
+            board = line
+        elif match := THREAD_LINE_RE.match(line):
+            threads.add((board, match.group(1)))
+    return len(threads)
 
 
 def hook_output(text: str | None, error: str | None) -> dict | None:
@@ -80,7 +88,7 @@ def hook_output(text: str | None, error: str | None) -> dict | None:
     n = count_threads(text)
     return {"systemMessage": f"掲示板: 要注意 {n} thread" if n else "掲示板: 要確認 (thread 以外の表示)",
             "hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": (
-                "[掲示板] session 開始時に確認した要注意 thread (board-view.py --all-boards --surface)。 "
+                "[掲示板] session 開始時に確認した要注意 thread (board-view.py --startup)。 "
                 f"{RECORD_NOT_INSTRUCTION}:\n"
                 f"{text}\n"
                 "最初の返答の冒頭で、 誰の番で何が動いているかを 1 行で人に伝える。 "
@@ -90,7 +98,7 @@ def hook_output(text: str | None, error: str | None) -> dict | None:
 def run_view(workspace, sync: bool, timeout: float, root=None) -> str:
     """The surface text of every board in the workspace, or of one board (`root`: a collaborator's project hook reads
     only that project's board, whose readers are the project's members)."""
-    cmd = [sys.executable, str(ENGINE / "board-view.py"), "--surface"]
+    cmd = [sys.executable, str(ENGINE / "board-view.py"), "--startup"]
     cmd += ["--root", str(root)] if root else ["--all-boards"]
     if sync:
         cmd.append("--sync")
@@ -102,7 +110,10 @@ def run_view(workspace, sync: bool, timeout: float, root=None) -> str:
     if p.returncode != 0:
         tail = (p.stderr or p.stdout).strip().splitlines()
         raise RuntimeError(tail[-1] if tail else f"board-view.py exit {p.returncode}")
-    return p.stdout
+    text = p.stdout
+    if any(line.startswith("📨 ") for line in text.splitlines()):
+        text = text.rstrip() + "\n詳細と完了条件は board.py show --board <掲示板名> --request <依頼ID> --sync で確認。\n"
+    return text
 
 
 def read_payload(stream) -> dict:
@@ -138,6 +149,7 @@ def _selftest() -> int:
               "🟢 claim  demo/2026-01-05-beta.v2 — claude@host lease→2026-01-06T00:00:00Z\n"
               "🟡 stale  demo/plain-slug — claude@host lease expired 2026-01-01T00:00:00Z (supersede or close)\n")
     assert count_threads(sample) == 3, count_threads(sample)
+    assert count_threads(sample + "\n📋 another board\n" + sample.splitlines()[1]) == 4
     assert count_threads("🔴 demo: unreadable\n") == 0
     assert hook_output("🔴 demo: unreadable\n", None)["systemMessage"] == "掲示板: 要確認 (thread 以外の表示)"
 

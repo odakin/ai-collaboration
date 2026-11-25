@@ -17,7 +17,6 @@ import sys
 import tempfile
 import time
 from board_workflow import KINDS, COARSE, LABELS, reduce_workflow, same_session, is_role, address_label
-from board_workflow import timestamp as wf_timestamp
 import board_config as bc
 import board_transport as bt
 
@@ -553,7 +552,7 @@ def touch_verdict(state, me, paths, labels=None):
     return lines, blocked
 
 
-def post(root, event, *, before_push=None, landed=None):
+def post(root, event, *, before_push=None, landed=None, ack_receipt=None):
     """Post one event; `landed` (a list), when given, receives the thread's events as they stand after the post."""
     # Caller has completed source_gate (and, on a collaborators board, check_post) before entering a snapshot.
     from board_schema import errors
@@ -564,8 +563,8 @@ def post(root, event, *, before_push=None, landed=None):
         if not re.fullmatch(r'r-[a-f0-9]{10,}',event['thread_id']):
             raise ValueError('restricted thread requires an opaque r-<12 hex> identifier (10 or more lowercase hex digits are accepted)')
     rel=Path('events')/event['project']['key']/event['thread_id']/(view.compact(view.parse_ts(event['created_at']))+'--'+event['event_id']+'.json')
-    if bt.transport()=='clone': return _post_clone(root,event,rel,before_push=before_push,landed=landed)
-    return _post_fetch(root,event,rel,before_push=before_push,landed=landed)
+    if bt.transport()=='clone': return _post_clone(root,event,rel,before_push=before_push,landed=landed,ack_receipt=ack_receipt)
+    return _post_fetch(root,event,rel,before_push=before_push,landed=landed,ack_receipt=ack_receipt)
 
 
 class PickupTaken(ValueError):
@@ -597,7 +596,7 @@ def pickup_problem(same, event, now=None):
     return None
 
 
-def _validate_post(dest, event, cfg):
+def _validate_post(dest, event, cfg, ack_receipt=None):
     """The transition check both transports run against the board as just read; returns (events, same-thread events,
     existing identical event or None)."""
     if cfg['audience']=='collaborators' and event['source_policy']!='ordinary':
@@ -623,6 +622,13 @@ def _validate_post(dest, event, cfg):
             raise ValueError('claim expired; reclaim before submission')
     w=reduce_workflow(same+[event],view.now_utc())
     if w['errors']: raise ValueError('; '.join(w['errors']))
+    if event['kind'] in ACK_KINDS:
+        receipt = ack_receipt if ack_receipt is not None else {'base': event['reply_to'], 'ids': []}
+        if (not isinstance(receipt, dict) or not isinstance(receipt.get('base'), str)
+                or not isinstance(receipt.get('ids'), list) or not all(isinstance(i, str) for i in receipt['ids'])):
+            raise ValueError(f"unreadable local acknowledgment record; sync the request and prepare a new {event['kind']}")
+        ack_newer_lines(event['kind'], same, w['request'], event['reply_to'], _actor(event), receipt['ids'],
+                        prepared_base=receipt['base'])
     if event['kind'] == 'claim' and view.parse_ts(event['lease_until']) <= view.now_utc():
         raise ValueError('new claim already expired')
     return events,same,None
@@ -636,7 +642,7 @@ def exhausted_post_error(event, stderr):
                       + (' Last push error: '+reason if reason else ''))
 
 
-def _post_fetch(root, event, rel, *, before_push=None, landed=None):
+def _post_fetch(root, event, rel, *, before_push=None, landed=None, ack_receipt=None):
     """Default transport: fetch, validate against the fetched tree, add the event as one commit through the object
     store, push; a rejected push (another writer won) fetches again and revalidates, three attempts."""
     repo=bt.Repo(root)
@@ -652,7 +658,7 @@ def _post_fetch(root, event, rel, *, before_push=None, landed=None):
             if cfg['encryption']=='git-crypt' and not encrypted: raise ValueError('board event encryption is not configured')
             base=(dest/bt.BASE_FILE).read_text().strip()
             try:
-                events,same,existing=_validate_post(dest,event,cfg)
+                events,same,existing=_validate_post(dest,event,cfg,ack_receipt)
             except ValueError:
                 # Refused against a read reused from seconds ago: another writer may have moved the thread
                 # (measured in a test mixing transports). Read the remote again before deciding.
@@ -672,7 +678,7 @@ def _post_fetch(root, event, rel, *, before_push=None, landed=None):
     raise exhausted_post_error(event,rejections[-1] if rejections else '')
 
 
-def _post_clone(root, event, rel, *, before_push=None, landed=None):
+def _post_clone(root, event, rel, *, before_push=None, landed=None, ack_receipt=None):
     """Previous transport (AGENT_BOARD_TRANSPORT=clone): post through a temporary clone of the remote."""
     with snapshot_clone(root) as dest:
         if not (dest/bc.CONFIG).is_file():
@@ -687,7 +693,7 @@ def _post_clone(root, event, rel, *, before_push=None, landed=None):
         if cfg['encryption']=='git-crypt' and not encrypted: raise ValueError('board event encryption is not configured')
         branch=cfg['branch']
         for attempt in range(3):
-            events,same,existing=_validate_post(dest,event,cfg)
+            events,same,existing=_validate_post(dest,event,cfg,ack_receipt)
             if existing:
                 if landed is not None: landed[:]=same
                 return event['event_id']
@@ -1660,6 +1666,7 @@ def cmd_edit_approvals(a):
             print(f"    前「{r['before']}」 → 後「{r['after']}」 (検収係の理由: {r['relax_why']})")
 
 
+ACK_KINDS = {'submit', 'accept', 'revise'}
 NEWER_KINDS=('note','submit','blocker','update')   # what the review side must have read before it takes a submission
 
 
@@ -1668,56 +1675,50 @@ def newer_since_submission(events, req, sub_id, poster):
     (note・submit・blocker・update), oldest first. Engine marks (a pickup or start note, a touch) are left out.
     CONTRACT.md#accept-ack-newer: measured, a review desk's note withdrawing its go-ahead was already on the board when
     the requester accepted, and the requester read the thread through a filter that dropped the line above."""
-    sub=next((e for e in events if e.get('event_id')==sub_id),None)
-    if sub is None: return []
-    t=wf_timestamp(sub['created_at']); key=(req['project']['key'],req['thread_id'])
-    out=[]
-    for e in events:
-        if e.get('event_id')==sub_id or e.get('kind') not in NEWER_KINDS: continue
-        if ((e.get('project') or {}).get('key'),e.get('thread_id'))!=key: continue
-        if same_session(_actor(e),poster): continue
-        if engine_mark(e): continue
-        try:
-            if wf_timestamp(e['created_at'])<=t: continue
-        except (KeyError, ValueError, TypeError):
-            continue
-        out.append(e)
-    return sorted(out,key=lambda e:e['created_at'])
+    # read() supplies branch order. Equal timestamps and clocks on different hosts cannot order posts.
+    following = iter(events)
+    if not any(e['event_id'] == sub_id for e in following):
+        return []
+    return [e for e in following
+            if e.get('kind') in NEWER_KINDS and e['project']['key'] == req['project']['key']
+            and e['thread_id'] == req['thread_id'] and not same_session(_actor(e), poster) and not engine_mark(e)]
 
 
 def submit_base(events, req, claim_id, poster):
     """The event a submit's --ack-newer counts from (CONTRACT.md#submit-ack-newer): the claim it replies to, or the
     poster's own latest submission on that claim when it submits again after a revise (the posts before that
     submission were named then, or read by the review)."""
-    claim=next((e for e in events if e.get('event_id')==claim_id),None)
-    if claim is None: return claim_id
-    try: t=wf_timestamp(claim['created_at'])
-    except (KeyError, ValueError, TypeError): return claim_id
-    own=[e for e in events if e.get('kind')=='submit' and e.get('request_id')==req['event_id'] and e.get('reply_to')==claim_id
-         and same_session(_actor(e),poster)]
-    own=[e for e in own if wf_timestamp(e.get('created_at') or '1970-01-01T00:00:00Z')>t]
-    return max(own,key=lambda e:e['created_at'])['event_id'] if own else claim_id
+    for e in reversed(events):
+        if e['event_id'] == claim_id:
+            break
+        if (e['kind'] == 'submit' and e['request_id'] == req['event_id'] and e.get('reply_to') == claim_id
+                and same_session(_actor(e), poster)):
+            return e['event_id']
+    return claim_id
 
 
-def ack_newer_lines(a, events, req, base=None):
+def ack_newer_lines(kind, events, req, reply_to, poster, given, *, prepared_base=None, receipt=None):
     """accept / revise: refuse unless --ack-newer names exactly the posts written after the submission by someone else
     (the same check send_mail.py --ack-newer makes for a thread). submit: the same, counted from the claim (or the
     poster's own last submission on it, submit_base) = the requester's notes and answers written while the worker
     worked (CONTRACT.md#submit-ack-newer; measured, workers submitted without reading a note the requester had added
     after their claim, four times on one day). Returns the lines kept in the event's details: each acknowledged post's
     id, kind, author and summary, so the record says what the poster had read."""
-    poster={'agent':a.agent,'session_id':a.session}
-    base=base or a.reply_to
-    what=('the submission' if a.command in ('accept','revise') else
-          'your claim' if base==a.reply_to else 'your last submission')
+    base = submit_base(events, req, reply_to, poster) if kind == 'submit' else reply_to
+    if prepared_base is not None and prepared_base != base:
+        raise ValueError(f"{kind} refused: another submission arrived on this claim. "
+                         f"Read show --request {req['event_id']} --sync and prepare a new {kind}.")
+    what = 'the submission'
+    if kind == 'submit':
+        what = 'your claim' if base == reply_to else 'your last submission'
     newer=newer_since_submission(events,req,base,poster)
     want=[e['event_id'] for e in newer]
-    given=list(dict.fromkeys(getattr(a,'ack_newer',None) or []))
+    given=list(dict.fromkeys(given))
     if set(given)!=set(want):
         missing=[e for e in newer if e['event_id'] not in given]
         extra=[g for g in given if g not in want]
-        lines=[f"{a.command} refused: the thread has posts written after {what} {base} by someone else."
-               " Read each (show --request "+a.request+"), then name every one with --ack-newer <event id>"
+        lines=[f"{kind} refused: the thread has posts written after {what} {base} by someone else."
+               " Read each (show --request "+req['event_id']+" --sync), then name every one with --ack-newer <event id>"
                " (repeatable) and post again."]
         for e in missing:
             who=address_label(_actor(e))
@@ -1725,9 +1726,13 @@ def ack_newer_lines(a, events, req, base=None):
         for g in extra:
             lines.append(f"  named but not a post after {what} by someone else: {g}")
         if not want:
-            lines=[f"{a.command} refused: --ack-newer names {', '.join(extra)}, but no one else posted after {what}"
+            lines=[f"{kind} refused: --ack-newer names {', '.join(extra)}, but no one else posted after {what}"
                    f" {base}; leave --ack-newer off"]
+        if prepared_base is not None:
+            lines.append(f"Run a fresh {kind} after reading the thread. retry uses the original acknowledgments.")
         raise ValueError('\n'.join(lines))
+    if receipt is not None:
+        receipt.update(base=base, ids=given)
     out=[]
     for e in newer:
         who=(e.get('actor') or {}).get('session_id') or '?'
@@ -1735,7 +1740,7 @@ def ack_newer_lines(a, events, req, base=None):
     return out
 
 
-def event_from(a, events):
+def event_from(a, events, *, ack_receipt=None):
     restricted=a.policy=='encrypted-metadata-only'
     ack_lines=[]
     if a.command=='request' or (a.command=='note' and not a.request):
@@ -1757,16 +1762,16 @@ def event_from(a, events):
         if a.command in ('accept','revise') and not a.reply_to:
             # Name the submission here instead of the schema's bare "$: missing reply_to" (measured: the reviewer could not tell what was missing).
             subs=[e for e in events if e.get('request_id')==a.request and e['kind']=='submit']
-            latest=max(subs,key=lambda e:e['created_at'])['event_id'] if subs else None
+            latest=subs[-1]['event_id'] if subs else None
             raise ValueError(f'{a.command} needs --reply-to <the submission you checked>'+(f': the latest submission is {latest}' if latest else ': no submission yet'))
-        ack_lines=ack_newer_lines(a,events,req) if a.command in ('accept','revise') else []
         if a.command in ('submit','release') and not a.reply_to:
             # Same for the worker side (measured: "$: missing reply_to" alone, then the request id was tried and refused).
             claims=[e for e in events if e.get('request_id')==a.request and e['kind']=='claim']
-            cur=max(claims,key=lambda e:e['created_at'])['event_id'] if claims else None
+            cur=claims[-1]['event_id'] if claims else None
             raise ValueError(f'{a.command} needs --reply-to <your current claim, not the request>'+(f': the latest claim is {cur}' if cur else ': no claim yet'))
-        if a.command=='submit':
-            ack_lines=ack_newer_lines(a,events,req,submit_base(events,req,a.reply_to,{'agent':a.agent,'session_id':a.session}))
+        if a.command in ACK_KINDS:
+            ack_lines=ack_newer_lines(a.command, events, req, a.reply_to, (a.agent, a.session),
+                                      getattr(a, 'ack_newer', []), receipt=ack_receipt)
     kind=a.command
     # Existing template supplies metadata; workflow fields are added below.
     ev,path=view.build_template(kind='update',project=pk,thread=tid,task=a.session_name or 'workflow',agent=a.agent,
@@ -1815,9 +1820,7 @@ def event_from(a, events):
             if getattr(a,'dialogue',False):
                 desk=dialogue_desk_env()
                 ev['details']='\n'.join(x for x in (ev.get('details'),DIALOGUE_LINE,DIALOGUE_DESK_PREFIX+desk if desk else '') if x)
-    if kind in ('accept','revise') and ack_lines:
-        ev['details']='\n'.join(x for x in (ev.get('details'),*ack_lines) if x)[:4000]   # schema maxLength
-    if kind=='submit' and ack_lines and not restricted:   # a restricted post carries no details (the ids were checked all the same)
+    if ack_lines and not restricted:
         ev['details']='\n'.join(x for x in (ev.get('details'),*ack_lines) if x)[:4000]
     if kind=='handover':
         if not a.to or not a.to_session or not a.role: raise ValueError('handover needs --to, --to-session, --role')
@@ -3612,11 +3615,20 @@ def main():
     outbox=outbox_dir(a.root)
     if a.command=='retry':
         if not a.event_id or not re.fullmatch(r'[a-zA-Z0-9-]+',a.event_id): ap.error('retry requires --event-id')
+        if a.ack_newer: ap.error('retry uses the saved acknowledgments; read the thread and prepare a fresh submit, accept or revise to name new posts')
         saved=outbox/(a.event_id+'.json')
         ev=json.loads(saved.read_text())
         if ev['source_policy']!=a.policy or ev['actor']['agent']!=a.agent or ev['actor']['session_id']!=a.session:
             raise ValueError('retry identity/policy differs from saved event')
-        print('posted '+post(a.root,ev)); return
+        proof=saved.with_suffix('.ack')
+        try:
+            receipt=json.loads(proof.read_text(encoding='utf-8'))
+            if receipt is None: receipt={}
+        except FileNotFoundError:
+            receipt=None  # older outboxes; only an empty set of acknowledgments can be established
+        except (OSError,ValueError):
+            receipt={}  # an exact event already on the board is still idempotent
+        print('posted '+post(a.root,ev,ack_receipt=receipt)); return
     labels={}
     for attempt in range(2):
       # A post's own read is optimistic (no fetch when this machine fetched or pushed within OPTIMISTIC_S); an event
@@ -3635,7 +3647,8 @@ def main():
                 a.summary=a.summary or ('手放す: '+(', '.join(released) or '(なし)'))[:1000]
             a.touch=new or [NONE_TOUCH]; a.command='note'
         try:
-            ev=event_from(a,events)
+            ack_receipt={}
+            ev=event_from(a,events,ack_receipt=ack_receipt)
             if edit_cmd:
                 ev['details']=edit_approval_details(a,events,cfg,ev)
                 ev['reply_to']=ev.get('reply_to') or re.search(r'^submit: (\S+)$',ev['details'],re.M).group(1)
@@ -3700,6 +3713,8 @@ def main():
         probs+=reduce_workflow(same+[ev],view.now_utc())['errors']
         if probs: raise ValueError('; '.join(probs))
         print(json.dumps(ev,ensure_ascii=False,indent=2))
+        if a.command=='request':
+            print(f'提出を受け取る検収役 = {reviewer or a.session}', file=sys.stderr)
         _OUTBOX['dry']=True
         try: announce_launch(a,ev,cfg['audience'])   # shown, not run: the requester sees the command it will get
         finally: _OUTBOX['dry']=False
@@ -3715,11 +3730,18 @@ def main():
     if bad: raise ValueError('; '.join(bad))
     outbox.mkdir(parents=True,exist_ok=True,mode=0o700)
     saved=outbox/(ev['event_id']+'.json')
-    with saved.open('x',encoding='utf-8') as f: json.dump(ev,f,ensure_ascii=False,indent=2)
+    with saved.open('x',encoding='utf-8') as f:
+        if ack_receipt:
+            # Reserve the event id first. Write its local receipt before making the event readable to retry.
+            proof=saved.with_suffix('.ack')
+            with proof.open('x',encoding='utf-8') as af:
+                proof.chmod(0o600)
+                json.dump(ack_receipt,af)
+        json.dump(ev,f,ensure_ascii=False,indent=2)
     saved.chmod(0o600)
     print('event_id='+ev['event_id']+'\ndelivery=pending (saved locally; wait for posted)',flush=True)
     landed=[]
-    print('posted '+post(a.root,ev,landed=landed))
+    print('posted '+post(a.root,ev,landed=landed,ack_receipt=ack_receipt))
     print('Local view is a snapshot; use inbox --sync to read the latest remote state.')
     state=request_state_line(reduce_workflow(landed or same+[ev],view.now_utc()))
     if state: print(state)

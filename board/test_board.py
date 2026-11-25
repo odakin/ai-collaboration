@@ -918,6 +918,49 @@ class History(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def test_startup_lists_every_request_once_and_show_opens_the_last(self):
+        import sys
+        ids=[]
+        for n in range(40):
+            req=event('request',n,thread=f'example-{n:02}')
+            req['request_id']=req['event_id']
+            req['summary']='First line\n'+'long title '*55
+            req['acceptance']=f'Full completion condition {n}'
+            self.add(req,commit=False)
+            ids.append(req['event_id'])
+        board.run(self.root,'add','events')
+        board.run(self.root,'commit','-qm','Add fixture requests')
+        remote=self.root/'remote.git'
+        subprocess.run(['git','init','-q','--bare',str(remote)],check=True)
+        board.run(self.root,'remote','add','origin',str(remote))
+        board.run(self.root,'push','-q','origin','main')
+        # Only the damaged thread is quarantined; its warning must survive the short display.
+        self.add(event('note',51,thread='damaged-example')).write_text('{')
+        def start():
+            return subprocess.check_output([sys.executable,str(board.ENGINE/'board-session-start.py'),
+                '--root',str(self.root),'--no-sync','--plain'],text=True)
+        text=start()
+        rows=[line for line in text.splitlines() if line.startswith('📨 ')]
+        self.assertEqual(len(rows),40)
+        for rid,row in zip(ids,rows):
+            self.assertEqual(text.count(rid),1)
+            for part in (rid,'board=','引受待ち','codex-session-001','引き受ける','First line'):
+                self.assertIn(part,row)
+            self.assertLess(len(row),300)
+        self.assertIn('invalid event file',text)
+        self.assertNotIn('Full completion condition',text)
+        self.assertEqual(text.count('show --board'),1)
+        from unittest.mock import patch
+        import os
+        with tempfile.TemporaryDirectory() as workspace:
+            (Path(workspace)/self.root.name).symlink_to(self.root,target_is_directory=True)
+            with patch.dict(os.environ,{'AGENT_BOARD_WORKSPACE':workspace,'AGENT_BOARD_CACHE_DIR':str(self.root/'cache')}):
+                detail=subprocess.check_output([sys.executable,str(board.ENGINE/'board.py'),'show','--board',self.root.name,
+                    '--agent','codex','--session','codex-session-001','--request',ids[-1],'--sync'],text=True)
+        self.assertIn('Full completion condition 39',detail)
+        (self.root/'board.json').write_bytes(board.view.GITCRYPT_MAGIC+b'fixture')
+        self.assertIn('locked',start())
+
     def add(self, e, *, commit=True, path=None):
         p = self.root / (path or ('events/' + e['project']['key'] + '/' + e['thread_id'] + '/'
             + board.view.compact(board.view.parse_ts(e['created_at'])) + '--' + e['event_id'] + '.json'))
@@ -1220,13 +1263,100 @@ class Transport(unittest.TestCase):
         self.assertIn('codex / codex-cli-session 対応待ち',cli('inbox','codex','--sync'))
         claim=eid(cli('claim','codex','--request',req,'--session-name','abcd1234 (fixture)'))
         self.assertIn('--session-name を event に書かない',errs[-1])   # the post itself says what it dropped
-        sub=eid(cli('submit','codex','--request',req,'--reply-to',claim))
+        note=eid(cli('note','claude','--request',req))
+        sub=eid(cli('submit','codex','--request',req,'--reply-to',claim,'--ack-newer',note))
         self.assertIn('確認待ち',cli('inbox','claude','--sync'))
-        accept=eid(cli('accept','claude','--request',req,'--reply-to',sub))
+        correction=eid(cli('note','codex','--request',req))
+        accept=eid(cli('accept','claude','--request',req,'--reply-to',sub,'--ack-newer',correction))
+        # Already delivered records from an older outbox need no local acknowledgment metadata.
+        (board.outbox_dir(self.root)/(accept+'.ack')).unlink()
         cli('retry','claude','--event-id',accept)
         self.assertIn('対応待ちはありません',cli('inbox','claude','--sync'))
         with board.snapshot(self.root) as root:
-            self.assertEqual(len(board.read(root)),4)
+            records=board.read(root)
+            self.assertEqual(len(records),6)
+            self.assertFalse(any('details' in e for e in records))
+
+    def test_correction_winning_the_push_race_requires_a_new_review(self):
+        r,c,sub=chain()
+        for item in (r,c,sub):
+            board.post(self.root,item)
+        note=event('note',4,agent='other')
+        note['created_at']=sub['created_at']
+        review=event('accept',5,reply=sub)
+        def correction_first(attempt):
+            if attempt==0:
+                board.post(self.root,note)
+        with self.assertRaisesRegex(ValueError,note['event_id']):
+            board.post(self.root,review,before_push=correction_first)
+        with board.snapshot(self.root,fresh=True) as snap:
+            self.assertEqual(board.reduce_workflow(board.read(snap),NOW)['status'],'submitted')
+        args=Note()._review_args('accept',r,sub,[note['event_id']])
+        receipt={}
+        checked=board.event_from(args,[r,c,sub,note],ack_receipt=receipt)
+        board.post(self.root,checked,ack_receipt=receipt)
+        self.assertEqual(board.post(self.root,checked),checked['event_id'])
+
+    def test_retry_rechecks_the_saved_acknowledgments(self):
+        import sys
+        source=self.base/'example'
+        subprocess.run(['git','init','-q',str(source)],check=True)
+        r,c,_=chain()
+        for e in (r,c): board.post(self.root,e)
+        note=event('note',2,agent='claude')
+        board.post(self.root,note)
+        def cli(op,*args):
+            return subprocess.run([sys.executable,str(board.ENGINE/'board.py'),op,'--root',str(self.root),
+                '--agent','codex','--session','codex-session-001','--policy','ordinary','--source',str(source),
+                '--project','example',*args],capture_output=True,text=True)
+        hook=self.remote/'hooks'/'pre-receive'
+        hook.write_text('#!/bin/sh\nexit 1\n'); hook.chmod(0o700)
+        args=('--request',r['event_id'],'--reply-to',c['event_id'],'--summary','fixture result',
+              '--deliverable','example/result.md','--ack-newer',note['event_id'])
+        failed=cli('submit',*args)
+        self.assertNotEqual(failed.returncode,0)
+        saved=next(line.split('=',1)[1] for line in failed.stdout.splitlines() if line.startswith('event_id='))
+        hook.unlink()
+        # Absence of the new sidecar in an old pending outbox never implies that a note was read.
+        proof=board.outbox_dir(self.root)/(saved+'.ack')
+        contents=proof.read_bytes()
+        proof.unlink()
+        legacy=cli('retry','--event-id',saved)
+        self.assertNotEqual(legacy.returncode,0)
+        self.assertIn(note['event_id'],legacy.stderr)
+        proof.write_bytes(contents)
+        correction=event('note',3,agent='claude'); board.post(self.root,correction)
+        stale=cli('retry','--event-id',saved)
+        self.assertNotEqual(stale.returncode,0)
+        self.assertIn(correction['event_id'],stale.stderr)
+        self.assertNotIn('not named: '+note['event_id'],stale.stderr)
+        changed=cli('retry','--event-id',saved,'--ack-newer',correction['event_id'])
+        self.assertNotEqual(changed.returncode,0)
+        self.assertIn('retry uses the saved acknowledgments',changed.stderr)
+        hook.write_text('#!/bin/sh\nexit 1\n'); hook.chmod(0o700)
+        checked=cli('submit',*args,'--ack-newer',correction['event_id'])
+        self.assertNotEqual(checked.returncode,0)
+        checked_id=next(line.split('=',1)[1] for line in checked.stdout.splitlines() if line.startswith('event_id='))
+        hook.unlink()
+        unrelated=event('note',7,agent='claude',thread='separate-example')
+        unrelated['request_id']=unrelated['event_id']
+        board.post(self.root,unrelated)
+        fresh=cli('retry','--event-id',checked_id)
+        self.assertEqual(fresh.returncode,0,fresh.stderr)
+        with board.snapshot(self.root,fresh=True) as snap:
+            subs=[e for e in board.read(snap) if e['kind']=='submit']
+        self.assertEqual(len(subs),1)
+        self.assertEqual(subs[0]['event_id'],checked_id)
+        self.assertNotEqual(checked_id,saved)
+
+    def test_saved_submission_cannot_cross_a_revision_even_if_no_notes_arrive(self):
+        r,c,sub=chain()
+        for e in (r,c,sub,event('revise',3,reply=sub)):
+            board.post(self.root,e)
+        resub=event('submit',4,reply=c)
+        with self.assertRaisesRegex(ValueError,'another submission arrived'):
+            board.post(self.root,resub,ack_receipt={'base':c['event_id'],'ids':[]})
+        board.post(self.root,resub,ack_receipt={'base':sub['event_id'],'ids':[]})
 
     def test_source_policy_rejected_before_write(self):
         with self.assertRaisesRegex(ValueError,'forbids'): board.source_gate(self.root,'no-post')
@@ -1257,7 +1387,8 @@ class Transport(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'question awaits reviewer'):
             board.post(self.root,submit)
         answer=event('update',101,agent='claude',reply=q); answer['request_id']=r['event_id']
-        board.post(self.root,answer); board.post(self.root,submit)
+        board.post(self.root,answer)
+        board.post(self.root,submit,ack_receipt={'base':renewed['event_id'],'ids':[answer['event_id']]})
         accept=event('accept',103,reply=submit); accept['request_id']=r['event_id']
         board.post(self.root,accept)
         with board.snapshot(self.root) as root:
@@ -1364,6 +1495,21 @@ class CollaboratorBoards(unittest.TestCase):
                     self.assertNotIn('event_id=', p.stdout)
                     self.assertEqual(before, board.run(self.owner, 'ls-remote', 'origin', 'refs/heads/main').stdout)
                     self.assertFalse(any(board.outbox_dir(self.owner).glob('*.json')))
+
+    def test_preview_shows_effective_reviewer_without_changing_the_event_json(self):
+        import os
+        from unittest.mock import patch
+        args=('request','--root',str(self.owner),'--source',str(self.proj),'--policy','ordinary','--project','proj',
+              '--agent','other','--session','requester','--to','other','--to-session','worker','--thread','route-preview',
+              '--summary','Check a sum','--acceptance','Return the sum','--preview')
+        for default,flags,want in [('',(),'requester'),('desk-<project>',(),'desk-proj'),
+                                   ('desk-<project>',('--reviewer','named-reviewer'),'named-reviewer')]:
+            with patch.dict(os.environ,{board.DEFAULT_REVIEWER_ENV:default}):
+                preview=self.cli(*args,*flags)
+            event_json=preview.stdout[preview.stdout.index('{'):]
+            self.assertEqual(json.loads(event_json)['kind'],'request')
+            self.assertIn('提出を受け取る検収役 = '+want,preview.stderr)
+        self.assertFalse(any(board.outbox_dir(self.owner).glob('*.json')))
 
     def test_stats_smoke(self):
         b=str(self.proj/'board')
@@ -1576,6 +1722,13 @@ class CollaboratorBoards(unittest.TestCase):
         self.assertEqual({(t['board'],t['thread_id']) for t in merged['threads']},{('owner-board','2026-10-05-owner'),('proj','2026-10-05-ask')})
         rows=json.loads(self.cli('inbox','--all-boards','--agent','claude','--session','c-1','--json').stdout)
         self.assertEqual([(r['board'],r['thread']) for r in rows],[('proj','2026-10-05-ask')])
+        broken=self.ws/'broken-board'; broken.mkdir()
+        (broken/'board.json').write_text('{')
+        short=subprocess.check_output([self.sys.executable,str(board.ENGINE/'board-view.py'),'--all-boards','--startup'],text=True)
+        self.assertEqual(short.count('📨 '),1)
+        self.assertIn('board=proj',short)
+        self.assertIn('request='+rows[0]['request_id'],short)
+        self.assertLess(short.index('🔴 broken-board'),short.index('📨 '))
 
     def test_init_scaffolds_a_collaborator_board(self):
         import board_config as bc
@@ -4180,6 +4333,22 @@ class SubmitAckNewer(unittest.TestCase):
         self.assertIn(f"after your last submission {sub['event_id']}",msg); self.assertIn(late['event_id'],msg)
         self.assertNotIn(early['event_id'],msg)
         self.assertIn(late['event_id'],board.event_from(self.args(r,c,[late['event_id']]),evs)['details'])
+
+    def test_branch_order_decides_both_the_boundary_and_newer_posts(self):
+        r,c,sub=chain()
+        before=self.other('note',10,'Already delivered before submission.')
+        late=self.other('note',5,'Delivered after submission.')
+        tied=self.other('note',6,'Delivered in the same second.')
+        sub['created_at']=c['created_at']
+        late['created_at']=r['created_at']
+        tied['created_at']=sub['created_at']
+        history=[r,c,before,sub,event('revise',8,reply=sub),late,tied]
+        with self.assertRaises(ValueError) as ex:
+            board.event_from(self.args(r,c),history)
+        self.assertNotIn(before['event_id'],str(ex.exception))
+        for n in (late,tied): self.assertIn(n['event_id'],str(ex.exception))
+        result=board.event_from(self.args(r,c,[tied['event_id'],late['event_id']]),history)
+        self.assertLess(result['details'].index(late['event_id']),result['details'].index(tied['event_id']))
 
     def test_restricted_is_checked_and_writes_no_details(self):
         r,c,_=chain(); r['source_policy']=c['source_policy']='encrypted-metadata-only'

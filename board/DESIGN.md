@@ -176,7 +176,11 @@ only tie to the rest of the engine is the ledger location, so a redesign of post
 wiring stays in each person's own settings (kernel up, instance down). What it prints and when it stays silent live in
 its docstring; the contract only points there, so the description has one home.
 
-- **Counting threads**: the hook counts the threads in board-view's surface text by the line heads `render()` writes
+- The startup view uses the reducer's next actor and action. One line and a stable request ID let readers scan
+  every pending request and open the matching detailed view. Protocol and board-level warnings stay visible.
+  A local startup reads independent checkouts concurrently and emits them in discovery order so a slow Git read
+  on one board can overlap work on another board within the hook deadline.
+- **Counting threads**: the hook counts distinct threads within each board by the line heads `render()` writes
   for a thread (request, claim, stale, block, find, protocol, uncommitted), and its selftest renders one synthetic
   thread per line kind through the real `render()`, so a format change there fails the hook's selftest. Rejected:
   matching `<project>/<yyyy-mm-dd>-<slug>` (the schema does not require a date and dateless ids exist, 実測 = one

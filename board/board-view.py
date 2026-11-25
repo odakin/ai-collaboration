@@ -595,7 +595,7 @@ def fmt_event(ev: dict, now: dt.datetime) -> str:
 
 
 def render(threads: dict, invalid, *, surface: bool, project: str | None,
-           now: dt.datetime, locked: bool, warnings=(), board: str | None = None, activity=None) -> str:
+           now: dt.datetime, locked: bool, warnings=(), board: str | None = None, activity=None, startup=False) -> str:
     lines: list[str] = []
     name = board or "board"
     if locked:
@@ -611,6 +611,21 @@ def render(threads: dict, invalid, *, surface: bool, project: str | None,
             t = threads[key]
             tag = f"{key[0]}/{key[1]}"
             w = t.get("workflow")
+            if startup and w and w["waiting_on"] and not w["errors"]:
+                title = " ".join((w.get("title") or "").split())
+                if len(title) > 64:
+                    title = title[:63] + "…"
+                flags = []
+                if t["unpromoted"]:
+                    flags.append(f"未反映の finding {len(t['unpromoted'])}件")
+                if activity and ba.unposted(key[1], w, *activity):
+                    flags.append("この依頼を参照する commit あり")
+                if any(not e.get("_committed", True) for e in t["events"]):
+                    flags.append("⚠️ 未コミットの記録あり")
+                lines.append(" · ".join(filter(None, (
+                    f"📨 {address_label(w['waiting_on'])} 対応待ち [{w['label']}] {tag} — {w['next_action']}",
+                    title, f"board={name}", f"request={w['request_id']}", *flags))))
+                continue
             if w:
                 for err in w["errors"]:
                     lines.append(f"🔴 protocol {tag}: {err}")
@@ -919,21 +934,21 @@ def one_board(root: Path, a, name: str, now: dt.datetime, git_root: Path | None 
             activity = ba.board_activity(git_root or root)
     except (ValueError, OSError, subprocess.SubprocessError):
         activity = None   # the evidence is extra: an unreadable history leaves the view as it was
-    payload = to_json_payload(root, threads, invalid, now=now, locked=False, warnings=warnings, board=name,
-                              activity=activity)
+    startup = getattr(a, "startup", False)
+    payload = {} if startup else to_json_payload(root, threads, invalid, now=now, locked=False, warnings=warnings,
+                                                  board=name, activity=activity)
     return payload, render(threads, invalid, surface=a.surface, project=a.project, now=now, locked=False,
-                           warnings=warnings, board=name, activity=activity)
+                           warnings=warnings, board=name, activity=activity, startup=startup)
 
 
 def all_boards(a, now: dt.datetime) -> int:
     """Every board in the workspace: the owner's dashboards read collaborator boards next to the owner board."""
     payloads, texts = [], []
     from board import snapshot
-    for b in bc.discover(a.workspace):
+    def read_board(b):
         if b["error"]:
-            payloads.append({"board": b["name"], "error": b["error"], "threads": [], "locked": False, "invalid": [], "warnings": [], "degraded": True})
-            texts.append(f"🔴 {b['name']}: {b['error']}")
-            continue
+            return ({"board": b["name"], "error": b["error"], "threads": [], "locked": False, "invalid": [],
+                     "warnings": [], "degraded": True}, f"🔴 {b['name']}: {b['error']}")
         try:
             if a.sync and not b["locked"]:
                 with snapshot(b["root"]) as remote_root:
@@ -945,6 +960,17 @@ def all_boards(a, now: dt.datetime) -> int:
         p["root"] = str(b["root"]).replace(str(Path.home()), "~")
         if b["config"]:
             p["audience"] = b["config"]["audience"]
+        return p,t
+
+    boards=bc.discover(a.workspace)
+    if getattr(a,"startup",False) and not a.sync and len(boards)>1:
+        # Local boards have independent checkouts. Overlap Git and file reads within the startup hook's deadline.
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(4,len(boards))) as pool:
+            results=list(pool.map(read_board,boards))
+    else:
+        results=map(read_board,boards)
+    for p,t in results:
         payloads.append(p)
         if t:
             texts.append(t)
@@ -968,6 +994,7 @@ def all_boards(a, now: dt.datetime) -> int:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--surface", action="store_true")
+    ap.add_argument("--startup", action="store_true", help="session-start surface: one line per actionable request")
     ap.add_argument("--sync", action="store_true", help="read remote in an isolated temporary checkout")
     ap.add_argument("--project")
     ap.add_argument("--inbox", help="session ID of the receiver")
@@ -991,6 +1018,10 @@ def main(argv=None) -> int:
     ap.add_argument("--git-root", type=Path, help=argparse.SUPPRESS)  # and the board's own checkout (its history)
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args(argv)
+    if a.startup:
+        if a.json or a.validate or a.stats or a.template or a.write:
+            ap.error("--startup produces the read-only session-start text")
+        a.surface = True
     if a.selftest:
         return _selftest()
     now = now_utc()

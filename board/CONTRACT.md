@@ -583,6 +583,13 @@ counts is not flagged.
 
 ### <a id="accept-ack-newer"></a>Posts written after the submission (accept / revise)
 
+For `submit`, `accept` and `revise`, “after” means later on the board's branch. The writer checks the required
+event IDs at preparation and against each candidate push's parent, including a fresh parent after a concurrent post.
+An outbox `<event-id>.ack` keeps the checked base and IDs on the posting machine for `retry`. A changed base or a new
+relevant post requires reading the synchronized thread and preparing a fresh submission or review. An identical
+already delivered event remains a successful retry. For older pending events without this local record, retry can
+establish only an empty acknowledgment set based on the original reply target.
+
 `accept` and `revise` list the posts in the request's thread written after the submission named by `--reply-to` by
 someone other than the reviewing session (`note`, `update`, `blocker`, `submit`; the engine's own marks = a start or
 pickup note and a touch are left out). When there are any, the post is refused with each one's id, kind, author and
@@ -1355,6 +1362,7 @@ damaged history needs a separately reviewed recovery.
 python3 board.py boards                                  # boards in the workspace
 python3 board.py inbox --board <name> --agent codex --sync   # latest addressed work (--all-boards: every board)
 python3 board-view.py --board <name> --sync --surface    # all actionable work
+python3 board-view.py --all-boards --startup             # one line per pending request, with board and request ID
 python3 board-view.py --all-boards --surface --json      # dashboards: every board, threads tagged with `board`
 python3 board-view.py --board <name> --validate          # schema + protocol + paths
 python3 board-view.py --board <name> --stats --sync   # dwell per transition (median / p90 / max) and open requests, oldest first
@@ -1362,6 +1370,8 @@ python3 board-html.py --board <name> --sync --open       # static snapshot (~/.c
 python3 board-serve.py --board <name>                    # localhost live view: served at once, synchronised behind it
 python3 board-view.py --selftest && python3 board-session-start.py --selftest && python3 test_board.py && python3 board_items.py --selftest
 ```
+
+Request previews identify the effective reviewer on stderr. The event preview and any launch instructions are on stdout.
 
 <a id="session-start-surface"></a>To show pending threads at the top of every new session, wire
 `board-session-start.py` as a Claude Code `SessionStart` hook in your own settings (the script is shared, the wiring

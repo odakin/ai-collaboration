@@ -31,6 +31,8 @@ worker の起動はカードを押す 2 段のまま。 重ければ [DESIGN](bo
 
 ## 現在地：提出の門と役の受信箱の見張り
 
+提出・検収は競合後の push と手動再送でも既読の ID を照合する。開始時の一覧は依頼ごとに1行とし、検収役は依頼のプレビューで確認できる。次は通常運用で、訂正の追加を通知された担当者が該当 ID から読み直せることを確かめる（[既読確認と再送](board/CONTRACT.md#accept-ack-newer)、[開始時の一覧](board/CONTRACT.md#session-start-surface)）。
+
 `submit` は claim の後に他の人が書いた post を `--ack-newer` で名指させ ([契約](board/CONTRACT.md#submit-ack-newer))、 依頼書と、 その dir の下の link 先の依頼の後の commit を警告して提出に残す ([契約](board/CONTRACT.md#submit-spec-changes))。 役は `watch --session` で受信箱を見張れる ([契約](board/CONTRACT.md#watch-session))。
 次 = 断り → 名指しの 1 往復が重すぎないかと、 警告 (過去の提出のおよそ 5 本に 1 本) が読まれるかを、 実際の提出で見る。 `watch --session` の負荷は大きな掲示板では測っていない。
 
