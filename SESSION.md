@@ -49,6 +49,8 @@ worker の起動はカードを押す 2 段のまま。 重ければ [DESIGN](bo
 
 ## 現在地：役割 id 宛ての依頼と vendor
 
+検収役の誤指定は依頼のプレビューと投稿の両方で書き込み前に検出し、役の受信箱は引受・再引受が必要な状態だけに `claim` を案内する。次は検収役つきの依頼で、提出が届いたときの案内を確認する（[検収の流れ](board/CONTRACT.md#request-and-receipt-workflow-v2)）。
+
 役割 id (`role-…` / `resident-…`) 宛ての依頼は、 依頼に書いた agent に依らず、 その役割で開いた Claude・Codex
 どちらの session の inbox にも出て、 claim・submit・受領ができる ([規則](board/CONTRACT.md#role-any-agent)、
 `--to any` を採らなかった理由 = [DESIGN](board/DESIGN.md#rejected-alternatives))。 既存の依頼は付け替え不要。

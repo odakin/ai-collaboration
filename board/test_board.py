@@ -1345,6 +1345,26 @@ class CollaboratorBoards(unittest.TestCase):
         return p
     def eid(self, out): return next(l.split('=',1)[1] for l in out.splitlines() if l.startswith('event_id='))
 
+    def test_invalid_reviewer_leaves_request_unposted(self):
+        import os
+        from unittest.mock import patch
+        args = ('request', '--root', str(self.owner), '--source', str(self.proj), '--policy', 'ordinary',
+                '--project', 'proj', '--agent', 'other', '--session', 'requester', '--to', 'other',
+                '--to-session', 'worker', '--thread', 'example-routing', '--summary', 'Check a sum',
+                '--acceptance', 'Return the sum', '--no-launch')
+        before = board.run(self.owner, 'ls-remote', 'origin', 'refs/heads/main').stdout
+        for explicit, default, error in [('worker', '', 'must differ'), (None, 'worker', 'must differ'),
+                                         ('invalid id', '', 'reviewer')]:
+            flags = ('--reviewer', explicit) if explicit else ()
+            for mode in [('--preview',), ()]:
+                with self.subTest(flags=flags, default=default, mode=mode), patch.dict(os.environ, {board.DEFAULT_REVIEWER_ENV: default}):
+                    p = self.cli(*args, *flags, *mode, check=False)
+                    self.assertNotEqual(p.returncode, 0)
+                    self.assertIn(error, p.stderr)
+                    self.assertNotIn('event_id=', p.stdout)
+                    self.assertEqual(before, board.run(self.owner, 'ls-remote', 'origin', 'refs/heads/main').stdout)
+                    self.assertFalse(any(board.outbox_dir(self.owner).glob('*.json')))
+
     def test_stats_smoke(self):
         b=str(self.proj/'board')
         self.cli('request','--root',b,'--agent','claude','--session','c-1','--thread','2026-10-05-stats','--to','codex','--to-session','x-1','--summary','s','--acceptance','a')
@@ -1424,6 +1444,7 @@ class CollaboratorBoards(unittest.TestCase):
         inbox=self.cli('inbox','--root',b,'--agent','codex','--session',role,'--sync').stdout
         self.assertIn('対応待ち',inbox); self.assertIn(f'{role} (Claude / Codex どちらでも)',inbox); self.assertNotIn('claude / '+role,inbox)
         self.assertIn(f'inbox --session {role} --sync で読み',inbox)      # the surface says how a role's session reads it
+        self.assertIn('同じ --session で claim する',inbox)
         row,=json.loads(self.cli('inbox','--root',b,'--agent','codex','--session',role,'--sync','--json').stdout)
         self.assertTrue(row['actionable'])
         claim=self.eid(self.cli('claim','--root',b,'--agent','codex','--session',role,'--request',req,
@@ -1814,7 +1835,10 @@ class FetchTransport(Transport):
         req,=eids(out); self.assertIn('検収役 = claude/role-x-owner-review',out)
         claim,=eids(cli('claim','codex','codex-cli-1','--request',req).stdout)
         sub,=eids(cli('submit','codex','codex-cli-1','--request',req,'--reply-to',claim).stdout)
-        self.assertIn('確認待ち',cli('inbox','claude','role-x-owner-review','--sync').stdout)       # the role's inbox, not the window's
+        inbox=cli('inbox','claude','role-x-owner-review','--sync').stdout
+        self.assertIn('確認待ち',inbox)
+        self.assertIn('inbox --session role-x-owner-review --sync',inbox)
+        self.assertNotIn('で claim する',inbox)
         self.assertIn('対応待ちはありません',cli('inbox','claude','claude-win-1','--sync').stdout)
         p=cli('accept','claude','claude-win-1','--request',req,'--reply-to',sub,ok=False)
         self.assertNotEqual(p.returncode,0); self.assertIn('designated reviewer',p.stderr)

@@ -3687,9 +3687,15 @@ def main():
     dnote=restricted_dropped_note(a)
     if dnote: print(dnote,file=sys.stderr)
     claim_model_check(a)   # a worker on another model than its request was launched for does not take the work (measured: the app started one on the requester's model)
+    from board_schema import errors
+    schema=json.loads(SCHEMA_PATH.read_text())
+    probs=errors(ev,schema)
+    if a.command=='request':
+        reviewer=reviewer_for(a,cfg)
+        if reviewer:
+            # Both preview and delivery must reject a bad handover target before saving or posting the request.
+            probs+=errors({'agent':a.agent,'session_id':reviewer},schema['properties']['target'],'reviewer')
     if a.preview:
-        from board_schema import errors
-        probs=errors(ev,json.loads(SCHEMA_PATH.read_text()))
         same=[e for e in events if e['project']['key']==ev['project']['key'] and e['thread_id']==ev['thread_id']]
         probs+=reduce_workflow(same+[ev],view.now_utc())['errors']
         if probs: raise ValueError('; '.join(probs))
@@ -3700,8 +3706,6 @@ def main():
         if a.command=='request' and (a.to_session or '').startswith('role-'):
             print('  (preview = 上の hand-off 文・引数・起動の記録は outbox に書いていない。 投稿すると、 その投稿の request id の名前で書く)')
         return
-    from board_schema import errors
-    probs=errors(ev,json.loads(SCHEMA_PATH.read_text()))
     if probs: raise ValueError('; '.join(probs))
     same=[e for e in events if e['project']['key']==ev['project']['key'] and e['thread_id']==ev['thread_id']]
     w_before=reduce_workflow(same,view.now_utc()) if a.request else None
@@ -3737,7 +3741,6 @@ def main():
         return
     rid = ev['event_id'] if a.command=='request' else a.request
     if a.command=='request':
-        reviewer=reviewer_for(a,cfg)
         if reviewer:
             # The receipt right moves to a standing id now, as one more event (old readers understand a handover):
             # the requesting window may close before the submission arrives (measured: most receipts after a
@@ -3750,7 +3753,7 @@ def main():
                 if separate_reviewer() else
                 f'検収役 = {reviewer} (依頼元 {a.session[:8]} の window が閉じても受領できる id。 依頼元が生きていれば同じ id で受領する)')
             hev=event_from(h,events+[ev])
-            probs=errors(hev,json.loads(SCHEMA_PATH.read_text()))+[x for x in reduce_workflow(same+[ev,hev],view.now_utc())['errors'] if x.startswith(hev['event_id']+':')]
+            probs=errors(hev,schema)+[x for x in reduce_workflow(same+[ev,hev],view.now_utc())['errors'] if x.startswith(hev['event_id']+':')]
             if probs: raise ValueError('reviewer handover: '+'; '.join(probs))
             print('posted '+post(a.root,hev)+f' (検収役 = {a.agent}/{reviewer}: 提出は inbox --session {reviewer} に載る。 受領は --session {reviewer} --session-name \'<native id 8 chars> (<model>)\' で accept / revise'
                   +(' = 検収役の窓が打つ。 この窓は受け取らない)' if separate_reviewer() else ')'))

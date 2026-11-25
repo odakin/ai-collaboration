@@ -619,7 +619,9 @@ def render(threads: dict, invalid, *, surface: bool, project: str | None,
                     if is_role(w['waiting_on'].get('session_id')):
                         # `inbox` without --session reads the caller's native id, so a role's requests stay unseen
                         # unless the line says how to read them (CONTRACT.md#role-any-agent).
-                        lines.append(f"    → この役割の session (Claude / Codex) は inbox --session {w['waiting_on']['session_id']} --sync で読み、 同じ --session で claim する")
+                        role = w['waiting_on']['session_id']
+                        hint = '同じ --session で claim する' if w.get('status') in {'requested', 'stale'} else '投稿にも同じ --session を使う'
+                        lines.append(f"    → この役割の session (Claude / Codex) は inbox --session {role} --sync で読み、 {hint}")
                     lines.append(f"    {w['title']} / request={w['request_id']} / reply_to={w['reply_to']}")
                     lines.extend(handoff_lines(w))
                     for u in (ba.unposted(key[1], w, *activity) if activity else ()):
