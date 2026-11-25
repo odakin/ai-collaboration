@@ -203,7 +203,12 @@ Codex thread, 2026-10-21). The rule matches a plain lone command only, so the ha
 time with every value typed out (measured: a command chained after another with `;` stayed sandboxed, and so did a
 `claim` whose `--session-name` used `${CODEX_THREAD_ID:0:8}`; the same worker's plain `inbox --sync`, `claim` and
 `note` reached the board). Model = `--expect-model`, else
-`AGENT_BOARD_CODEX_MODEL`, else Codex's own `config.toml`; effort = `--effort`, else `AGENT_BOARD_CODEX_EFFORT`, else the
+`AGENT_BOARD_CODEX_MODEL`, else Codex's own `config.toml`; <a id="codex-model-family"></a>a family word there (`sol`,
+`astra`) is the newest listed version of that family on the machine that starts the worker (`codex-app-launch.py
+best-model --family <word>` reads Codex's model list there; a request for another machine keeps the word and that
+machine's `launch` resolves it; an unreadable list or a family it does not list stops the request, no id is guessed),
+and a versioned id is used as given (measured: a procedure that wrote a fixed id started workers one version behind
+once the newer one was out); effort = `--effort`, else `AGENT_BOARD_CODEX_EFFORT`, else the
 same file; working directory = `--launch-cwd`, else the workspace; directories outside it that the work writes (a
 blind-review sandbox, another working place) = `--launch-writable-root <dir>`, repeatable, named in the request because a
 running thread cannot be given one (they join the board's own cache, checkout and git dir; `~` is expanded on the
@@ -213,7 +218,10 @@ anything starts; a repository's `.git` stays read-only unless its git dir is nam
 option, since its worker has no such sandbox); the thread's name in the app = `--title`, else the
 summary's first clause (a restricted request: the role, since its summary is the engine's fixed text), then the model (not added again when the title already ends with the same model and effort). The thread runs unattended (approval `never`), asks the requester's questions as
 a `blocker`, and starts with step 0 = `codex-app-launch.py check-self` (its own model and effort in Codex's local
-record). That check, not the pin, tells which model is running: a later turn queued into the thread can run on another
+record), run again at the start of every later turn; it passes the same family at the asked version or a newer one (a
+newer one prints a line the worker posts once as a `note`, and goes on) and stops on another family, an older version,
+another effort or an unreadable record (measured: the exact match stopped a worker whose later turns ran on the newer
+version of its family). That check, not the pin, tells which model is running: a later turn queued into the thread can run on another
 model than the pinned one (measured once: from the first queued turn after the machine's default model had changed
 since the launch; whether the app or the owner switched it is not settled). Being in Codex's local store, the thread is reachable by `codex queue` ([#codex-reach](#codex-reach)): the app
 takes a queued message as the thread's next turn (measured). On an owner board with the launch default the request
@@ -1082,7 +1090,14 @@ python3 board_asks.py digest --root <board> --session S
   record, the arguments and the hand-off text, and the launch check refused the corrected `start_session` arguments).
   The same value goes to the launch record, the `start_session` arguments, the CLI `--effort`, the hand-off text and
   the title on every surface; a request for a worker of a given model and effort is written
-  `--expect-model <model> --effort <effort>`. <a id="launch-effort-floor"></a>A board whose `board.json` sets
+  `--expect-model <model> --effort <effort>`. <a id="claude-model-floor"></a>A tier word (`opus`, `fable`) is passed as
+  it is to `start_session` and the CLI, which resolve it to the newest version (measured: a desktop worker started with
+  "opus" ran claude-opus-5-5), and the hand-off's step 0 checks the newest version of that tier this machine's Claude
+  CLIs list (claude-config `scripts/lib/model_versions.py`, the same as `session-model.py best-model --family <tier>`)
+  as a floor: the same tier at that version or a newer one passes (a newer one: a line the worker posts once as a
+  `note`), an older start stops (the app starts a child on the requester's model when the asked one is higher). An
+  unreadable list leaves step 0 on the tier word (any version of it). A versioned id pins that version at launch, so
+  it is for a version the owner named. <a id="launch-effort-floor"></a>A board whose `board.json` sets
   `launch_effort_floor` (`{"effort": "<lowest>", "rule": "<where the rule is written>"}`) refuses a request to a Claude
   role, and `launch --request` on one, whose effort so resolved is below it: one line naming the rule, before anything is
   posted or written. The owner's own words naming that effort, verbatim, in `--effort-quote` let it through and go to

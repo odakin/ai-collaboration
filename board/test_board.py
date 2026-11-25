@@ -4178,6 +4178,77 @@ class SpecChangesCLI(EffortFlag):
         self.assertIn('spec-changed-after-request: eproj/plans/spec.md',sub.get('details') or '')
 
 
+class NewestModelOfFamily(unittest.TestCase):
+    """A family word is the newest version of that family, and step 0 passes a newer one (CONTRACT.md#codex-model-family
+    / #claude-model-floor). Measured: a Codex worker asked for an older version ran its later turns on the newer one and
+    the exact-match check stopped it; a fixed id in the procedure started workers one version behind."""
+    def setUp(self):
+        import os
+        self.tmp=Path(tempfile.mkdtemp(prefix='newest-model-'))
+        self.saved={k:os.environ.get(k) for k in ('AGENT_BOARD_CODEX_LAUNCHER','CLAUDE_MODEL_LIST_FILES')}
+        self.stub=self.tmp/'launch-stub.py'
+        self.stub.write_text('import sys\n'
+                             'if sys.argv[1:3]==["best-model","--family"]:\n'
+                             '    best={"astra":"gpt-6.2-astra","sol":"gpt-6.2-sol"}.get(sys.argv[3])\n'
+                             '    if best: print(best); sys.exit(0)\n'
+                             '    print("分からない: no "+sys.argv[3],file=sys.stderr); sys.exit(1)\n'
+                             'sys.exit(2)\n')
+        os.environ['AGENT_BOARD_CODEX_LAUNCHER']=str(self.stub)
+        self.models=self.tmp/'models.json'
+        self.models.write_text(json.dumps({'additionalModelCostsCache':{'claude-opus-5':{},'claude-opus-5-5':{},'claude-fable-5-1':{}},
+                                           'additionalModelOptionsCache':[{'value':'claude-fable-5-2[1m]'}]}))
+        os.environ['CLAUDE_MODEL_LIST_FILES']=str(self.models)
+    def tearDown(self):
+        import os, shutil
+        for k,v in self.saved.items():
+            if v is None: os.environ.pop(k,None)
+            else: os.environ[k]=v
+        shutil.rmtree(self.tmp,ignore_errors=True)
+    def test_codex_family_word_resolved_on_the_launch_host(self):
+        here=board.this_host()
+        self.assertEqual(board.resolve_codex_model('astra',here),'gpt-6.2-astra')
+        self.assertEqual(board.resolve_codex_model('Sol',here),'gpt-6.2-sol')
+        self.assertEqual(board.resolve_codex_model('astra','another-machine-x'),'astra')   # that machine's launch resolves it
+        self.assertEqual(board.resolve_codex_model('gpt-6-astra',here),'gpt-6-astra')      # a versioned id stays as given
+        self.assertEqual(board.resolve_codex_model('',here),'')
+        with self.assertRaises(ValueError) as cm: board.resolve_codex_model('luna',here)
+        self.assertIn('分からない',str(cm.exception)); self.assertIn('--expect-model',str(cm.exception))
+    def test_codex_handoff_names_the_family_and_reruns_step_zero(self):
+        text=board.codex_handoff_text(Path('/fixture/board'),'role-fixture-worker','20990101T000000Z-codex-000001',None,
+                                      {'model':'gpt-6.2-astra','effort':'xhigh'})
+        self.assertIn('must run on the newest Astra (gpt-6.2-astra when it was started) or a newer Astra at xhigh effort',text)
+        self.assertIn('check-self --model gpt-6.2-astra --effort xhigh',text)
+        self.assertIn('run it again at the start of every later turn',text)
+        self.assertIn('post that line once as a `note`',text)
+        other=board.codex_handoff_text(Path('/fixture/board'),'role-fixture-worker','20990101T000000Z-codex-000001',None,
+                                       {'model':'fixture-model','effort':'high'})
+        self.assertIn('must run on fixture-model at high effort',other); self.assertNotIn('post that line once',other)
+        restricted=board.codex_handoff_text(Path('/fixture/board'),'role-fixture-worker','20990101T000000Z-codex-000001',None,
+                                            {'model':'gpt-6.2-astra','effort':'xhigh'},policy='encrypted-metadata-only',source=Path('/fixture/src'))
+        self.assertNotIn('post that line once',restricted)   # a restricted thread takes no free text
+    def test_claude_tier_word_gets_the_newest_as_step_zero_floor(self):
+        import os
+        text=board.handoff_text(Path('/fixture/board'),'role-fixture-worker','20990101T000000Z-claude-000001',None,'opus','xhigh',surface='desktop')
+        self.assertIn('must run on the newest opus (claude-opus-5-5 when this was written) or a newer opus at xhigh effort',text)
+        self.assertIn('self --expect-model claude-opus-5-5 --expect-effort xhigh',text)
+        self.assertIn('post that line once as a `note`',text)
+        fab=board.handoff_text(Path('/fixture/board'),'role-fixture-worker','20990101T000000Z-claude-000001',None,'fable','xhigh',surface='desktop')
+        self.assertIn('self --expect-model claude-fable-5-2 ',fab)   # the options list counts, the context suffix dropped
+        pinned=board.handoff_text(Path('/fixture/board'),'role-fixture-worker','20990101T000000Z-claude-000001',None,'claude-fable-5-1','high',surface='desktop')
+        self.assertIn('must run on claude-fable-5-1 at high effort',pinned); self.assertIn('self --expect-model claude-fable-5-1 ',pinned)
+        self.assertNotIn('post that line once',pinned)
+        os.environ['CLAUDE_MODEL_LIST_FILES']=''   # no readable list: step 0 on the tier word, as before
+        bare=board.handoff_text(Path('/fixture/board'),'role-fixture-worker','20990101T000000Z-claude-000001',None,'opus','xhigh',surface='desktop')
+        self.assertIn('must run on opus at xhigh effort',bare); self.assertIn('self --expect-model opus ',bare)
+    def test_claude_start_arguments_keep_the_tier_word(self):
+        # the app and the CLI resolve the word to the newest version; a pinned id would start the next release one behind
+        root=self.tmp/'b'; root.mkdir()
+        (root/'.local').mkdir()
+        args,_=board.desktop_plan(root,'role-proj-x','20990101T000000Z-claude-0000aa','(the request itself)','opus','sess-1',
+                                  effort='xhigh',project='proj',summary='Fix the parser')
+        self.assertEqual(args['model'],'opus'); self.assertIn('--expect-model claude-opus-5-5',args['prompt'])
+
+
 class SessionWatchClone(SessionWatch):
     """The same through the previous transport (AGENT_BOARD_TRANSPORT=clone): a full read every interval."""
     def setUp(self):

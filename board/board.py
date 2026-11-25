@@ -1935,17 +1935,20 @@ def handoff_text(root, role, request_id, spec, model, effort, surface='backgroun
     not to ask the owner in its window and to apply guard-stopped files there, while the window is where the owner
     discusses the research and the conductor does the files, Git and records (measured: a dialogue window moved material
     into a repository, committed, pushed and reported the post-commit check to the owner)."""
-    run=(f" This window must run on {model}"+(f" at {effort} effort" if effort else '')
+    floor,_=claude_floor(model)
+    target=(f"the newest {model} ({floor} when this was written) or a newer {model}" if floor else model)
+    run=(f" This window must run on {target}"+(f" at {effort} effort" if effort else '')
          +(f" (why this model and effort: {reason})" if reason else '')+'.') if model else ''
     eng=Path(__file__).resolve()
     hold=''
     if surface=='desktop' and model:
         sm_cli=ENGINE.parent.parent/'claude-config'/'scripts'/'session-model.py'
-        hold=(f"0. First run `python3 {sm_cli} self --expect-model {model}"+(f" --expect-effort {effort}" if effort else '')
+        hold=(f"0. First run `python3 {sm_cli} self --expect-model {floor or model}"+(f" --expect-effort {effort}" if effort else '')
               +"`: if it does not print ✅, stop at once without reading the request or its materials: first send the line it"
               " prints to the session that started you (SendMessage to the `to` it names = your requester; your turn's end does"
               " not wake it while its other children run, a message does), then say so in one line; the requester switches"
-              " you and sends `go`.\n")
+              " you and sends `go`."+(" If it prints that a newer version runs, go on, and after your claim (step 2) post that"
+              " line once as a `note` on this request." if floor else '')+"\n")
     # A question put to the owner in more than one window reached the owner twice (measured), and the owner moved the
     # worker's questions to the requester (measured: a worker asked the owner in its own window whether to keep a sentence
     # of its deliverable, and the owner answered that the requester should decide it at review). The requester decides
@@ -2000,6 +2003,30 @@ def handoff_text(root, role, request_id, spec, model, effort, surface='backgroun
             f"1. `python3 {eng} inbox --root {root} --agent claude --session {role} --sync`; if the request is not visible, do not read the spec — ask the requester or `watch`.\n"
             f"2. `python3 {eng} claim --root {root} --agent claude --session {role} --request {request_id}{scope}{src}{claim_tail}`; if refused with *another live claim exists*, stop and say so in one line.\n"
             f"3. {step3}{plain}{ask}\n" + safety_stop_handoff_text())
+
+
+CLAUDE_TIER_WORDS=('opus','fable','sonnet','haiku','mythos')
+
+
+def _model_versions():
+    """Optional companion (layer-1 claude-config scripts/lib/model_versions.py, cloned next to this engine). Raises when absent."""
+    lib=ENGINE.parent.parent/'claude-config'/'scripts'/'lib'/'model_versions.py'
+    spec=importlib.util.spec_from_file_location('model_versions',lib); mv=importlib.util.module_from_spec(spec); spec.loader.exec_module(mv)
+    return mv
+
+
+def claude_floor(model):
+    """(floor, why) for a Claude worker asked for by a tier word: floor = the newest version of that tier this machine's
+    Claude CLIs list. The worker is still started with the word (the CLI and the app resolve it to the newest version =
+    measured: a desktop worker started with "opus" ran claude-opus-5-5), and its step 0 checks the floor, so a start on an
+    older version (the app starts a child on the requester's model when the asked one is higher) stops while a later
+    release goes on. ('', why) when the list cannot be read (step 0 then checks the tier alone, as before); ('', '') for
+    a versioned id or no model (the id is the floor itself). The same rule as Codex: the newest version of the chosen
+    family, a newer one goes on (CONTRACT.md#claude-model-floor / #codex-model-family)."""
+    m=(model or '').strip().lower()
+    if m not in CLAUDE_TIER_WORDS: return '',''
+    try: return _model_versions().best_model(m)
+    except Exception as ex: return '',f'model_versions.py が読めない ({ex.__class__.__name__})'
 
 
 def own_model(session):
@@ -2562,15 +2589,52 @@ def codex_defaults():
     return got.get('model',''),got.get('model_reasoning_effort','')
 
 
+CODEX_SLUG=re.compile(r'^gpt-(\d+(?:\.\d+)*)-([a-z]+)$')
+CODEX_FAMILY_WORD=re.compile(r'^[a-z]+$')
+
+
+def codex_family(model):
+    """'gpt-6.2-astra' → 'astra'; '' for another shape."""
+    m=CODEX_SLUG.match((model or '').strip().lower())
+    return m.group(2) if m else ''
+
+
+def codex_best_model(family):
+    """The newest listed version of a Codex family on this machine (the launcher's best-model), or raises with its
+    reason: an unknown one stops the request instead of guessing an id (an old id starts the worker a version behind,
+    and its step 0 stopped it when the app's default later moved to the newer one = measured)."""
+    try:
+        p=subprocess.run([sys.executable,str(codex_launcher()),'best-model','--family',family],capture_output=True,text=True,timeout=30)
+    except Exception as ex:
+        raise ValueError(f'Codex の系統 {family} の最新の版を引けない ({ex.__class__.__name__}) = 起こさない。 --expect-model に版つきの id を書いて出し直す')
+    got=(p.stdout or '').strip().splitlines()
+    if p.returncode!=0 or not got:
+        why=(p.stderr or '').strip()[-300:] or f'exit {p.returncode}'
+        raise ValueError(f'Codex の系統 {family} の最新の版が分からない ({why}) = 起こさない。 --expect-model に版つきの id を書いて出し直す')
+    return got[-1].strip()
+
+
+def resolve_codex_model(model, host):
+    """A family word ('astra', 'sol') → the newest listed version, looked up when this machine is the launch host; for
+    another machine the word stays in the request and that machine's `launch` resolves it from its own list. A versioned
+    id stays as it is (named by the owner or the requester)."""
+    m=(model or '').strip()
+    if m and CODEX_FAMILY_WORD.match(m.lower()) and same_host(host,this_host()):
+        return codex_best_model(m.lower())
+    return m
+
+
 def codex_fields(a):
     """How a Codex role's worker starts (CONTRACT.md#codex-worker-launch): the machine, model, effort, working directory
     and surface. Written into the request's `details` (one `launch-<key>: <value>` line each), so a session on another
-    machine reads the same values and the launch host is on record before anything starts."""
+    machine reads the same values and the launch host is on record before anything starts. A family word as the model
+    is resolved to its newest listed version here when this machine starts the worker (resolve_codex_model)."""
     if getattr(a,'_codex_fields',None): return a._codex_fields
     dm,de=codex_defaults()
     cwd=a.launch_cwd or str(bc.workspace(a.root))
-    f={'host':a.launch_host or this_host(),
-       'model':(a.expect_model or os.environ.get(CODEX_MODEL_ENV) or dm or '').strip(),
+    host=a.launch_host or this_host()
+    f={'host':host,
+       'model':resolve_codex_model((a.expect_model or os.environ.get(CODEX_MODEL_ENV) or dm or '').strip(),host),
        'effort':(a.effort or os.environ.get(CODEX_EFFORT_ENV) or de or '').strip(),
        'cwd':home_tilde(cwd),
        'surface':'background' if a.surface=='background' else 'codex-app'}
@@ -2640,10 +2704,17 @@ def codex_handoff_text(root, role, request_id, spec, f, project=None, policy=Non
     --sync` and `note` reached the board)."""
     eng=Path(__file__).resolve(); launcher=codex_launcher(); m,e=f.get('model'),f.get('effort')
     scope=(f" --project {project}" if project else '')+(f" --policy {policy}" if policy else '')
-    run=(f" This thread must run on {m}"+(f" at {e} effort" if e else '')+'.') if m else ''
+    fam=codex_family(m)
+    target=(f"the newest {fam.capitalize()} ({m} when it was started) or a newer {fam.capitalize()}" if fam else m)
+    run=(f" This thread must run on {target}"+(f" at {e} effort" if e else '')+'.') if m else ''
     src,claim_tail,submit_tail,restricted=restricted_handoff_parts(policy,source,f"<the first 8 characters of your thread id, typed out> ({m or '<model>'})")
-    hold=(f"0. First run `python3 {launcher} check-self --model {m}"+(f" --effort {e}" if e else '')+"`: if it does not print ✅,"
-          " stop at once without reading the request or its materials and say so in one line.\n") if m else ''
+    # Step 0 again at each later turn: a worker's later turns (a queued notice, the owner's message) ran on the app's
+    # default model, not the one pinned at the start (measured); the check passes a newer version of the same family.
+    hold=(f"0. First run `python3 {launcher} check-self --model {m}"+(f" --effort {e}" if e else '')+"`, and run it again at the"
+          " start of every later turn (a queued notice or the owner's message starts one): if it does not print ✅,"
+          " stop at once without reading the request or its materials and say so in one line."
+          +(" If it prints that a newer version runs, go on, and after your claim (step 2) post that line once as a `note`"
+            " on this request." if fam and not restricted else '')+"\n") if m else ''
     return (f"You are the board worker for role `{role}`, request `{request_id}`, spec `{spec or '(the request itself)'}`; execute it yourself.{run}\n"
             +hold+
             f"1. `python3 {eng} inbox --root {root} --agent codex --session {role} --sync`; if the request is not visible, do not read the spec — say so in one line and stop.\n"
@@ -2832,6 +2903,7 @@ def cmd_launch(a):
         raise ValueError('この依頼は headless の codex exec を選んでいる (理由 = '+f.get('headless-reason','')+') = 依頼元の shell が起こす')
     if f.get('writable-root'): normalize_writable_roots(f['writable-root'])   # this machine starts it: each root must be a dir here
     a.policy=req['source_policy']; a.project=req['project']['key']
+    f['model']=resolve_codex_model(f.get('model'),f['host'])   # a family word from another machine's request: this machine's newest
     spec=handoff_spec(a,req,launch_record(a.root,a.request))
     argv,line,_=codex_plan(a.root,asg['session_id'],a.request,spec,f,project=a.project,policy=a.policy,source=getattr(a,'source',None),
                            title=f.get('title') or summary_title(req.get('summary'),a.policy,title_fallback(a.root)) or None)
