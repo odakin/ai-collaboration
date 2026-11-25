@@ -218,6 +218,13 @@ code did not take).
   splitting a line at 、 to keep the answer half of "1 OK、2 は？" (it also binds "はい、でも 2 は？", which binds nothing
   today: a lost answer leaves the ask open, a wrong one closes it).
 
+The [proposal for confirming several questions together](../docs/owner-asks-multiple-answers-proposal.md)
+records the rationale for binding one answer to revisions of several questions. The
+[baseline reproduction](../docs/owner-asks-multiple-answers-proposal.md#baseline-reproduction)
+exercises binding by display order and by confirmation separately. The
+[candidate verification](../docs/owner-asks-multiple-answers-proposal.md#implementation-verification)
+covers the ledger and the independent approval paths.
+
 ## Source-of-truth boundary
 
 The board may say "the numerical check found X" while work is in progress; it must not become the only home of X.
