@@ -634,6 +634,10 @@ A board whose `board.json` sets `accept_review_form` (`{"rule": "<where the rule
   closing a question "as decided before" shows that the decision's reason still holds after the submission, or the
   question goes to the owner as `fact` (claude-config `actor-attribution.md#premise-before-rank`; measured: an
   acceptance kept a placement as the ledger's ruling after a later draft had removed its reason).
+  When the accepted deliverable is a draft to be sent or posted outside (a message, a letter, a post), sort the
+  owner's approval to send into that same acceptance as `--owner-ruling 'outbound: <what, where, to whom>'`. A line in
+  `--leftover` or a later note saying the owner sees it first does not reach the owner-asks ledger, which reads the
+  owner lines of the latest acceptance only, and a closed request cannot be accepted again (measured).
 - Optional `--leftover 'in <where the confirmed policy is>: <rest>'` or `'out: <rest>'`: whether a follow-up request
   for the submission's out-of-scope rest stays inside the confirmed policy; outside it, a policy stage comes first
   (measured: follow-ups made from acceptances' out-of-scope rests widened a protection beyond what the owner had
