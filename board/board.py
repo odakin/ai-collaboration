@@ -628,10 +628,19 @@ def _validate_post(dest, event, cfg):
     return events,same,None
 
 
+def exhausted_post_error(event, stderr):
+    # Push may print a URL containing user info. Retain the reason without publishing URL credentials.
+    reason=re.sub(r'(?<=://)[^\s/@]+@','<redacted>@',stderr).strip()[-1200:]
+    return ValueError(f"posting failed after three attempts; sync first, then use `retry --event-id {event['event_id']}` "
+                      'with the original --agent, --session, --policy and project or source if it is missing.'
+                      + (' Last push error: '+reason if reason else ''))
+
+
 def _post_fetch(root, event, rel, *, before_push=None, landed=None):
     """Default transport: fetch, validate against the fetched tree, add the event as one commit through the object
     store, push; a rejected push (another writer won) fetches again and revalidates, three attempts."""
     repo=bt.Repo(root)
+    rejections=[]
     encrypted='git-crypt' in run(repo.top,'check-attr','filter','--',repo.prefix+str(rel)).stdout.decode()
     text=(json.dumps(event,ensure_ascii=False,indent=2)+'\n').encode()
     for attempt in range(3):
@@ -656,13 +665,11 @@ def _post_fetch(root, event, rel, *, before_push=None, landed=None):
         if cfg['encryption']=='git-crypt' and not repo.blob_bytes(blob).startswith(view.GITCRYPT_MAGIC): raise ValueError('refusing to push an unencrypted event')
         sha=repo.commit(base,str(rel),blob)
         if before_push: before_push(attempt)
-        if repo.push(sha):
+        if repo.push(sha,rejections=rejections):
             fetched(root,sha); repo.notify(sha); repo.fast_forward(sha,cfg['audience'])
             if landed is not None: landed[:]=same+[event]
             return event['event_id']
-    raise ValueError(f"posting failed after three attempts; post it again with `retry --event-id {event['event_id']}` "
-                     'and the same --agent, --session and --policy, plus --project (or --source) as in this command '
-                     '(retry checks the source before it reads the saved event)')
+    raise exhausted_post_error(event,rejections[-1] if rejections else '')
 
 
 def _post_clone(root, event, rel, *, before_push=None, landed=None):
@@ -698,9 +705,7 @@ def _post_clone(root, event, rel, *, before_push=None, landed=None):
             # Reset only this disposable checkout, then revalidate the transition
             # against the winner. A concurrent claim cannot sneak through rebase.
             run(dest,'reset','--hard',f'origin/{branch}')
-        raise ValueError(f"posting failed after three attempts; post it again with `retry --event-id {event['event_id']}` "
-                     'and the same --agent, --session and --policy, plus --project (or --source) as in this command '
-                     '(retry checks the source before it reads the saved event)')
+        raise exhausted_post_error(event,pushed.stderr.decode(errors='replace'))
 
 
 def _session_model():
@@ -2693,7 +2698,27 @@ def normalize_writable_roots(roots, check_exists=True):
     return out
 
 
-def codex_handoff_text(root, role, request_id, spec, f, project=None, policy=None, source=None):
+def codex_git_delivery_status(f, source=None):
+    """Compare the work repository's Git paths with the roots explicitly requested for it."""
+    if not same_host(f.get('host'),this_host()):
+        return ''
+    args=('rev-parse','--path-format=absolute','--git-dir','--git-common-dir')
+    result=run(os.path.expanduser(f['cwd']),*args,check=False)
+    if result.returncode and source:
+        result=run(source,*args,check=False)
+    if result.returncode:
+        return ''
+    git_dirs=dict.fromkeys(os.path.realpath(path) for path in os.fsdecode(result.stdout).splitlines() if path)
+    roots={os.path.realpath(os.path.expanduser(path)) for path in f.get('writable-root',[])}
+    missing=[path for path in git_dirs if path not in roots]
+    if missing:
+        return ('Git delivery: requester. Protected Git directories missing from --launch-writable-root: '
+                + ', '.join(shlex.quote(path) for path in missing)
+                + '. Save files in the worktree and name the pending Git delivery in the submission.')
+    return 'Git delivery: the request names the Git directories. Check write and remote access in the executing turn before using Git.'
+
+
+def codex_handoff_text(root, role, request_id, spec, f, project=None, policy=None, source=None, *, git_status=''):
     """What a Codex worker thread starts from: the Codex counterpart of handoff_text. Step 0 reads this thread's own
     model and effort from Codex's local record (the launcher pins them; a text pasted into a window opened by hand runs
     on whatever that window has). The Codex app runs the thread, so the owner may watch it and talk to it there, but the
@@ -2717,14 +2742,21 @@ def codex_handoff_text(root, role, request_id, spec, f, project=None, policy=Non
             " on this request." if fam and not restricted else '')+"\n") if m else ''
     return (f"You are the board worker for role `{role}`, request `{request_id}`, spec `{spec or '(the request itself)'}`; execute it yourself.{run}\n"
             +hold+
+            (git_status+'\n' if git_status else '')+
             f"1. `python3 {eng} inbox --root {root} --agent codex --session {role} --sync`; if the request is not visible, do not read the spec — say so in one line and stop.\n"
             f"2. `python3 {eng} claim --root {root} --agent codex --session {role} --request {request_id}{scope}{src}{claim_tail}`"
             +('' if restricted else " (read the thread id first with a separate `echo $CODEX_THREAD_ID`)")
-            +"; if refused with *another live claim exists*, stop and say so in one line.\n"
+            +f"; wait for the command to finish and print `posted <event-id>`. Then run `python3 {eng} show --root {root}"
+            f" --agent codex --session {role} --request {request_id} --sync` and check that the same claim is active for your role."
+            " If the claim is unconfirmed, stop before step 3 and report the request and any saved event ID to the requester"
+            " in this window. For an ordinary request on an owner board, the requester or reviewer can also find that ID"
+            " via a synced show on the posting host."
+            " The requester can coordinate an approved retry with the original identity.\n"
             f"3. {POLICY_FIRST_HANDOFF}; when done, `submit` with the same --root, --agent, --session, --request{scope}{src},{submit_tail}"
             +('' if restricted else " Write every `submit` and `note` summary in plain words: do not use labels made up during the work (option letters, item"
             " or finding numbers); if you keep one, say what it refers to right after it.")
-            +" Ask a question for the requester as a"
+            +" Verify the submission with `posted <event-id>` and a synced show of the same request."
+            " Ask a question for the requester as a"
             " `blocker` on the board: the requester reads the board, not this window (the owner may also watch this window and"
             " talk to you here). Run each board command on its own, with every value typed out: not chained with `;`, `&&` or a"
             " pipe, and with no `$` expansion (`$VAR`, `${…}`, `$(…)`) in it. A Codex rule runs exactly such plain commands"
@@ -2745,7 +2777,10 @@ def codex_plan(root, role, request_id, spec, f, project=None, policy=None, title
     Codex rule (the app's sandbox has no network); network on for the daemon fallback (approval never: it runs
     unattended, so the dirs outside cwd it writes, the request's --launch-writable-root, are named here, at the start).
     The thread's name = the request's --title (else the summary's first clause) and the model."""
-    text=codex_handoff_text(root,role,request_id,spec,f,project=project,policy=policy,source=source)
+    git_source=source or (touch_base(root)/project if project and policy=='ordinary' else None)
+    git_status=codex_git_delivery_status(f,git_source)
+    if git_status: print(git_status,file=sys.stderr)
+    text=codex_handoff_text(root,role,request_id,spec,f,project=project,policy=policy,source=source,git_status=git_status)
     hpath=write_outbox(root,request_id+'.handoff.txt',text)
     rec=write_launch_record(root,request_id,role=role,spec=spec,model=f.get('model'),effort=f.get('effort'),surface='codex-app',
                             launch_host=f.get('host'),cwd=f.get('cwd'))
@@ -2792,7 +2827,9 @@ def codex_announce(a, ev, audience):
     (argv, env) when it starts on this machine (None when another machine launches it, or for the headless line)."""
     f=codex_fields(a); rid=ev['event_id']; spec=handoff_spec(a)
     if f['surface']=='background':
-        text=codex_handoff_text(a.root,a.to_session,rid,spec,f,project=a.project,policy=a.policy,source=a.source)
+        git_status=codex_git_delivery_status(f,a.source)
+        if git_status: print(git_status,file=sys.stderr)
+        text=codex_handoff_text(a.root,a.to_session,rid,spec,f,project=a.project,policy=a.policy,source=a.source,git_status=git_status)
         hpath=write_outbox(a.root,rid+'.handoff.txt',text)
         write_launch_record(a.root,rid,role=a.to_session,spec=spec,model=f.get('model'),effort=f.get('effort'),surface='background',
                             launch_host=f['host'],cwd=f['cwd'],headless_reason=f.get('headless-reason'))
@@ -3124,8 +3161,34 @@ def request_matches(key, state, ref):
     return bool(w.get('request_id')) and (w['request_id']==ref or ref in ('/'.join(key), key[1]))
 
 
+def pending_delivery(board_root, snapshot_root, events, project, thread, workflow, reader):
+    """Owner-board recovery metadata for this request's requester or reviewer on the posting host."""
+    if not any(same_session(reader,workflow.get(side)) for side in ('requester','reviewer')):
+        return []
+    if bc.load(snapshot_root)['audience']!='owner':
+        return []
+    landed={event['event_id'] for event in events}
+    result=[]
+    for path in sorted(outbox_dir(board_root).glob('*.json')):
+        if path.stem in landed or path.is_symlink() or not re.fullmatch(r'\d{8}T\d{6}Z-[a-zA-Z0-9-]+',path.stem):
+            continue
+        try: saved=json.loads(path.read_text(encoding='utf-8'))
+        except (OSError,ValueError): continue
+        if not isinstance(saved,dict) or saved.get('event_id')!=path.stem or saved.get('source_policy')!='ordinary':
+            continue
+        if saved.get('request_id')!=workflow['request_id'] or saved.get('thread_id')!=thread:
+            continue
+        saved_project=saved.get('project')
+        if not isinstance(saved_project,dict) or saved_project.get('key')!=project:
+            continue
+        if saved.get('kind') in ('claim','note','blocker','submit'):
+            result.append({'event_id':path.stem,'kind':saved['kind']})
+    return result
+
+
 def inbox_show(a, root, *, board_name=None, collect=None):
     """inbox / show for one board. `collect` (a list) gathers rows across boards instead of printing."""
+    board_root=root
     with snapshot(root) if a.sync else contextlib.nullcontext(root) as root:
         events=read(root); all_threads=view.derive(events,view.now_utc())
         if any(issue.unscoped for issue in events.invalid):
@@ -3143,12 +3206,17 @@ def inbox_show(a, root, *, board_name=None, collect=None):
                 return
             if len(found) != 1: raise ValueError('request not found or ambiguous: '+a.request)
             pk,tid,t=found[0]; w=t['workflow']
+            pending=pending_delivery(board_root,root,events,pk,tid,w,me) if a.sync else []
             if a.json:
-                print(json.dumps(view.workflow_row(pk,tid,t,reader=me),ensure_ascii=False,indent=2))
+                row=view.workflow_row(pk,tid,t,reader=me)
+                if pending: row['pending_delivery']=pending
+                print(json.dumps(row,ensure_ascii=False,indent=2))
             else:
                 print(f"{pk}/{tid} [{w['label']}] request={w['request_id']}")
                 print(w.get('title') or '')
                 print('\n'.join(view.handoff_lines(w, notes='all')))
+                for item in pending:
+                    print(f"同期時点で未配送（この機械の outbox）: {item['kind']} {item['event_id']}")
                 for err in w.get('errors',[]): print('🔴 '+err)
                 print(w.get('next_action') or 'この依頼は終了しています。')
             return
@@ -3645,7 +3713,7 @@ def main():
     saved=outbox/(ev['event_id']+'.json')
     with saved.open('x',encoding='utf-8') as f: json.dump(ev,f,ensure_ascii=False,indent=2)
     saved.chmod(0o600)
-    print('event_id='+ev['event_id'],flush=True) # retain for ambiguous network outcomes
+    print('event_id='+ev['event_id']+'\ndelivery=pending (saved locally; wait for posted)',flush=True)
     landed=[]
     print('posted '+post(a.root,ev,landed=landed))
     print('Local view is a snapshot; use inbox --sync to read the latest remote state.')

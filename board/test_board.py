@@ -1101,6 +1101,64 @@ class Transport(unittest.TestCase):
         self.tmp.cleanup()
         if self._cache_saved is None: os.environ.pop('AGENT_BOARD_CACHE_DIR',None)
         else: os.environ['AGENT_BOARD_CACHE_DIR']=self._cache_saved
+
+    def test_requester_can_find_an_unlanded_claim_then_verify_its_retry(self):
+        import sys
+        source=self.base/'example'
+        subprocess.run(['git','init','-q',str(source)],check=True)
+
+        def cli(op, session, *args):
+            return subprocess.run([sys.executable,str(board.ENGINE/'board.py'),op,
+                                   '--root',str(self.root),'--agent','codex','--session',session,*args],
+                                  capture_output=True,text=True)
+
+        def event_id(result):
+            return next(line.split('=',1)[1] for line in result.stdout.splitlines() if line.startswith('event_id='))
+
+        def show(session, *args):
+            result=cli('show',session,'--request',request,'--json',*args)
+            self.assertEqual(result.returncode,0,result.stderr)
+            return json.loads(result.stdout)
+
+        posting=['--source',str(source),'--project','example','--policy','ordinary']
+        request_post=cli('request','fixture-requester',*posting,'--thread','2026-01-01-delivery',
+                         '--to','codex','--to-session','fixture-worker',
+                         '--reviewer','fixture-reviewer',
+                         '--summary','Fixture delivery','--acceptance','Fixture result')
+        self.assertEqual(request_post.returncode,0,request_post.stderr)
+        request=event_id(request_post)
+        board.run(self.root,'pull','--ff-only','--quiet')
+        hook=self.remote/'hooks'/'pre-receive'
+        hook.write_text('#!/bin/sh\nprintf "fixture rejects this push\\n" >&2\nexit 1\n')
+        hook.chmod(0o700)
+        failed=cli('claim','fixture-worker',*posting,'--request',request,
+                   '--summary','Delivery diagnostic fixture')
+        self.assertNotEqual(failed.returncode,0)
+        claim=event_id(failed)
+        self.assertIn('delivery=pending',failed.stdout)
+        self.assertNotIn('posted '+claim,failed.stdout)
+        self.assertIn('fixture rejects this push',failed.stderr)
+        row=show('fixture-requester','--sync')
+        self.assertEqual(row['status'],'requested')
+        self.assertEqual(row['pending_delivery'],[{'event_id':claim,'kind':'claim'}])
+        self.assertEqual(show('fixture-reviewer','--sync')['pending_delivery'],row['pending_delivery'])
+        self.assertNotIn('Delivery diagnostic fixture',json.dumps(row))
+        self.assertNotIn('pending_delivery',show('unrelated-viewer','--sync'))
+        self.assertNotIn('pending_delivery',show('fixture-requester'))
+
+        hook.unlink()
+        retry=cli('retry','fixture-worker',*posting,'--event-id',claim)
+        self.assertEqual(retry.returncode,0,retry.stderr)
+        self.assertIn('posted '+claim,retry.stdout)
+        row=show('fixture-requester','--sync')
+        self.assertEqual((row['status'],row['reply_to']),('working',claim))
+        self.assertNotIn('pending_delivery',row)
+        submitted=cli('submit','fixture-worker',*posting,'--request',request,'--reply-to',claim,
+                      '--summary','Fixture result ready','--deliverable','result.md')
+        self.assertEqual(submitted.returncode,0,submitted.stderr)
+        row=show('fixture-requester','--sync')
+        self.assertEqual((row['status'],row['submission']['event_id']),('submitted',event_id(submitted)))
+
     def test_encrypted_roundtrip_and_unchanged_caller_index(self):
         (self.root/'unrelated.txt').write_text('Other agent work'); board.run(self.root,'add','unrelated.txt')
         before=board.run(self.root,'diff','--cached','--raw').stdout
@@ -2384,6 +2442,29 @@ class CodexLaunchCLI(Transport):
         finally:
             for k in self.KEYS: os.environ.pop(k,None)
             os.environ.update({k:v for k,v in wiring.items() if v is not None})
+
+    def test_launch_reports_each_protected_git_directory(self):
+        worktree=self.base/'worker copy'
+        board.run(self.root,'worktree','add','-q','--detach','--no-checkout',str(worktree))
+        git_dir,common_dir=board.run(worktree,'rev-parse','--path-format=absolute',
+                                     '--git-dir','--git-common-dir').stdout.decode().splitlines()
+        settings={'cwd':str(worktree),'host':board.this_host(),'writable-root':[common_dir]}
+        argv,_,handoff=board.codex_plan(self.root,'role-example-worker','20260101T000000Z-codex-11',
+                                       None,settings)
+        text=handoff.read_text(encoding='utf-8')
+        self.assertIn('Git delivery: requester',text)
+        self.assertIn(git_dir,text)
+        self.assertNotIn(git_dir,argv)
+        self.assertIn('wait for the command to finish and print `posted <event-id>`',text)
+        self.assertIn('check that the same claim is active',text)
+        settings['writable-root'].append(git_dir)
+        argv,_,handoff=board.codex_plan(self.root,'role-example-worker','20260101T000000Z-codex-12',
+                                       None,settings)
+        self.assertIn('the request names the Git directories',handoff.read_text(encoding='utf-8'))
+        self.assertIn(git_dir,argv)
+        self.assertEqual(board.codex_git_delivery_status(dict(settings,host='unrelated-fixture-host')),'')
+        workspace_settings=dict(settings,cwd=str(self.base),**{'writable-root':[]})
+        self.assertIn(common_dir,board.codex_git_delivery_status(workspace_settings,self.root))
 
     def test_launch_writable_root_request_to_argv(self):
         """--launch-writable-root: an unattended Codex thread cannot be given a writable dir once it runs (measured: a

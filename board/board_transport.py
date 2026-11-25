@@ -339,12 +339,15 @@ class Repo:
             try: os.unlink(idx)
             except OSError: pass
 
-    def push(self, sha: str) -> bool:
+    def push(self, sha: str, *, rejections: list[str] | None = None) -> bool:
         """Push the commit to the branch; False when the remote moved (the caller fetches and revalidates)."""
         p = git(self.top, 'push', '--quiet', 'origin', f'{sha}:refs/heads/{self.branch}', check=False)
         if p.returncode:
             err = p.stderr.decode(errors='replace')
-            if 'rejected' in err or 'fetch first' in err or 'non-fast-forward' in err: return False
+            if 'rejected' in err or 'fetch first' in err or 'non-fast-forward' in err:
+                if rejections is not None:
+                    rejections.append(err)
+                return False
             raise ValueError('git push failed: ' + err[:1200])
         git(self.top, 'update-ref', self.tracking, sha, check=False)
         self._stamp(LAST_FETCH_FILE)

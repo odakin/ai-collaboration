@@ -358,6 +358,16 @@ project, thread, person, result or path in a commit subject or branch name.
   `handover --project <key> --thread <thread> --request <id> --role reviewer --to <agent> --to-session <reviewer>
   --summary '…'`, and if the request went to a role with no live window, start it with `launch --request <id>`.
 
+- A Codex worker's launch compares the work repository's absolute Git directory and common Git directory with
+  the roots explicitly named in the request. A missing root assigns Git delivery to the requester. The worker
+  can save its deliverables in the worktree and report the pending Git delivery in its submission. The
+  launch check records the requested roots. Effective access still depends on the executing turn.
+- A fresh `show --request <id> --sync` verifies the claim or submission against the board. On an owner board,
+  the requester or designated reviewer running it on the posting host can also see the kinds and event IDs
+  of ordinary attempts saved locally and missing from the synchronized board. JSON output includes
+  `pending_delivery` when such attempts are present. A pending entry records an attempt and carries no
+  authority to change the board. Retry continues to use the original event identity and existing permissions.
+
 ## <a id="request-and-receipt-workflow-v2"></a>Request and receipt workflow (v2)
 
 One thread holds one request. **Submission is not completion.** The designated reviewer reviews the latest
