@@ -71,7 +71,9 @@ worker の起動はカードを押す 2 段のまま。 重ければ [DESIGN](bo
 `board/board_asks.py` は、 問い返し・聞き直しの頼みを答えに読まず、 推定を確かめの短い肯定で結ぶか「答えではない」 で捨てる
 ([契約](board/CONTRACT.md#owner-asks) の Settling a guess)。 止めた理由の文が挙げる語は selftest が 1 つずつ試す。
 まとめ答えは [実装の確かめ](docs/owner-asks-multiple-answers-proposal.md#implementation-verification) のとおり当てた (claude-config 6b8f97de・本 repo 7e33352)。 次は実際の画面で、 問いが複数開いたときに確認の行を出して短い答えでまとめて閉じる形を見る。
-次 = 実際の推定が 1 往復で解けるかを、 掲示板の台帳の `confirmed`・`dismissed` の記録で見る。 解けない言い方が出たら語を足す。
+行き止まりの直し (本 repo 7e03b57): 問いの中身の名指しで結ぶ (`content`)、 読むだけの操作は止めない、 まとめの行を作れない範囲は一問ずつ、
+肯定は直前の確かめの種類で読む (理由 = [DESIGN](board/DESIGN.md#owner-asks))。 中身で結ぶ条件は過去の発言で締めたので、 新しい発言での誤りの率は未測定。
+次 = 実際の推定が 1 往復で解けるかと、 中身で結んだ答え (`content`) が正しい問いに結んだかを、 掲示板の台帳の記録で見る。 解けない言い方・誤った結びが出たら条件を直す。
 
 ## 現在地：本人への問いの「何の話か」 と前の記録
 
