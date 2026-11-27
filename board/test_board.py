@@ -2545,6 +2545,57 @@ class CodexLaunchCLI(Transport):
           'AGENT_BOARD_LAUNCH_SURFACE','AGENT_BOARD_LAUNCH_MODEL','AGENT_BOARD_DEFAULT_REVIEWER','CLAUDE_CODE_ENTRYPOINT',
           'AGENT_BOARD_CODEX_LAUNCHER','AGENT_BOARD_CODEX_MODEL','AGENT_BOARD_CODEX_EFFORT','CODEX_HOME')
 
+    def test_wrap_ready_reads_only_status_from_the_synced_board(self):
+        import os, sqlite3, sys
+
+        native='aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+        role={'agent':'codex', 'session_id':'role-example-worker'}
+        home=self.base/'codex-home'
+        home.mkdir()
+        db_path=home/'state_5.sqlite'
+        with sqlite3.connect(db_path) as db:
+            db.execute('CREATE TABLE threads (id TEXT, model TEXT, reasoning_effort TEXT)')
+            db.execute('INSERT INTO threads VALUES (?,?,?)',(native,'gpt-6.2-astra','xhigh'))
+        env=dict(os.environ,CODEX_HOME=str(home),CODEX_SQLITE_HOME=str(home),CODEX_THREAD_ID=native)
+        r,c,sub=chain()
+        r['assignee']=role
+        for e in (c,sub):
+            e['actor'].update(role,task=f'{native[:8]} (gpt-6.2-astra)')
+        command=[sys.executable,str(board.ENGINE/'board.py'),'show','--root',str(self.root),'--agent','codex',
+                 '--session',role['session_id'],'--request',r['event_id'],'--sync','--wrap-ready']
+
+        def check_ready(expected, input_env=env):
+            p=subprocess.run(command,env=input_env,capture_output=True,text=True)
+            self.assertEqual(p.returncode,expected,p.stdout+p.stderr)
+            self.assertEqual('✅' in p.stdout,expected==0)
+            self.assertNotIn(r['summary'],p.stdout+p.stderr)
+            self.assertNotIn(r['acceptance'],p.stdout+p.stderr)
+
+        def check_model(model, expected):
+            launcher=board.ENGINE.parent.parent/'claude-config'/'scripts'/'codex-app-launch.py'
+            p=subprocess.run([sys.executable,str(launcher),'check-self','--model',model,'--effort','xhigh'],
+                             env=env,capture_output=True,text=True)
+            self.assertEqual(p.returncode,expected,p.stdout+p.stderr)
+            self.assertEqual('✅' in p.stdout,expected==0)
+
+        for e in (r,c,sub): board.post(self.root,e)
+        check_model('gpt-6.2-astra',0)
+        check_ready(1)
+        board.post(self.root,event('accept',3,reply=sub))
+        with sqlite3.connect(db_path) as db:
+            db.execute('UPDATE threads SET model=? WHERE id=?',('gpt-6.2-sol',native))
+        check_ready(0)
+        check_model('gpt-6.2-sol',0)
+        check_model('gpt-6.2-astra',1)
+        with sqlite3.connect(db_path) as db:
+            db.execute('UPDATE threads SET reasoning_effort=? WHERE id=?',('high',native))
+        check_model('gpt-6.2-sol',1)
+        check_ready(1,dict(env,CODEX_THREAD_ID='bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee'))
+        next_request=event('request',4,thread='2026-09-06-next-wrap-fixture')
+        next_request.update(request_id=next_request['event_id'],assignee=role)
+        board.post(self.root,next_request)
+        check_ready(1)
+
     def test_codex_role_request_launch_host_and_relaunch(self):
         import sys, os
         script=board.ENGINE/'board.py'
@@ -4490,9 +4541,14 @@ class NewestModelOfFamily(unittest.TestCase):
     def test_codex_handoff_names_the_family_and_reruns_step_zero(self):
         text=board.codex_handoff_text(Path('/fixture/board'),'role-fixture-worker','20990101T000000Z-codex-000001',None,
                                       {'model':'gpt-6.2-astra','effort':'xhigh'})
-        self.assertIn('must run on the newest Astra (gpt-6.2-astra when it was started) or a newer Astra at xhigh effort',text)
+        self.assertIn('The assigned work must run on the newest Astra (gpt-6.2-astra when it was started) or a newer Astra at xhigh effort',text)
         self.assertIn('check-self --model gpt-6.2-astra --effort xhigh',text)
-        self.assertIn('run it again at the start of every later turn',text)
+        self.assertIn('at the start of each later assignment turn',text)
+        self.assertIn('A routine queued notice or a quotation of /wrap stays an assignment turn',text)
+        self.assertIn('--request 20990101T000000Z-codex-000001 --sync --wrap-ready',text)
+        self.assertIn('the wrap skill’s model and effort',text)
+        self.assertNotIn('start of every later turn',text)
+        self.assertIn('--session-name \'<your full thread id, typed out>',text)
         self.assertIn('post that line once as a `note`',text)
         other=board.codex_handoff_text(Path('/fixture/board'),'role-fixture-worker','20990101T000000Z-codex-000001',None,
                                        {'model':'fixture-model','effort':'high'})
@@ -4500,6 +4556,51 @@ class NewestModelOfFamily(unittest.TestCase):
         restricted=board.codex_handoff_text(Path('/fixture/board'),'role-fixture-worker','20990101T000000Z-codex-000001',None,
                                             {'model':'gpt-6.2-astra','effort':'xhigh'},policy='encrypted-metadata-only',source=Path('/fixture/src'))
         self.assertNotIn('post that line once',restricted)   # a restricted thread takes no free text
+        self.assertNotIn('--wrap-ready',restricted)           # its board event has no native claim label
+        self.assertIn("through the restricted request's source",restricted)
+
+    def test_wrap_readiness_requires_acceptance_for_this_native_claim(self):
+        native = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+        role = {'agent':'codex', 'session_id':'role-fixture-worker'}
+        r, c, sub = chain()
+        r['assignee'] = role
+        for e in (c, sub):
+            e['actor'].update(role, task=f'{native[:8]} (gpt-6.2-astra)')
+        acc = event('accept', 3, reply=sub)
+        reviewer = {'agent':'claude', 'session_id':'claude-session-001'}
+        expected = NOW+dt.timedelta(seconds=30)
+        state = lambda events: reduce_workflow(events, expected)
+        verify = lambda prefix: native if prefix == native[:8] else None
+        accepted = state([r,c,sub,acc])
+        self.assertEqual(accepted['status'], 'accepted')
+        self.assertIsNone(board.wrap_ready_error(accepted, [], role, native, verify))
+        self.assertIsNotNone(board.wrap_ready_error(state([r,c,sub]), [], role, native, verify))
+        self.assertIsNotNone(board.wrap_ready_error(state([r,c,sub,event('revise',3,reply=sub)]), [], role, native, verify))
+        self.assertIsNotNone(board.wrap_ready_error(accepted, [], reviewer, native, verify))
+        self.assertIsNotNone(board.wrap_ready_error(accepted, [], role, native, lambda _: None))
+        launch = event('note',0,agent='claude',reply=r)
+        launch['event_id'] = r['event_id'].removesuffix('000000')+'fffffe'
+        launch['summary'] = f'{board.CODEX_LAUNCHED} {native} (fixture, gpt-6.2-astra xhigh)。'
+        legacy = state([r,launch,c,sub,acc])
+        self.assertIsNone(board.wrap_ready_error(legacy, [], role, native, lambda _: None))
+        launch['actor']['session_id'] = 'unrelated-reviewer'
+        self.assertIsNotNone(board.wrap_ready_error(state([r,launch,c,sub,acc]), [], role, native, lambda _: None))
+        full_claim = dict(c,actor=dict(c['actor'],task=f'{native} (gpt-6.2-astra)'))
+        self.assertIsNone(board.wrap_ready_error(state([r,full_claim,sub,acc]), [], role, native, lambda _: None))
+        self.assertIsNotNone(board.wrap_ready_error(accepted, [], role, '', verify))
+        self.assertIsNotNone(board.wrap_ready_error(accepted, [], role, 'not-a-native-id', verify))
+        pending = {'status':'requested', 'assigned_to':role}
+        self.assertIsNotNone(board.wrap_ready_error(accepted, [pending], role, native, verify))
+        alien = {'agent':'codex', 'session_id':'role-other'}
+        pending = {'status':'submitted', 'assigned_to':alien,
+                   'claim':{'actor':dict(alien,task=f'{native[:8]} (gpt-6.2-astra)')}}
+        self.assertIsNotNone(board.wrap_ready_error(accepted, [pending], role, native, verify))
+        self.assertIsNotNone(board.wrap_ready_error(accepted, [pending], role, native, lambda _: None))
+        self.assertIsNone(board.wrap_ready_error(accepted, [dict(pending, status='accepted')], role, native, verify))
+        different = 'bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+        assigned_elsewhere = {'status':'working', 'assigned_to':role,
+                              'claim':{'actor':dict(role,task=f'{different} (gpt-6.2-astra)')}}
+        self.assertIsNone(board.wrap_ready_error(accepted, [assigned_elsewhere], role, native, verify))
     def test_claude_tier_word_gets_the_newest_as_step_zero_floor(self):
         import os
         text=board.handoff_text(Path('/fixture/board'),'role-fixture-worker','20990101T000000Z-claude-000001',None,'opus','xhigh',surface='desktop')

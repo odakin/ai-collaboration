@@ -49,6 +49,7 @@ CODEX_LAUNCHER_ENV='AGENT_BOARD_CODEX_LAUNCHER'          # request to a Codex ro
 CODEX_MODEL_ENV='AGENT_BOARD_CODEX_MODEL'                # request to a Codex role: the model when --expect-model is not given (else Codex's own config.toml)
 CODEX_EFFORT_ENV='AGENT_BOARD_CODEX_EFFORT'              # request to a Codex role: the effort when --effort is not given (else Codex's own config.toml)
 CODEX_LAUNCHED='起動した: Codex thread'                   # the note a Codex launch posts on its request; a second launch reads it and stops
+CODEX_NATIVE_ID=r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}'
 PICKUP='引き受けた:'                                      # the note `pickup` posts on a request before the work on it starts (CONTRACT.md#pickup)
 PICKUP_HOLD_H=2                                           # a pickup holds until the request's next transition or this many hours
 PICKUP_STATES=('requested','stale','submitted','blocked') # the next move is waiting for someone: a pickup says who takes it
@@ -722,14 +723,19 @@ def _session_model():
 
 
 def native_session(agent, session, events):
-    """The native id (or its 8-character prefix) behind a session address: the address itself, or for a role id the
-    native id prefix that the acting session put in its name when it claimed (worker hand-off text:
-    '<native id, 8 chars> (<model>)'). None when a role has no such named event yet."""
+    """The native id behind an address: for a role, use the id or legacy prefix in the latest acting session's label."""
     if not session: return None
     if not session.startswith(('role-','resident-')): return session
     names=[(e.get('actor') or {}).get('task') or '' for e in events
            if (e.get('actor') or {}).get('agent')==agent and (e.get('actor') or {}).get('session_id')==session]
-    return next((n[:8] for n in reversed(names) if re.match(r'[0-9a-f]{8}(?![0-9a-z])',n)),None)
+    for name in reversed(names):
+        if agent == 'codex':
+            full = re.match(CODEX_NATIVE_ID+r'(?![0-9a-z-])',name)
+            if full:
+                return full[0]
+        if re.match(r'[0-9a-f]{8}(?![0-9a-z])',name):
+            return name[:8]
+    return None
 
 
 def session_state(agent, session, quiet_s=SESSION_ENDED_QUIET_S):
@@ -2734,17 +2740,26 @@ def codex_handoff_text(root, role, request_id, spec, f, project=None, policy=Non
     scope=(f" --project {project}" if project else '')+(f" --policy {policy}" if policy else '')
     fam=codex_family(m)
     target=(f"the newest {fam.capitalize()} ({m} when it was started) or a newer {fam.capitalize()}" if fam else m)
-    run=(f" This thread must run on {target}"+(f" at {e} effort" if e else '')+'.') if m else ''
-    src,claim_tail,submit_tail,restricted=restricted_handoff_parts(policy,source,f"<the first 8 characters of your thread id, typed out> ({m or '<model>'})")
-    # Step 0 again at each later turn: a worker's later turns (a queued notice, the owner's message) ran on the app's
-    # default model, not the one pinned at the start (measured); the check passes a newer version of the same family.
-    hold=(f"0. First run `python3 {launcher} check-self --model {m}"+(f" --effort {e}" if e else '')+"`, and run it again at the"
-          " start of every later turn (a queued notice or the owner's message starts one): if it does not print ✅,"
+    run=(f" The assigned work must run on {target}"+(f" at {e} effort" if e else '')+'.') if m else ''
+    src,claim_tail,submit_tail,restricted=restricted_handoff_parts(policy,source,f"<your full thread id, typed out> ({m or '<model>'})")
+    # A later assignment turn can run on a different model from the launch. Keep the same check for work and route an
+    # explicitly requested wrap through a separate readiness check and the applicable wrap model in that turn.
+    hold=(f"0. At launch and at the start of each later assignment turn, run `python3 {launcher} check-self --model {m}"
+          +(f" --effort {e}" if e else '')+"`: if it does not print ✅,"
           " stop at once without reading the request or its materials and say so in one line."
           +(" If it prints that a newer version runs, go on, and after your claim (step 2) post that line once as a `note`"
             " on this request." if fam and not restricted else '')+"\n") if m else ''
+    ready=(" Verify the receipt, this thread's claim and any remaining work through the restricted request's source."
+           if restricted else
+           f" Before any wrap operation, run `python3 {eng} show --root {root} --agent codex --session {role}"
+           f" --request {request_id} --sync --wrap-ready`. The check reads only readiness for this thread on this board.")
+    wrap=("   A routine queued notice or a quotation of /wrap stays an assignment turn."
+          " For a separate turn explicitly requesting this thread’s wrap, confirm the direct owner input or verified wrap handoff."
+          +ready+" If readiness cannot be verified or other work is still open, say what is pending and stop."
+          " Then apply the wrap skill’s model and effort from the applicable instructions,"
+          " and verify them in this turn before performing the wrap. A return to assigned work uses step 0 again.\n") if m else ''
     return (f"You are the board worker for role `{role}`, request `{request_id}`, spec `{spec or '(the request itself)'}`; execute it yourself.{run}\n"
-            +hold+
+            +hold+wrap+
             (git_status+'\n' if git_status else '')+
             f"1. `python3 {eng} inbox --root {root} --agent codex --session {role} --sync`; if the request is not visible, do not read the spec — say so in one line and stop.\n"
             f"2. `python3 {eng} claim --root {root} --agent codex --session {role} --request {request_id}{scope}{src}{claim_tail}`"
@@ -3189,11 +3204,67 @@ def pending_delivery(board_root, snapshot_root, events, project, thread, workflo
     return result
 
 
+def wrap_ready_error(workflow, other_workflows, role, native_id, resolve_prefix):
+    """Check board state for an explicit Codex wrap. This does not classify prompts or choose a model."""
+    if role['agent'] != 'codex' or not re.fullmatch(CODEX_NATIVE_ID,native_id):
+        return '締めの確認に、この Codex thread の完全な ID が要ります。'
+    if (workflow.get('request') or {}).get('source_policy') == 'encrypted-metadata-only':
+        return '不透明な依頼は、作業元の記録で受領とこの窓の担当を照合してください。'
+
+    def claim_thread(w):
+        actor = (w.get('claim') or {}).get('actor') or {}
+        if actor.get('agent') != 'codex':
+            return None
+        address = actor.get('session_id')
+        label = native_session('codex',address,[w['claim']])
+        if not label or label[:8] != native_id[:8]:
+            return label
+        if re.fullmatch(CODEX_NATIVE_ID,label):
+            return label
+        resolved = resolve_prefix(label)
+        if resolved:
+            return resolved
+        # Legacy claims can have an ambiguous 8-character label. The requester's launch note binds it to a full id.
+        requester = (w.get('request') or {}).get('actor')
+        launches = set()
+        for note in w.get('notes', []):
+            if not same_session(requester,note.get('actor')) or note['created_at'] > w['claim']['created_at']:
+                continue
+            launch = re.match(re.escape(CODEX_LAUNCHED)+r' ('+CODEX_NATIVE_ID+r') \(',note.get('summary',''))
+            if launch:
+                launches.add(launch[1])
+        if len(launches) == 1:
+            launched = next(iter(launches))
+            if launched[:8] == label:
+                return launched
+        return label   # Incomplete proof for closing the assignment, still a potential match for an open request.
+
+    if workflow.get('errors') or workflow.get('status') != 'accepted':
+        return '元の依頼の正式受領を確認できません。'
+    if not same_session(role, workflow.get('assigned_to')) or claim_thread(workflow) != native_id:
+        return '元の依頼の引き受けを、この Codex thread と照合できません。'
+    native = {'agent':'codex', 'session_id':native_id}
+    for w in other_workflows:
+        open_work = w.get('errors') or w.get('status') not in {'accepted','abandoned'}
+        if not open_work:
+            continue
+        other_claim = claim_thread(w)
+        belongs_here = other_claim in {native_id,native_id[:8]}
+        claimed_elsewhere = other_claim and re.fullmatch(CODEX_NATIVE_ID,other_claim) and not belongs_here
+        assigned_here = same_session(native,w.get('assigned_to')) or (
+            same_session(role,w.get('assigned_to')) and not claimed_elsewhere)
+        other_duty = any(same_session(addr, participant) for addr in (role,native) for participant in (
+            w.get('reviewer'), (w.get('request') or {}).get('actor')))
+        if belongs_here or assigned_here or other_duty:
+            return 'この作業窓には、まだ終了を確認できない依頼があります。'
+    return None
+
+
 def inbox_show(a, root, *, board_name=None, collect=None):
     """inbox / show for one board. `collect` (a list) gathers rows across boards instead of printing."""
     board_root=root
     with snapshot(root) if a.sync else contextlib.nullcontext(root) as root:
-        events=read(root); all_threads=view.derive(events,view.now_utc())
+        events=read(root); now=view.now_utc(); all_threads=view.derive(events,now)
         if any(issue.unscoped for issue in events.invalid):
             raise ValueError('unscoped invalid history: inbox/request state cannot be determined')
         me={'agent':a.agent,'session_id':a.session}
@@ -3209,6 +3280,19 @@ def inbox_show(a, root, *, board_name=None, collect=None):
                 return
             if len(found) != 1: raise ValueError('request not found or ambiguous: '+a.request)
             pk,tid,t=found[0]; w=t['workflow']
+            if a.wrap_ready:
+                def resolve_prefix(prefix):
+                    try: return _codex_threads().resolve(prefix)
+                    except (OSError, ImportError): return None
+
+                # The display view exposes a claim id. Readiness needs the actual claimant and assignment history.
+                assignment = reduce_workflow(t['events'],now)
+                others = (reduce_workflow(entry['events'],now) for entry in all_threads.values()
+                          if entry is not t and (entry.get('workflow') or {}).get('request'))
+                why = wrap_ready_error(assignment, others, me, os.environ.get('CODEX_THREAD_ID', ''), resolve_prefix)
+                if why: raise ValueError(why)
+                print('✅ 元の依頼の正式受領と、この掲示板に残る担当を照合しました。')
+                return
             pending=pending_delivery(board_root,root,events,pk,tid,w,me) if a.sync else []
             if a.json:
                 row=view.workflow_row(pk,tid,t,reader=me)
@@ -3312,6 +3396,7 @@ def main():
                     '#no-policy-stage>: <one line>\'')
     ap.add_argument('--lease-hours',type=float,default=12)
     ap.add_argument('--sync',action='store_true',help='read latest remote inbox in an isolated checkout')
+    ap.add_argument('--wrap-ready',action='store_true',help='show --sync: check only whether the current Codex thread has finished this assignment')
     ap.add_argument('--preview',action='store_true',help='validate and show the proposed event without posting')
     ap.add_argument('--json',action='store_true',help='inbox: waiting rows; show: one request object; boards: the list; warnings go to stderr')
     ap.add_argument('--include-closed',action='store_true',help='inbox: also show completed requests involving this exact session (not actionable)')
@@ -3401,6 +3486,8 @@ def main():
         if form: ap.error(f"{', '.join(form)} は受け取り (accept) の欄なので submit では使えない (submit は書かない)。 回した確かめと残りは"
                           " --summary か結果の file (--deliverable) に書く (CONTRACT.md#accept-review-form)")
     if a.command == 'show' and not a.request: ap.error('show requires --request')
+    if a.wrap_ready and (a.command != 'show' or not a.sync or a.all_boards or a.json or a.agent != 'codex'):
+        ap.error('--wrap-ready requires show --sync --agent codex on one board')
     if a.all_boards:
         if a.command not in {'inbox','show'}: ap.error('--all-boards is for inbox / show')
         found=bc.discover(a.workspace)

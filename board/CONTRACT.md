@@ -218,10 +218,10 @@ anything starts; a repository's `.git` stays read-only unless its git dir is nam
 option, since its worker has no such sandbox); the thread's name in the app = `--title`, else the
 summary's first clause (a restricted request: the role, since its summary is the engine's fixed text), then the model (not added again when the title already ends with the same model and effort). The thread runs unattended (approval `never`), asks the requester's questions as
 a `blocker`, and starts with step 0 = `codex-app-launch.py check-self` (its own model and effort in Codex's local
-record), run again at the start of every later turn; it passes the same family at the asked version or a newer one (a
-newer one prints a line the worker posts once as a `note`, and goes on) and stops on another family, an older version,
+record). It runs at the start of each later assignment turn and accepts the same family at the requested version or
+a newer one. The worker posts a newer-version note once and continues. The check stops on another family, an older version,
 another effort or an unreadable record (measured: the exact match stopped a worker whose later turns ran on the newer
-version of its family). That check, not the pin, tells which model is running: a later turn queued into the thread can run on another
+version of its family). The check reads the actual model: a later turn queued into the thread can run on another
 model than the pinned one (measured once: from the first queued turn after the machine's default model had changed
 since the launch; whether the app or the owner switched it is not settled). Being in Codex's local store, the thread is reachable by `codex queue` ([#codex-reach](#codex-reach)): the app
 takes a queued message as the thread's next turn (measured). On an owner board with the launch default the request
@@ -251,6 +251,19 @@ falls back to the app's network default), so literature goes into the sandbox be
 writer (`--writer daemon`) shows no progress in the app and takes `--daemon-reason`; without a reason the launcher does
 not start it. `codex resume <thread id>` attaches a terminal view to a daemon run, and the app can open and continue it
 some 40–60 seconds after its turn ends (measured).
+
+<a id="codex-worker-wrap-readiness"></a>**A separate wrap turn.** A direct owner request to wrap this thread, or a
+verified wrap handoff, uses the applicable wrap skill's model and effort. For an ordinary request, use
+`show --sync --wrap-ready --agent codex`
+with the same `--root`, `--session` and `--request` as the worker's handoff. This read returns a readiness verdict
+without request materials. It requires formal acceptance, matches the claimant to the current `CODEX_THREAD_ID`, and
+checks for other open requests linked to that role or thread on the same board. A Codex role claim uses the full native
+thread id in its session name. An older short label must resolve uniquely or match the requester's full launch record.
+An unknown thread, pending review, open
+related work or failed synchronization stops this path. Confirm remaining closing conditions and check the prescribed
+wrap model and effort in that turn, before the skill performs work. The owner or workspace supplies the wrap model
+policy. A restricted request verifies readiness through its own source, which can identify the claimant. A routine
+queued notice, quoted command or return to assigned work uses the assignment's step 0.
 
 Operating facts (measured):
 
