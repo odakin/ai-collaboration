@@ -2495,7 +2495,11 @@ def dialogue_gate(dialogue, surface, worktree, codex=False):
     file), a subagent (the owner cannot talk to it) and a Codex role (its hand-off is not this one; Codex dialogue
     windows follow the owner layer's Codex launch)."""
     if not dialogue: return
-    if codex: raise ValueError('--dialogue は Claude の役割への依頼だけ (Codex の対話係の起動文はこの印を読まない)')
+    if codex: raise ValueError('--dialogue は Claude の役割への依頼だけ (Codex の対話係の起動文はこの印を読まない)。'
+                               ' Codex の対話係は印を外して出し、 渡し先と完了条件は依頼書 (spec) に書く。 印が無いと掲示板は'
+                               '写しと組版の係を先に立てない = 依頼元が係を自分で立ててから対話係に係の id を知らせる'
+                               ' (立て方 = claude-config multi-session-coordination.md#research-dialogue-setup。 実測: 断られた'
+                               '指揮所が印だけ外して出し直し、 係を立てずに file と Git の仕事を自分の窓でした)')
     if worktree: raise ValueError('--dialogue と --worktree は一緒に使わない (対話係の窓は repo の file を書かない)')
     if surface=='agent': raise ValueError('--dialogue は --surface desktop か background (subagent の窓に本人は話しかけられない)')
 

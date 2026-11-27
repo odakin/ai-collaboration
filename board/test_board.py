@@ -3075,6 +3075,7 @@ class DialogueWorker(EffortFlag):
             self.assertNotEqual(p.returncode,0); self.assertIn(word,p.stderr)
         p=self.cli('request',*b,'--thread','2026-01-01-dlg-r','--to','codex','--to-session','role-eproj-talk','--dialogue',ok=False)
         self.assertNotEqual(p.returncode,0); self.assertIn('Claude',p.stderr)
+        self.assertIn('係を自分で立て',p.stderr); self.assertIn('#research-dialogue-setup',p.stderr)  # how to go on without the mark
         p=self.cli('claim','--root',str(self.root),'--agent','claude','--session','role-x','--dialogue',ok=False)
         self.assertIn('--dialogue is for request and launch only',p.stderr)
         with board.snapshot(self.root,fresh=True) as snap: self.assertEqual(len([e for e in board.read(snap) if e['kind']=='request']),0)

@@ -1214,7 +1214,10 @@ python3 board_asks.py digest --root <board> --session S
   prints one line pointing at it, and the text stays the worker's (measured: the working-tree line told a dialogue
   window to commit and push, and it moved material into a repository, committed, pushed and reported the post-commit
   check to the owner). Refused before anything is posted: `--dialogue` with `--worktree`, with `--surface agent`, and
-  on a request to a Codex role (its hand-off does not read the mark). The division of work itself =
+  on a request to a Codex role (its hand-off does not read the mark). The Codex refusal also says how to go on: drop
+  the mark, put the hand-over target and the completion condition in the spec, and raise the copy-and-typeset desk by
+  hand before telling the window its id (the board raises the desk only for the mark; measured: a refused requester
+  only dropped the mark and did the files and Git in its own window). The division of work itself =
   [claude-config multi-session-coordination.md#research-dialogue-and-conductor](../../claude-config/conventions/multi-session-coordination.md#research-dialogue-and-conductor).
   <a id="dialogue-desk"></a>**The window's copy-and-typeset desk**: on an owner board, the board's
   [request desk](#request-desk) may name the requester's resident copy-and-typeset desk for a dialogue request
