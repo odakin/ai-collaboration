@@ -2651,11 +2651,14 @@ def codex_fields(a):
        'model':resolve_codex_model((a.expect_model or os.environ.get(CODEX_MODEL_ENV) or dm or '').strip(),host),
        'effort':(a.effort or os.environ.get(CODEX_EFFORT_ENV) or de or '').strip(),
        'cwd':home_tilde(cwd),
-       'surface':'background' if a.surface=='background' else 'codex-app'}
+       'surface':a.surface if a.surface in ('background','agent') else 'codex-app'}
     roots=[home_tilde(r) for r in getattr(a,'launch_writable_root',None) or []]
     if roots: f['writable-root']=roots   # dirs outside cwd the worker writes: an unattended thread cannot be given one later
     if getattr(a,'title',None): f['title']=' '.join(a.title.split())   # the thread's name in the app (measured: --title was ignored)
     if a.surface=='background': f['headless-reason']=' '.join((a.headless_reason or '').split())
+    if a.surface=='agent':
+        f.update(model=(a.expect_model or '').strip(), effort=(a.effort or '').strip(),
+                 **{'same-turn-reason':' '.join((a.reason or '').split())})
     a._codex_fields=f
     return f
 
@@ -2844,6 +2847,21 @@ def codex_announce(a, ev, audience):
     """For a request to a Codex role: write the hand-off and the launch record, print how the worker starts, and return
     (argv, env) when it starts on this machine (None when another machine launches it, or for the headless line)."""
     f=codex_fields(a); rid=ev['event_id']; spec=handoff_spec(a)
+    if f['surface']=='agent':
+        import hashlib
+        prompt = (
+            f"Codex same-turn board check {rid}.\n"
+            f"Board root: {Path(a.root).resolve()}\n"
+            "Read the request, claim it, and submit the answer in the same turn. "
+            "Do not edit project files, delegate, or start an independent task.\n"
+            + codex_handoff_text(a.root, a.to_session, rid, spec, f,
+                                  project=a.project, policy=a.policy, source=a.source)
+        )
+        hpath=write_outbox(a.root,rid+'.handoff.txt',prompt)
+        write_launch_record(a.root,rid,role=a.to_session,surface='agent',requester=a.session,
+                            handoff_sha256=hashlib.sha256(prompt.encode('utf-8')).hexdigest())
+        print(f'→ 同じターンで使い切る Codex の小さな照合。親の spawn_agent の message に {hpath} の全文を渡す。')
+        return None
     if f['surface']=='background':
         git_status=codex_git_delivery_status(f,a.source)
         if git_status: print(git_status,file=sys.stderr)
@@ -2954,6 +2972,8 @@ def cmd_launch(a):
     if st not in ('requested','stale'): raise ValueError(f'この依頼は {st} = 受け手はもう居る (か終わった)。 起こさない')
     if not same_host(f['host'],this_host()):
         raise ValueError(f"この依頼の起動する機械 = {f['host']} (この機械 = {this_host()})。 {f['host']} の session が起こす")
+    if f.get('surface')=='agent':
+        raise ValueError('この依頼は親の同じターンで使う小さな照合。 launch で別窓を開かない')
     if f.get('surface')=='background':
         raise ValueError('この依頼は headless の codex exec を選んでいる (理由 = '+f.get('headless-reason','')+') = 依頼元の shell が起こす')
     if f.get('writable-root'): normalize_writable_roots(f['writable-root'])   # this machine starts it: each root must be a dir here
@@ -3504,8 +3524,14 @@ def main():
     if is_codex_role_request(a):
         # A Codex role's worker is started so the owner sees it in the Codex app (CONTRACT.md#codex-worker-launch);
         # the headless `codex exec` is listed nowhere there and is chosen only with a reason.
-        if a.surface in ('desktop','agent'):
-            ap.error('--surface desktop / agent は Claude の worker 用。 Codex の役割は既定 (アプリに出る起動) か --surface background --headless-reason')
+        if a.surface=='desktop':
+            ap.error('--surface desktop は Claude の worker 用。 Codex の可視窓は --surface を省略する')
+        if a.surface=='agent':
+            parent_id=re.fullmatch(r'[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}', a.session or '')
+            if a.agent!='codex' or not parent_id or not (a.reason or '').strip():
+                ap.error('Codex の --surface agent は同じターンで使う小さな照合用。親の native session id と --reason を指定する')
+            if a.launch or a.launch_host or a.launch_cwd or a.launch_writable_root or a.worktree:
+                ap.error('Codex の --surface agent は親の内部で動く。独立した起動、機械、作業場所は指定できない')
         if a.surface=='background' and not (a.headless_reason or '').strip():
             ap.error("headless の codex exec は Codex アプリのどこにも出ない = 本人か依頼元が選んだときだけ: --headless-reason '<理由>' を付ける")
         if a.launch_writable_root:

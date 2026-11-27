@@ -2664,7 +2664,30 @@ class CodexLaunchCLI(Transport):
             out3=cli('request',*base,'--thread','2026-01-01-codex-e','--to','codex','--to-session','role-qproj-fourth','--surface','background',
                      '--headless-reason','fixture: この機械に Codex アプリが無い').stdout
             self.assertIn('CODEX_EXEC_REASON=',out3); self.assertIn(' exec ',out3); self.assertEqual(len(calls()),2)
-            # Claude's surfaces are refused for a Codex role; the launch flags are for Codex roles only
+            parent = '01000000-0000-7000-8000-000000000001'
+            small = [*base]
+            small[small.index('--agent')+1] = 'codex'
+            small[small.index('--session')+1] = parent
+            small[small.index('--summary')+1] = '表の一箇所の値を照合する'
+            small[small.index('--acceptance')+1] = '親がこのターンで使う照合の答え'
+            request = ['request',*small,'--thread','2026-01-01-codex-small',
+                       '--to','codex','--to-session','role-qproj-small','--surface','agent']
+            self.assertIn('--reason',cli(*request,ok=False).stderr)
+            report = cli(*request,'--reason','返事に使う値を1つ確認').stdout
+            small_id = rid_of(report)
+            record = board.launch_record(self.root,small_id)
+            self.assertEqual((record['surface'],record['requester']),('agent',parent))
+            handoff = (board.outbox_dir(self.root)/(small_id+'.handoff.txt')).read_text(encoding='utf-8')
+            import hashlib
+            self.assertEqual(record['handoff_sha256'],hashlib.sha256(handoff.encode()).hexdigest())
+            self.assertTrue(handoff.startswith(f'Codex same-turn board check {small_id}.'))
+            self.assertEqual(len(calls()),2)
+            refused = cli('launch','--root',str(self.root),'--agent','codex','--session',parent,
+                          '--request',small_id,ok=False)
+            self.assertNotEqual(refused.returncode,0)
+            self.assertIn('小さな照合',refused.stderr)
+            self.assertEqual(len(calls()),2)
+            # Codex's visible worker uses the default route; launch flags are for Codex roles only.
             self.assertNotEqual(cli('request',*base,'--thread','2026-01-01-codex-f','--to','codex','--to-session','role-qproj-fifth','--surface','desktop',ok=False).returncode,0)
             self.assertNotEqual(cli('request',*base,'--thread','2026-01-01-codex-g','--to','claude','--to-session','role-qproj-sixth','--launch-host','x',ok=False).returncode,0)
         finally:

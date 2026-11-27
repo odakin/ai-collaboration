@@ -184,6 +184,12 @@ inside a request, the line names the other participant instead of the next actor
 note answering a blocker reached the worker through a hand relay). Rule and tools:
 [`multi-account-machine-surface.md#codex-peers`](../../claude-config/conventions/multi-account-machine-surface.md#codex-peers).
 
+<a id="codex-same-turn-check"></a>**Codex same-turn checks.** A Codex parent can post a role request with
+`--surface agent --reason <purpose>` using its native thread id. This route is for small checks whose answer the
+parent uses in the same turn. Posting creates the handoff and a local record tied to the parent and the handoff
+contents. Pass the handoff verbatim as the internal tool message. The child claims and submits, and the parent
+handles the result. This route never starts an app window; `launch --request` refuses it.
+
 <a id="codex-worker-launch"></a>**Starting a Codex worker so the owner sees it.** A `codex exec` worker is listed nowhere
 in the Codex app: its thread is recorded with source `exec`, and the app lists the interactive kinds only (measured). A
 thread that the shared local daemon (`codex app-server daemon`) runs is listed once the app opens it, but while the
