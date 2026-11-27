@@ -913,7 +913,7 @@ answered questions into a one-line "done" (measured).
 
 ```sh
 python3 board_asks.py ask    --root <board> --about '<what it is about>' [--effect '<what changes>'] --text '<question>' --recommend '<answer>' --ground <why the owner> [--prior-term <word>... --prior '<earlier decisions, amounts, promises and where>'] [--key todo:<repo>:<id>] [--evidence <repo>@<rev>:<path>] [--reword '<what changed>'] [--negation-reason '<why>']
-python3 board_asks.py answer --root <board> --label H12 --quote '<owner words>' --binding label|order|confirmed|guess [--reading '<one line>']
+python3 board_asks.py answer --root <board> --label H12 --quote '<owner words>' --binding label|order|content|confirmed|guess [--reading '<one line>']
 python3 board_asks.py list   --root <board> [--open] [--session S] [--label H12 ...] [--block]
 python3 board_asks.py group-reading --root <board> [--session S] [--label H12 ...]
 python3 board_asks.py digest --root <board> --session S
@@ -1009,13 +1009,25 @@ python3 board_asks.py digest --root <board> --session S
   line that mixes an answer and such a question binds nothing; a label written in such a line does not bind either: the
   words become a guess with that ask as the candidate, settled below (owner's ruling: a question about an ask and a
   rhetorical answer look alike) (measured: a question about one option and a request to hear one again were bound as
-  answers, and after a reply with one ask block the request closed the second ask). Anything else (another numbered list or numbered table row in the reply,
-  open asks in two replies, a position outside the block, two digits followed by more than an affirmation) is a
-  `guess`: the answer is recorded with its candidates, and the session's effective actions (sending, recording a
-  decision, messaging, starting or closing another session, writing the ledger or its markers) stop until the owner's
-  next words settle it. An answer that only defers ("H2 は後で") is recorded and leaves the ask open. Reading,
-  searching and drafting are not stopped. The first line of the reply names the question it bound by its content,
-  with the label after it ("<question> (H12) への答えと読みました").
+  answers, and after a reply with one ask block the request closed the second ask). The owner may also name the
+  question by its content (`content`): a short line (80 characters or fewer) with an answer word (やって・入れる・
+  送って・進めて・よし・お願い・後で …) and two or more words of the matter that are in that question and in no other
+  open question this session showed (runs of kanji or katakana, latin words matched as whole words) binds it. Words
+  of the work itself (方針・正本・確認・記録 …), words inside file names and paths, and words on two lines added
+  together do not count; a message that asks anything anywhere (a question mark inside a line, ですか・っけ・〜んじゃ
+  ない) or a line that names another question by fewer words binds nothing by content, and the hook names the lines
+  with an answer word that bound nothing (measured: answers that named one question by its matter bound nothing, and
+  the stop stayed on; a looser first form, calibrated on past messages, also bound a long message on another matter,
+  a reply made of work words and a question asking to see drafts). Anything else (another numbered list or numbered
+  table row in the reply, open asks in two replies, a position outside the block, two digits followed by more than an
+  affirmation) is a `guess`: the answer is recorded with its candidates, and the session's effective actions
+  (sending, recording a decision, messaging, starting or closing another session, writing the ledger or its markers)
+  stop until the owner's next words settle it. An answer that only defers ("H2 は後で") is recorded and leaves the ask
+  open. Reading, searching and drafting are not stopped, nor is reading the engine's source or the ledger (grep,
+  sed -n, cat, git) or running the engine without a subcommand (`--selftest`); running it with `answer`, `withdraw`
+  or a hook, and writing the ledger, are (measured: a grep of the engine's source was stopped as an answer typed by
+  hand). The first line of the reply names the question it bound by its content, with the label after it
+  ("<question> (H12) への答えと読みました").
 - **Settling a guess**: the reply's first line names one candidate by its content, the label after it, and says how
   it read the words: "<question> (H12) への答えと読みました。よいですか", or, for words that were not an answer
   (asking back, asking to hear again), "<question> (H12) への答えではない (<what was asked>) と読みました。よいですか".
@@ -1032,8 +1044,9 @@ python3 board_asks.py digest --root <board> --session S
   and the hook names the answer words to the agent, so the ledger, the digest and the decision record carry what the
   owner answered, not "はい" (measured: a confirmation was recorded as the answer, and the real answer had to be added
   later). The owner writing a candidate's label with nothing but a confirmation ("H12 です") confirms the same way;
-  a label with the owner's own answer ("H12 は延ばさない"), or an answer by label or order to any ask, is recorded as
-  that answer, and the guess is dropped on the record first and the agent told so (it no longer clears silently). A
+  a label with the owner's own answer ("H12 は延ばさない"), or an answer by label, order or content to any ask, is
+  recorded as that answer, and the guess is dropped on the record first and the agent told so (it no longer clears
+  silently). A
   new ambiguous answer replaces the guess and keeps the earlier words (`earlier`); a bare affirmation that no reading
   ties to one candidate keeps the guess and its words. While a guess is pending, each of the owner's messages that
   settles nothing tells the agent what is left and how it settles (measured: the agent learned of the stop only when
@@ -1054,8 +1067,14 @@ python3 board_asks.py digest --root <board> --session S
   reply, with other approval text and controls on different turns. A subsequent short affirmative, including `yoi`,
   settles that line. The hook checks the displayed revisions, open status, and the pending guess under the ledger lock
   before appending one answer with the original words, confirmation, displayed reading and every bound label.
-  A changed revision or an ineligible item prevents the whole confirmation. `Stop` asks for all bound questions by
-  content in the first reporting line. Sending and recording or applying protected approvals require a separate owner
+  A changed revision or an ineligible item prevents the whole confirmation. A collective answer over a scope that no
+  grouped line can confirm (an item that may not be grouped, a list not displayed whole, a count that does not match)
+  is an ordinary guess, settled one question at a time as above. While a grouped guess is pending, a short
+  affirmation answers the kind of confirmation the latest reply showed: with no grouped line in it and a reading line
+  that names one candidate, it settles that one question (measured: an answer to "all" over questions that needed
+  their own approval waited for a grouped line the tool refused to make, and the owner's "はい" to the agent's
+  one-question reading line was read against that line; only "答えではない" cleared it). `Stop` asks for all bound
+  questions by content in the first reporting line. Sending and recording or applying protected approvals require a separate owner
   turn. The hook keeps those operations separate even after the grouped questions are settled.
 - **Asking without a label is sent back once**: a paragraph of the reply that asks the owner and carries no ask label
   is sent back, even beside a labelled one. The addendum says the question is now in the ledger and pastes the tool's

@@ -226,10 +226,26 @@ code did not take).
 - **The messages are built from the words the selftest tries.** A message that tells the agent how to unblock is a
   promise; keeping the words in one tuple that both the message and the selftest read keeps the promise checked
   (general form: claude-config `conventions/hook-authoring.md#unblock-message-from-tested-ways`).
-- Rejected: binding by the content words of a candidate (an unrelated instruction sharing a word would bind); a CLI that
-  settles a guess from words the agent copies (the stop exists because the agent's reading is the thing in doubt);
-  splitting a line at 、 to keep the answer half of "1 OK、2 は？" (it also binds "はい、でも 2 は？", which binds nothing
-  today: a lost answer leaves the ask open, a wrong one closes it).
+- **Content binds only when it names one question strongly.** The first design did not bind by content words: an
+  unrelated instruction sharing one word would bind. A dead end then showed the other side's cost: the owner named
+  the question by its matter twice, with an action word, and nothing bound, so every effective action stayed stopped
+  (実測). Content now binds under conditions calibrated on the owner's past messages to sessions with open asks: two
+  or more words that only that question has, on a short line with an answer word, in a message that asks nothing,
+  work words, file names and words across lines left out. A looser first form also bound a long message on another
+  matter, a reply made of work words and a question asking to see drafts; the conditions that remove those were
+  tuned on the same messages, so the rate on new ones is not measured (a wrong binding closes an ask, so a doubtful
+  line binds nothing and stays a guess).
+- **A grouped scope that no line can confirm is an ordinary guess, and a yes answers the confirmation shown last.**
+  An answer to "all" over questions that may not be grouped was kept as a grouped guess with nothing in it, so the
+  only line that could settle it was one the tool refused to make, and the owner's yes to the one-question reading
+  line was read against it; only "答えではない" cleared the stop (実測). Such a scope is now an ordinary guess, and
+  while a grouped guess is pending, a yes with no grouped line in the reply goes to the one-question reading line.
+- **Reading the engine is not an answer.** The tool check took any command naming the engine's file as a hand-typed
+  answer, so the agent could not grep the source to learn how the stop settles (実測); only running it with a
+  subcommand that settles (or writing the ledger) is stopped now.
+- Rejected: a CLI that settles a guess from words the agent copies (the stop exists because the agent's reading is the
+  thing in doubt); splitting a line at 、 to keep the answer half of "1 OK、2 は？" (it also binds "はい、でも 2 は？",
+  which binds nothing today: a lost answer leaves the ask open, a wrong one closes it).
 
 The [proposal for confirming several questions together](../docs/owner-asks-multiple-answers-proposal.md)
 records the rationale for binding one answer to revisions of several questions. The

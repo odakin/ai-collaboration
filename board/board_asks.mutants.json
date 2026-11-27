@@ -1,5 +1,5 @@
 {
-  "_comment": "board_asks.py の Stop の網の直し (前の Stop からの文だけを読む・同じ段を 2 度差し戻さない・報告と別の窓への案内と答え方の案内を問いと読まない・差し戻しの続きの扱い・印の使い方の検査・方針の問いの関門・推定の解き方 = 問い返しを答えに数えない・確かめの語・確かめた答えの記録・推定を捨てる道・推定が残る間の知らせ・確かめの行の選び方・別の答えで推定を捨てる記録・置き換えた推定の語・問いと推す答えの向きの門・言い直しの記録の前の推す答え・外への発信の在りかを下書きとして受ける・対話係の依頼の worker の方針の確認・第三者に聞く一覧・報告の形の「番号で答えていた」) の selftest が、 直した箇所を 1 つずつ外した版でそれぞれ落ちるか",
+  "_comment": "board_asks.py の Stop の網の直し (前の Stop からの文だけを読む・同じ段を 2 度差し戻さない・報告と別の窓への案内と答え方の案内を問いと読まない・差し戻しの続きの扱い・印の使い方の検査・方針の問いの関門・推定の解き方 = 問い返しを答えに数えない・確かめの語・確かめた答えの記録・推定を捨てる道・推定が残る間の知らせ・確かめの行の選び方・別の答えで推定を捨てる記録・置き換えた推定の語・問いと推す答えの向きの門・言い直しの記録の前の推す答え・外への発信の在りかを下書きとして受ける・対話係の依頼の worker の方針の確認・第三者に聞く一覧・報告の形の「番号で答えていた」) の selftest が、 直した箇所を 1 つずつ外した版でそれぞれ落ちるか。 2026-11-27 に足した分 = 結び先の行き止まりの直し (読むだけの操作を止めない・確かめの種類に合わせた読み・まとめられない範囲は一問ずつ・問いの中身の名指し) も、 1 つずつ外した版でそれぞれ落ちるか",
   "target": "board_asks.py",
   "run": "env BOARD_ASKS_SELFTEST_VERBOSE=1 python3 {} --selftest",
   "fail_marker": "FAIL ",
@@ -716,6 +716,201 @@
       ],
       "expect_fail": [
         "まとめ確定の後は通常の作業を進め、保護承認と送信は別に確認する"
+      ]
+    },
+    {
+      "name": "読むだけの操作 (grep・sed -n・cat) も推定の間に止める",
+      "pairs": [
+        [
+          "            if _reads_only(toks) and not re.search(r'(?<![<>])>{1,2}', seg):\n                continue",
+          "            if False:\n                continue"
+        ]
+      ],
+      "expect_fail": [
+        "道具の source と台帳を読むだけの操作は止めない"
+      ]
+    },
+    {
+      "name": "読むだけの command の出力を台帳に書き込む形も通す",
+      "pairs": [
+        [
+          "            if _reads_only(toks) and not re.search(r'(?<![<>])>{1,2}', seg):",
+          "            if _reads_only(toks):"
+        ]
+      ],
+      "expect_fail": [
+        "推定の間、 手で答えを記録する・台帳に書く操作は今までどおり止める"
+      ]
+    },
+    {
+      "name": "道具を引数なし (--selftest) で走らせても止める",
+      "pairs": [
+        [
+          "                if sub is None or sub in ASKS_FREE_CMDS:",
+          "                if sub in ASKS_FREE_CMDS:"
+        ]
+      ],
+      "expect_fail": [
+        "推定の間も selftest と一覧は止めない"
+      ]
+    },
+    {
+      "name": "まとめの推定に、 一問の確かめの行への肯定をまとめの答えとして読む",
+      "pairs": [
+        [
+          "        if len(single) == 1 or not _group_formable(guess, st):\n            return None, '', ''",
+          "        if False:\n            return None, '', ''"
+        ]
+      ],
+      "expect_fail": [
+        "「よい」 は直前に出した確かめの種類",
+        "前の版の空のまとめの推定も、 一問の確かめの 1 行への「はい」 で解ける"
+      ]
+    },
+    {
+      "name": "まとめの確かめの行を作れない範囲でも、 まとめの推定にする",
+      "pairs": [
+        [
+          "    if not _group_formable({'group': scope, 'candidates': candidates}, st):\n        return None, '', ''",
+          "    if False:\n        return None, '', ''"
+        ]
+      ],
+      "expect_fail": [
+        "まとめられない問いへの「全部」 は普通の推定にし"
+      ]
+    },
+    {
+      "name": "止めの文が、 作れないまとめの確かめを案内する",
+      "pairs": [
+        [
+          "    advice = GROUP_HELP if _group_formable(g, state(recs)) else CONFIRM_HOW + SETTLE_HOW",
+          "    advice = GROUP_HELP if g.get('group') else CONFIRM_HOW + SETTLE_HOW"
+        ]
+      ],
+      "expect_fail": [
+        "前の版の空のまとめの推定でも、 止めの文は一問ずつの道を示す"
+      ]
+    },
+    {
+      "name": "問いの中身の名指しで結ばない",
+      "pairs": [
+        [
+          "    if asks is not None and not asked:\n        hit = content_named(",
+          "    if False:\n        hit = content_named("
+        ]
+      ],
+      "expect_fail": [
+        "問いの中身を名指した答えはその問いに結び",
+        "2 行の答えの名指した行を結び"
+      ]
+    },
+    {
+      "name": "中身の語が 1 つで結ぶ",
+      "pairs": [
+        [
+          "CONTENT_MIN_WORDS = 2",
+          "CONTENT_MIN_WORDS = 1"
+        ]
+      ],
+      "expect_fail": [
+        "今までどおり結ばない: one-word"
+      ]
+    },
+    {
+      "name": "作業の一般語も中身の語に数える",
+      "pairs": [
+        [
+          "    return set(CONTENT_WORD_RE.findall(_content_text(text))) - CONTENT_STOP",
+          "    return set(CONTENT_WORD_RE.findall(_content_text(text)))"
+        ]
+      ],
+      "expect_fail": [
+        "今までどおり結ばない: work-words"
+      ]
+    },
+    {
+      "name": "行の途中の問い・勧めの言い方を問いと読まない",
+      "pairs": [
+        [
+          "    if not pool or ASKS_ANYWHERE_RE.search(t) or any(",
+          "    if not pool or any("
+        ]
+      ],
+      "expect_fail": [
+        "今までどおり結ばない: suggestion",
+        "今までどおり結ばない: mid-question"
+      ]
+    },
+    {
+      "name": "長い行でも中身で結ぶ",
+      "pairs": [
+        [
+          "CONTENT_MAX_LINE = 80",
+          "CONTENT_MAX_LINE = 1000"
+        ]
+      ],
+      "expect_fail": [
+        "今までどおり結ばない: long-line"
+      ]
+    },
+    {
+      "name": "ほかの問いにもある語を、 その問いの語に数える",
+      "pairs": [
+        [
+          "    own = {lb: {w for w, h in hits.items() if h == [lb]} for lb in pool}",
+          "    own = {lb: {w for w, h in hits.items() if lb in h} for lb in pool}"
+        ]
+      ],
+      "expect_fail": [
+        "今までどおり結ばない: shared-words"
+      ]
+    },
+    {
+      "name": "ほかの問いを弱く名指していても、 強く名指した問いに結ぶ",
+      "pairs": [
+        [
+          "    return strong if strong and not weak else []",
+          "    return strong"
+        ]
+      ],
+      "expect_fail": [
+        "今までどおり結ばない: strong-and-weak"
+      ]
+    },
+    {
+      "name": "file 名の中の語も中身の語に数える",
+      "pairs": [
+        [
+          "    return CONTENT_PATHLIKE_RE.sub(' ', unicodedata.normalize('NFKC', text or '')).casefold()",
+          "    return unicodedata.normalize('NFKC', text or '').casefold()"
+        ]
+      ],
+      "expect_fail": [
+        "file 名の中の語は数えずに照らす: path-word"
+      ]
+    },
+    {
+      "name": "英字の語を語の中の部分にも当てる (code が Codex に当たる)",
+      "pairs": [
+        [
+          "        return bool(re.search(rf'(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])', blob))",
+          "        return term in blob"
+        ]
+      ],
+      "expect_fail": [
+        "file 名の中の語は数えずに照らす: latin-word"
+      ]
+    },
+    {
+      "name": "道具の名を引数に持つだけの command (cp・git) も道具を走らせたと読む",
+      "pairs": [
+        [
+          "            if _runs_script(toks, 'board_asks.py'):\n                sub = _subcommand(toks, 'board_asks.py')",
+          "            if any(t.endswith('board_asks.py') for t in toks):\n                sub = _subcommand(toks, 'board_asks.py')"
+        ]
+      ],
+      "expect_fail": [
+        "道具の source と台帳を読むだけの操作は止めない"
       ]
     }
   ]

@@ -34,13 +34,16 @@ What it is:
   made (silently when the module is absent, with a note when it fails). A reword keeps the earlier text and the
   earlier recommended answer in the ask's `rewords` (`show`).
 - An **answer** records the owner's words verbatim, the labels it was bound to and how: `label` (the owner wrote a
-  label this session showed), `order` (a position in the only ask block of the latest reply), `confirmed` (the owner
-  confirmed the reading the agent stated), or `guess` (no safe binding: candidates listed). A line that asks back or
+  label this session showed), `order` (a position in the only ask block of the latest reply), `content` (a short line
+  with an answer word named one open question this session showed by two or more words only that question has:
+  content_named), `confirmed` (the owner confirmed the reading the agent stated), or `guess` (no safe binding:
+  candidates listed). A line that asks back or
   asks to hear something again ("…？", "…聞かせて") is not read as an answer by number, position or affirmation, and
   a label written in it makes a guess with that ask as the candidate instead of binding (owner's ruling). An
   answer that only defers ("H2 は後で") is recorded and leaves the ask open. While a session's latest answer is a guess
   with an open candidate, the tool check stops effective actions (sending, recording a decision, messaging or starting
-  another session, closing a session); only the owner's next words settle it (the CLI refuses a settling answer while
+  another session, closing a session; reading this engine's source or the ledger is not one); only the owner's next
+  words settle it (the CLI refuses a settling answer while
   a guess is pending; the binding hook records the owner's words): a message that only confirms, after the agent's
   reading line ("…と読みました") named one candidate, binds it (`confirmed`, the quote = the guessed words, the
   confirmation kept as `confirm`); "答えではない", or a confirmation of a reading that the words were not an answer,
@@ -50,7 +53,9 @@ What it is:
 - A grouped confirmation starts from the single complete displayed list. The agent may mark eligible internal
   choices and preparatory policies with --groupable. group-reading prints the exact line the owner sees.
   One reply can confirm all the items in that line. Their revisions and the pending answer are checked under
-  the ledger lock. Sending and protected approval still need a separate owner turn.
+  the ledger lock. Sending and protected approval still need a separate owner turn. A scope no grouped line can
+  confirm is an ordinary guess, and a short yes to a reply with a one-question reading line and no grouped line
+  settles that one question (_group_formable).
 - Every new ask says **what it is about** (`--about`: one sentence on where the matter came from = who, when, which
   case, in the owner's words: no file names, paths, flags, English identifiers, commit heads or labels) and may say
   **what changes** if the owner decides it (`--effect`); the block is composed in that order, then the question.
@@ -151,8 +156,8 @@ ABOUT_WORKSIDE = (
     (re.compile(r'(?<![A-Za-z0-9])[a-z]+[A-Z][A-Za-z0-9]*'), '英語の識別子'),
     (re.compile(r'(?<![A-Za-z0-9])[A-Z]\d{1,5}(?![0-9])'), '問いの印'),
 )
-BINDINGS = ('label', 'order', 'confirmed', 'guess', 'dismissed')
-SETTLED = ('label', 'order', 'confirmed')
+BINDINGS = ('label', 'order', 'content', 'confirmed', 'guess', 'dismissed')
+SETTLED = ('label', 'order', 'content', 'confirmed')
 LABEL_RE = re.compile(r'(?<![A-Za-z0-9])([A-Z])(\d{1,5})(?![0-9])')
 BLOCK_RE = re.compile(r'〔問\s*([A-Z]\d{1,5})〕')
 MAX_TEXT = 600
@@ -1117,6 +1122,96 @@ GROUP_AFFIRM = re.compile(
 GROUP_LATIN_AFFIRM = re.compile(r'yoi[。.!！]*', re.I)
 
 
+# Naming a question by its content ("<the matter's words> はやって"): the owner answers by what the question is about,
+# not by its label (measured: two answers that named one shown question by the words of its matter, with an action
+# word, bound nothing: the gate read only labels, positions and bare affirmations, so the stop stayed on). A line names
+# a question when it is short (CONTENT_MAX_LINE), carries an answer word, and has at least CONTENT_MIN_WORDS words that
+# are in that question and in no other question this session showed and is still open. A message that asks anything
+# anywhere (a question mark inside a line, っけ, 〜んじゃない) names none, nor does a line that names one question by
+# fewer words while it names another. Words are runs of kanji / katakana (2+) and latin words (3+, as whole words:
+# "code" is not in "Codex"), less the words of the work itself (CONTENT_STOP). Words in two lines are not added up.
+# Calibrated on the owner's past messages to sessions with open asks they showed: a looser first form (no length limit,
+# a question mark only at a line's end, the whole message read as one, few stop words) also bound a long message on
+# another matter, a reply made of work words, and a question asking to see drafts; this form bound only right ones on
+# the same messages (the conditions were tuned on them, so the rate on new messages is not measured).
+CONTENT_WORD_RE = re.compile(r'[一-龥々〆ヵヶァ-ヴー]{2,}|[A-Za-z][A-Za-z0-9]{2,}')
+CONTENT_STOP = frozenset((
+    '全部', '両方', '全て', '本人', '今日', '明日', '昨日', '今夜', '今回', '前回', '次回', '本当', '問い', '答え', '返事', '確認',
+    '記録', '推す', '指揮所', '指揮役', '雑用', '依頼', '依頼書', '掲示板', '窓', 'セッション', '道具', '正本', '参照', '検収',
+    '検収係', '検収所', '方針', '実装', '規則', '文書', '一覧', '検査', '試験', '作業', '仕事', '予定', '理由', '必要', '範囲',
+    '場合', '問題', '内容', '結果', '返信', '送信', '文面', '修正', '変更', '追加', '削除', '提案', '候補', '判断', '決定', '裁定',
+    '承認', '報告', '連絡', '研究', '物理', 'それ', 'これ', 'session', 'worker', 'and', 'the', 'for'))
+CONTENT_MIN_WORDS = 2
+CONTENT_MAX_LINE = 80
+ASKS_ANYWHERE_RE = re.compile(r'[?？]|ですか|ますか|でしょうか|っけ|かな(?:[\s。、!！]|$)|(?:ん|の)じゃ(?:ない|ね)')
+ANSWER_WORD_RE = re.compile(r'やって|やる|やろう|入れ(?:る|て|よう)|当て(?:る|て)|送(?:って|る|ろう|信して)|進め(?:る|て)|'
+                            r'お願い|頼(?:む|みます)|よろしく|よし|いい(?:よ|です)|よい|良い|(?<![a-z])ok(?![a-z])|はい|了解|採(?:る|用)|'
+                            r'それで|推しで|おすすめ(?:で|どおり)|やめ|不要|要らな|いらな|却下|しない|しなくて|見送|'
+                            r'後で|あとで|保留|待って', re.I)
+
+
+# file names, paths and joined identifiers are not words of the matter (measured: "code" inside a file name of another
+# question made the owner's "code" name two questions)
+CONTENT_PATHLIKE_RE = re.compile(r'[A-Za-z0-9~#]*[A-Za-z0-9](?:[/._-]+[A-Za-z0-9~#]+)+[/]?')
+
+
+def _content_text(text):
+    return CONTENT_PATHLIKE_RE.sub(' ', unicodedata.normalize('NFKC', text or '')).casefold()
+
+
+def _content_blob(ask):
+    return _content_text('\n'.join(ask.get(k) or '' for k in ('about', 'effect', 'text', 'recommend')))
+
+
+def _content_terms(text):
+    return set(CONTENT_WORD_RE.findall(_content_text(text))) - CONTENT_STOP
+
+
+def _term_in(term, blob):
+    if term[:1].isascii():
+        return bool(re.search(rf'(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])', blob))
+    return term in blob
+
+
+def _named_in(text, pool, blobs):
+    """The asks of pool that this text names by their content words (see CONTENT_WORD_RE), in pool order."""
+    t = _content_text(text)
+    terms = _content_terms(t)
+    for lb in pool:
+        terms |= {w for w in _content_terms(blobs[lb]) if _term_in(w, t)}
+    hits = {w: [lb for lb in pool if _term_in(w, blobs[lb])] for w in terms}
+    own = {lb: {w for w, h in hits.items() if h == [lb]} for lb in pool}
+    # a word inside another of the same question's words counts once ("数式" in "数式描画")
+    own = {lb: {w for w in ws if not any(w != v and w in v for v in ws)} for lb, ws in own.items()}
+    strong = [lb for lb in pool if len(own[lb]) >= CONTENT_MIN_WORDS]
+    weak = [lb for lb in pool if 0 < len(own[lb]) < CONTENT_MIN_WORDS]
+    return strong if strong and not weak else []
+
+
+def _content_lines(text, pool, st):
+    """(labels named by content, the other lines that carry an answer word) of the owner's words (see CONTENT_WORD_RE).
+    A message that asks anything names none."""
+    t = unicodedata.normalize('NFKC', text or '')
+    pool = [lb for lb in dict.fromkeys(pool) if st.get(lb, {}).get('status') == 'open']
+    if not pool or ASKS_ANYWHERE_RE.search(t) or any(QUERY_LINE.search(ln) for ln in t.splitlines()):
+        return [], []
+    blobs = {lb: _content_blob(st[lb]) for lb in pool}
+    named, rest = [], []
+    for ln in t.splitlines():
+        if not ln.strip() or not ANSWER_WORD_RE.search(ln):
+            continue
+        hit = _named_in(ln, pool, blobs) if len(ln.strip()) <= CONTENT_MAX_LINE else []
+        named += [lb for lb in hit if lb not in named]
+        if not hit:
+            rest.append(ln.strip())
+    return named, rest
+
+
+def content_named(text, pool, st):
+    """Labels of the open asks in pool that the owner's words name by content, with an answer word on the same line."""
+    return _content_lines(text, pool, st)[0]
+
+
 def _whole_count(text):
     """None for other messages, 0 for 'all', or the explicitly stated group size."""
     match = GROUP_ALL.fullmatch(unicodedata.normalize('NFKC', text or '').strip())
@@ -1150,11 +1245,12 @@ def _ordinals(text, n):
     return [x for i, x in enumerate(nums) if x not in nums[:i]]
 
 
-def bind(text, shown_now, shown_prev, open_labels, other_numbered_now=False, known=None):
+def bind(text, shown_now, shown_prev, open_labels, other_numbered_now=False, known=None, asks=None):
     """Bind the owner's words to asks.
     shown_now / shown_prev = labels displayed in the latest reply / the one before (display order);
-    known = labels this session showed at any time (a label the owner writes binds only when it is one of these).
-    Returns {'binding': 'label'|'order'|'guess'|'none', 'labels': [...], 'candidates': [...], 'defer': bool}."""
+    known = labels this session showed at any time (a label the owner writes binds only when it is one of these);
+    asks = the ledger's state (label -> ask): with it, words that name a question by its content bind it (content_named).
+    Returns {'binding': 'label'|'order'|'content'|'guess'|'none', 'labels': [...], 'candidates': [...], 'defer': bool}."""
     t = unicodedata.normalize('NFKC', text or '')
     open_set = set(open_labels)
     knownset = set(known or []) | set(shown_now) | set(shown_prev)
@@ -1172,6 +1268,11 @@ def bind(text, shown_now, shown_prev, open_labels, other_numbered_now=False, kno
         return {'binding': 'guess', 'labels': [], 'candidates': named, 'defer': False}
     if named:
         return {'binding': 'label', 'labels': named, 'candidates': [], 'defer': bool(DEFER_RE.search(first))}
+    if asks is not None and not asked:
+        hit = content_named(text, [lb for lb in list(known or []) + list(shown_now) + list(shown_prev) if lb in open_set],
+                            asks)
+        if hit:
+            return {'binding': 'content', 'labels': hit, 'candidates': [], 'defer': bool(DEFER_RE.search(first))}
     t = '\n'.join(ln for ln in t.strip().splitlines() if not QUERY_LINE.search(ln))   # asking back is not answering
     first = t.strip().splitlines()[0] if t.strip() else ''
     defer = bool(DEFER_RE.search(first))
@@ -1324,6 +1425,52 @@ def _tokens(seg):
         return seg.split()
 
 
+# A segment whose command reads a file only (grep, sed without -i, cat, git log...): it names this engine or the ledger
+# as an argument and runs nothing (measured: a grep of this engine's source while a guess was pending was stopped as an
+# answer typed by hand, so the agent could not even read how the stop settles).
+READ_COMMANDS = frozenset(('grep', 'egrep', 'fgrep', 'rg', 'ugrep', 'ag', 'cat', 'head', 'tail', 'less', 'more', 'wc', 'nl',
+                           'cut', 'sort', 'uniq', 'diff', 'cmp', 'file', 'stat', 'ls', 'sed', 'awk', 'jq', 'bat', 'od'))
+CMD_PREFIXES = frozenset(('command', 'builtin', 'exec', 'time', 'nice', 'nohup', 'env'))
+INTERPRETER_RE = re.compile(r'(?:python|pypy)\d*(?:\.\d+)?')
+
+
+def _command_head(tokens):
+    """Index of the command word of a segment (after variable assignments and prefixes such as `command`), or None."""
+    i = 0
+    while i < len(tokens) and (tokens[i] in CMD_PREFIXES or re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*=.*', tokens[i])):
+        i += 1
+    return i if i < len(tokens) else None
+
+
+def _reads_only(tokens):
+    """The segment's command only reads its arguments (sed with -i / --in-place writes; awk is left out, it can write)."""
+    i = _command_head(tokens)
+    if i is None:
+        return False
+    head = os.path.basename(tokens[i])
+    if head not in READ_COMMANDS or head == 'awk':
+        return False
+    return not (head == 'sed' and any(t.startswith(('-i', '--in-place')) for t in tokens[i + 1:]))
+
+
+def _runs_script(tokens, script):
+    """The segment runs the script: the script is the command word, or the first argument of a Python that is not an
+    option. `-c` / `-m` are left to the caller's pattern on the segment (code given inline)."""
+    i = _command_head(tokens)
+    if i is None:
+        return False
+    if tokens[i].endswith(script):
+        return True
+    if not INTERPRETER_RE.fullmatch(os.path.basename(tokens[i])):
+        return False
+    for t in tokens[i + 1:]:
+        if t in ('-c', '-m'):
+            return False
+        if not t.startswith('-'):
+            return t.endswith(script)
+    return False
+
+
 def _subcommand(tokens, script):
     i = next((k for k, t in enumerate(tokens) if t.endswith(script)), None)
     if i is None:
@@ -1351,13 +1498,16 @@ def effect(tool, inp):
         pats = env_list('BOARD_ASKS_EFFECT_BASH', EFFECT_BASH_DEFAULT)
         for seg in _segments(cmd):
             toks = _tokens(seg)
-            if any(t.endswith('board_asks.py') for t in toks):
-                if _subcommand(toks, 'board_asks.py') in ASKS_FREE_CMDS:
-                    continue   # asking, listing and reading the ledger are never stopped
-                return 'Bash (board_asks.py)'   # answer / withdraw would settle or close a pending guess by hand
+            if _reads_only(toks) and not re.search(r'(?<![<>])>{1,2}', seg):
+                continue   # grep / sed -n / cat of the engine or the ledger reads, it settles nothing
+            if _runs_script(toks, 'board_asks.py'):
+                sub = _subcommand(toks, 'board_asks.py')
+                if sub is None or sub in ASKS_FREE_CMDS:
+                    continue   # asking, listing, reading the ledger and --selftest / --help are never stopped
+                return 'Bash (board_asks.py)'   # answer / withdraw / a hook run by hand would settle a pending guess
             if re.search(r'board_asks\b[^\n]*\b(answer|withdraw)\b', seg):
                 return 'Bash (board_asks)'
-            if any(t.endswith('board.py') for t in toks) and _subcommand(toks, 'board.py') in BOARD_EFFECT_CMDS:
+            if _runs_script(toks, 'board.py') and _subcommand(toks, 'board.py') in BOARD_EFFECT_CMDS:
                 return 'Bash (board.py)'
             if any(re.search(p, seg) for p in pats):
                 return 'Bash'
@@ -1721,6 +1871,21 @@ def _group_reading(guess, st, labels):
     return ''
 
 
+def _group_formable(guess, st):
+    """A grouped confirmation line can be made for this guess's scope: all of it for an answer to the whole list, at
+    least one question for an answer to some. A scope no line can confirm (questions that may not be grouped, a list
+    that was not displayed whole) waits for nothing: the single-question confirmation settles it (measured: an answer
+    to "all" over questions that needed their own approval kept every action stopped, and the owner's "はい" to the
+    agent's one-question reading line was read as an answer to a grouped line that the tool refused to make)."""
+    group = (guess or {}).get('group') or {}
+    versions = list(group.get('versions') or {})
+    if not versions:
+        return False
+    if group.get('whole'):
+        return bool(_group_reading(guess, st, versions))
+    return any(_group_reading(guess, st, [lb]) for lb in versions)
+
+
 def _label_confirmation(text):
     rest = LABEL_RE.sub(' ', text)
     return LABEL_ONLY_REST.fullmatch(rest) or is_confirm(re.sub(r'^[\sではがを、。,]*', '', rest))
@@ -1733,6 +1898,12 @@ def _group_prompt(prompt, w0, w1, res, guess, st, session):
     whole = _whole_count(t)
     affirmed = GROUP_AFFIRM.fullmatch(t) or GROUP_LATIN_AFFIRM.fullmatch(t)
     reply = w0.strip()
+    if group and GROUP_PREFIX not in reply and (affirmed or is_confirm(t)):
+        # The owner confirms the kind of confirmation the agent showed last: with no grouped line in the reply, a
+        # short yes goes to the one-question reading line, and with no line that could be made it does too.
+        _, single = _confirm_line(w0, guess.get('candidates') or [])
+        if len(single) == 1 or not _group_formable(guess, st):
+            return None, '', ''
     repeated = group.get('whole') and t == unicodedata.normalize('NFKC', guess['quote']).strip()
     if group and (affirmed or repeated):
         labels = GROUP_ITEM_LABEL.findall(reply)
@@ -1766,6 +1937,8 @@ def _group_prompt(prompt, w0, w1, res, guess, st, session):
             return None, '', ''
         versions = {candidates[0]: _group_revision(a)}
     scope = {'versions': versions, 'whole': whole is not None, 'count': whole}
+    if not _group_formable({'group': scope, 'candidates': candidates}, st):
+        return None, '', ''   # no grouped line can confirm this scope: an ordinary guess, settled one question at a time
     earlier = ((guess.get('earlier') or []) + [guess['quote']]) if guess else []
     return dict(binding='guess', labels=[], candidates=candidates, defer=False, group=scope, earlier=earlier), '', ''
 
@@ -1799,7 +1972,7 @@ def _settle(g, res, prompt, w0, open_labels):
     cands = [lb for lb in original if lb in open_labels]
     t = unicodedata.normalize('NFKC', prompt or '').strip()
     first = t.splitlines()[0] if t else ''
-    answered = res['binding'] in ('label', 'order')
+    answered = res['binding'] in ('label', 'order', 'content')
     if NOT_ANSWER_OWNER.search(unquoted(first)) and not QUERY_LINE.search(first):
         if answered:
             return res, '', True   # "前のは答えじゃない。 H26 は延ばさない": drop the guess, record the answer
@@ -1848,7 +2021,7 @@ def hook_prompt(root, data, path=None):
     known = shown_by(recs, session)
     now, prev = labels_in(w0), labels_in(w1)
     g = pending_guess(recs, session, st)
-    res = bind(prompt, now, prev, open_labels, numbered_outside_blocks(w0), known=known)
+    res = bind(prompt, now, prev, open_labels, numbered_outside_blocks(w0), known=known, asks=st)
     quote, confirm, earlier, drop = prompt, '', [], False
     grouped, reading, group_why = _group_prompt(prompt, w0, w1, res, g, st, session)
     if group_why:
@@ -1877,7 +2050,7 @@ def hook_prompt(root, data, path=None):
     if drop:
         answer(root, [], g.get('quote') or '', 'dismissed', session=session, path=p, from_hook=True, confirm=prompt,
                candidates=[lb for lb in (g.get('candidates') or []) if lb in open_labels], earlier=g.get('earlier'),
-               reading='本人が印か並びで別に答えた')
+               reading='本人が中身の名指しで別に答えた' if res['binding'] == 'content' else '本人が印か並びで別に答えた')
         dropped = (f'推定「{(g.get("quote") or "")[:60]}」 は、 本人が別に答えたので捨てた (その候補の問いは開いたまま)。 ')
     try:
         pending = answer(root, res['labels'], quote, res['binding'], session=session, candidates=res['candidates'],
@@ -1896,8 +2069,7 @@ def hook_prompt(root, data, path=None):
             line = _group_reading(pending, st, res['candidates'])
             how = GROUP_HELP
             if scope['whole'] and not line:
-                how = ('まとめる範囲か、 まとめてよい問いを確かめられない。 '
-                       '問いの中身を示し直し、 個別に答える問いとまとめる問いを本人に分かるようにする。')
+                how = CONFIRM_HOW + SETTLE_HOW   # no grouped line can be made: the one-question way settles it
         else:
             line = ''
             how = CONFIRM_HOW + SETTLE_HOW
@@ -1910,9 +2082,15 @@ def hook_prompt(root, data, path=None):
     if res.get('defer'):
         return (f'board-asks: {dropped}本人の答えは {heads} の先送り (問いは開いたまま)。'
                 ' 返事の 1 行目に問いの中身を書き、 印は後ろに添える')
-    how = {'label': '印で', 'order': '直前の返事の問いの並びで', 'confirmed': '確かめた読みで'}[res['binding']]
+    how = {'label': '印で', 'order': '直前の返事の問いの並びで', 'content': '問いの中身の名指しで',
+           'confirmed': '確かめた読みで'}[res['binding']]
     words = (f' 本人の答えの語 =「{quote[:200]}」 (確かめの語「{confirm[:60]}」 は答えでない)。' if res['binding'] == 'confirmed'
              else '')
+    if res['binding'] == 'content':
+        rest = _content_lines(prompt, res['labels'], st)[1]
+        if rest:   # a line with an answer that named no question: the agent confirms which one it answers
+            words += (' 次の行はどの問いにも結んでいない (どの問いへの答えかは、 その問いの中身で名指して確かめる): '
+                      + ' / '.join(f'「{ln[:60]}」' for ln in rest[:3]) + '。')
     return (f'board-asks: {dropped}本人の答えを {heads} に結んだ ({how})。{words} 返事の 1 行目に結んだ問いの中身を書き、'
             ' 印は後ろに添える (例: 「〈問いの中身〉 (H12) への答えと読みました」)。'
             ' 本人の裁定なら、 その問いの key の記録 (TODO の decided など) に本人の答えの語のまま書く')
@@ -1939,7 +2117,8 @@ def hook_pretool(root, data, path=None):
     if not eff:
         return None
     c = ', '.join(g.get('candidates') or [])
-    advice = GROUP_HELP if g.get('group') else CONFIRM_HOW + SETTLE_HOW
+    # the way that can settle this guess (a grouped scope no line can confirm settles one question at a time)
+    advice = GROUP_HELP if _group_formable(g, state(recs)) else CONFIRM_HOW + SETTLE_HOW
     return (f'🔒 board-asks: 本人の答え「{(g.get("quote") or "")[:60]}」 の結び先が決まっていない (候補 {c}) ので、 {eff} は止めた。'
             ' 先に返事の 1 行目で、 ' + advice)
 
@@ -2501,7 +2680,146 @@ def _group_selftest(check):
         msg('user', 'もう一つ見せて')
         msg('assistant', '\n'.join(blocks[2:]))
         prompt('全部')
-        check(guess() and not guess()['group']['versions'], '別々に見せた並びを「全部」で合わせない')
+        check(guess() and not (guess().get('group') or {}).get('versions'), '別々に見せた並びを「全部」で合わせない')
+
+
+def _deadlock_selftest(check):
+    """The shape of a measured dead end, in synthetic words: an answer to "all" over questions that may not be grouped,
+    then answers that name one question by its content, short confirmations of a one-question reading line, and reads of
+    the engine's source, each of which the gate refused; and the short answers that must still be confirmed."""
+    asks = [
+        dict(label='Q1', ground='policy', about='今日、 印刷した週報の表で罫線が消えた件 (Code 表示でも同じ)', text='罫線の直しを 3 つとも入れますか',
+             recommend='3 つとも入れる'),
+        dict(label='Q2', ground='policy', about='週報の集計で引き継ぎが漏れた件 (Codex の締め)', effect='当てると、 集計の方針と正本の記録が変わる',
+             text='集計の直しの案を推す範囲で当てますか',
+             recommend='推す範囲で当てる'),
+        dict(label='Q3', ground='outbound', about='講演会の告知の件', effect='文面 = notes/layout-rules.md の 2 通',
+             text='告知 2 通を、 この文面のまま送りますか',
+             recommend='送る'),
+    ]
+    reading_q1 = '「全部当てて」 は、 罫線の直しを 3 つとも入れるか (Q1) への答えと読みました。よいですか'
+
+    def fixture(path, legacy_group=False, groupable=False, shown=None):
+        path.mkdir()
+        ledger, transcript = path / 'asks.jsonl', path / 'turns.jsonl'
+        os.environ['BOARD_ASKS_STATE_DIR'] = str(path / 'state')
+        session = 'deadlock-test'
+        _append(ledger, [dict(a, type='ask', session=session, groupable=groupable) for a in asks])
+        args = {'session_id': session, 'transcript_path': str(transcript)}
+
+        def message(role, words):
+            _append(transcript, [{'type': role, 'message': {'role': role, 'content': words}}])
+
+        def prompt(text):
+            out = hook_prompt(path, dict(args, prompt=text), path=ledger)
+            message('user', text)
+            return out or ''
+
+        def deny(tool='SendMessage', **tool_input):
+            return hook_pretool(path, dict(args, tool_name=tool, tool_input=tool_input), path=ledger)
+
+        def last():
+            return ([r for r in load(ledger) if r.get('type') == 'answer'] or [{}])[-1]
+
+        message('user', '問いを見せて')
+        message('assistant', format_block([dict(a, status='made') for a in (shown or asks)]))
+        if legacy_group:   # the record an earlier engine wrote: a grouped scope that no line can confirm
+            _append(ledger, [{'type': 'answer', 'labels': [], 'quote': '全部当てて', 'binding': 'guess', 'reading': '',
+                              'recorded': '', 'candidates': ['Q1', 'Q2', 'Q3'], 'session': session,
+                              'created_at': now_iso(), 'group': {'versions': {}, 'whole': True, 'count': 0}}])
+            guess_marker(session).write_text('x')
+            message('user', '全部当てて')
+        return ledger, message, prompt, deny, last, session
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        led, msg, prompt, deny, last, session = fixture(root / 'all')
+        out = prompt('全部当てて')
+        g = pending_guess(load(led), session)
+        check(bool(g) and not g.get('group') and '候補を 1 つだけ問いの中身で名指し' in out and 'group-reading' not in out,
+              '行き止まり: まとめられない問いへの「全部」 は普通の推定にし、 一問ずつ確かめる道を示す')
+        check(bool(deny()) and '候補を 1 つだけ' in deny() and 'group-reading' not in deny(),
+              '行き止まり: 推定の間の止めの文も、 解ける道 (一問ずつの確かめ) だけを示す')
+        reads = ('command grep -n "AFFIRM" /x/ai-collaboration/board/board_asks.py | head -5',
+                 "sed -n '1,40p' /x/board/board_asks.py", 'cat /x/.local/asks.jsonl | wc -l', 'git -C /x log -1 -- board/board_asks.py',
+                 'grep -n "board_asks.py answer" /x/board/CONTRACT.md', 'cp /x/board/board_asks.py /tmp/engine-copy.py')
+        check(all(not deny('Bash', command=c) for c in reads), '行き止まり: 道具の source と台帳を読むだけの操作は止めない')
+        writes = ('python3 /x/board/board_asks.py answer --root /x --label Q1 --quote 送って --binding label',
+                  'python3 -c "import board_asks; board_asks.answer(1)"', "sed -i '' s/a/b/ /x/.local/asks.jsonl",
+                  'grep x /x/board/board_asks.py > /x/.local/asks.jsonl', 'python3 /x/board/board_asks.py hook-prompt --root /x')
+        check(all(deny('Bash', command=c) for c in writes), '推定の間、 手で答えを記録する・台帳に書く操作は今までどおり止める')
+        check(not deny('Bash', command='python3 /x/board/board_asks.py --selftest')
+              and not deny('Bash', command='python3 /x/board/board_asks.py list --open'), '推定の間も selftest と一覧は止めない')
+        msg('assistant', '今回の作業の状況です。')
+        prompt('はい')
+        check(bool(pending_guess(load(led), session)) and bool(deny()),
+              '名指しの無い短い肯定は、 確かめの 1 行が無ければ今までどおり結ばない')
+        msg('assistant', reading_q1)
+        prompt('よい')
+        r = last()
+        check(r.get('binding') == 'confirmed' and r.get('labels') == ['Q1'] and r.get('quote') == '全部当てて'
+              and r.get('confirm') == 'よい' and not deny(), '行き止まり: 一問の確かめの 1 行への「よい」 はその問いに結ぶ')
+
+        # the record an earlier engine left (a grouped scope with nothing in it): a short yes to a one-question reading
+        led, msg, prompt, deny, last, session = fixture(root / 'legacy', legacy_group=True)
+        check(bool(deny()) and '候補を 1 つだけ' in deny(), '前の版の空のまとめの推定でも、 止めの文は一問ずつの道を示す')
+        msg('assistant', reading_q1)
+        prompt('はい')
+        r = last()
+        check(r.get('binding') == 'confirmed' and r.get('labels') == ['Q1'] and not deny(),
+              '行き止まり: 前の版の空のまとめの推定も、 一問の確かめの 1 行への「はい」 で解ける')
+
+        # a grouped scope that can be confirmed, while the agent showed a one-question reading line instead
+        led, msg, prompt, deny, last, session = fixture(root / 'kind', groupable=True, shown=asks[:2])
+        prompt('全部おすすめで')
+        g = pending_guess(load(led), session)
+        msg('assistant', '「全部おすすめで」 は、 罫線の直しを 3 つとも入れるか (Q1) への答えと読みました。よいですか')
+        prompt('よい')
+        r = last()
+        check(bool(g and g.get('group')) and r.get('binding') == 'confirmed' and r.get('labels') == ['Q1'],
+              '「よい」 は直前に出した確かめの種類 (一問の読みの行) に合わせて読む')
+
+        # answers that name the question by its content
+        led, msg, prompt, deny, last, session = fixture(root / 'content')
+        prompt('全部当てて')
+        msg('assistant', reading_q1)
+        out = prompt('印刷の罫線の直しはお願い。やって')
+        recs = load(led)
+        r = last()
+        check(r.get('binding') == 'content' and r.get('labels') == ['Q1'] and r.get('quote') == '印刷の罫線の直しはお願い。やって'
+              and any(x.get('binding') == 'dismissed' for x in recs) and not deny() and '問いの中身の名指しで' in out,
+              '行き止まり: 問いの中身を名指した答えはその問いに結び、 推定を捨てて止めを解く')
+        led, msg, prompt, deny, last, session = fixture(root / 'content2')
+        prompt('全部当てて')
+        out = prompt('両方とも送ってよい。\n印刷の罫線の直しも 3 つとも入れる')
+        r = last()
+        check(r.get('binding') == 'content' and r.get('labels') == ['Q1'] and '両方とも送ってよい' in out and not deny(),
+              '行き止まり: 2 行の答えの名指した行を結び、 結ばなかった行を agent に伝える')
+        led, msg, prompt, deny, last, session = fixture(root / 'content3')
+        prompt('全部当てて')
+        prompt('答えではない')
+        check(last().get('binding') == 'dismissed' and not deny(), '「答えではない」 は今までどおり推定を捨てる')
+        for name, words in (('latin-word', 'code の罫線をやって'), ('path-word', 'layout の罫線の印刷をやって')):
+            led, msg, prompt, deny, last, session = fixture(root / f'pos-{name}')
+            prompt(words)
+            check(last().get('binding') == 'content' and last().get('labels') == ['Q1'],
+                  f'中身の語は英字を語ごとに、 file 名の中の語は数えずに照らす: {name}')
+
+        # what must still be confirmed
+        for name, words in (('bare-command', 'やって'), ('one-word', '罫線やって'), ('two-asks-one-word', '罫線と集計を当てて'),
+                            ('asks-back', '罫線の直しって何を入れるんだっけ'), ('question-mark', '印刷の罫線の直しは入れる？'),
+                            ('mid-question', '印刷の罫線の直しは入れてと言ったっけ？まだなら見せて'),
+                            ('strong-and-weak', '印刷の罫線の直しと集計をやって'),
+                            ('suggestion', '印刷の罫線の直しは入れてもいいんじゃないの'),
+                            ('shared-words', '週報の集計の印刷をやって'),
+                            ('work-words', '方針の確認と正本の記録をやって'),
+                            ('long-line', '印刷の罫線の直しについては、 いろいろ考えたけれど今はまだ決めきれないので、 来週の会議で'
+                                          'ほかの人の意見も聞いてから決めることにしたい、 それまでは今のままでよい')):
+            led, msg, prompt, deny, last, session = fixture(root / f'neg-{name}')
+            prompt(words)
+            recs = [x for x in load(led) if x.get('type') == 'answer']
+            check(not any(x.get('binding') in SETTLED for x in recs),
+                  f'名指しの無い短い答え・名指しの弱い答え・問い返しは今までどおり結ばない: {name}')
 
 
 def selftest():
@@ -3312,6 +3630,7 @@ def selftest():
             else:
                 print('skip: 隣の claude-config に向きの部品が無い = 既定の部品の試験を回していない')
         _group_selftest(check)
+        _deadlock_selftest(check)
     finally:
         for k, v in saved.items():
             if v is None:
