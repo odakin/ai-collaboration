@@ -86,7 +86,8 @@ CLI:
                                    [--evidence <repo>@<rev>:<path>] [--applied] [--denied '<guard's reason>']
                                    [--reask '<what changed>'] [--reword '<what changed>'] [--negation-reason '<why>']
                                    [--project P] [--json]
-    python3 board_asks.py answer   --root <board> --label H12 [--label …] --quote '<owner words>' --binding label|order|confirmed|guess
+    python3 board_asks.py answer   --root <board> --label H12 [--label …] --quote '<owner words>'
+                                   --binding label|order|content|confirmed|guess
                                    [--reading '<one line>'] [--recorded <path or repo@commit>]
     python3 board_asks.py withdraw --root <board> --label H12 --reason '<why>'
     python3 board_asks.py list     --root <board> [--open] [--session S] [--json]
