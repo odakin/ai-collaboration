@@ -813,7 +813,7 @@ poster role the owner's delegation does not let approve, read through the rule g
 answer, the board says so and leaves the check to the guard's `apply`); a window whose first board event under a role
 id was under another role (a window opened for an approval-only or second-review role that writes the approval under
 the reviewer's role id; a window opened for the role's standing instance `<role>-<8 hex>` counts as the role) —
-measured twice, an approval the guard would refuse at `apply` was asked for; a
+measured, an approval the guard would refuse at `apply` was asked for; a
 region outside `authority:*`; a missing check, a check that only names an artifact, or a missing `--nothing-lost`; and
 a change stopped on a relaxing word without `--relax-why` (where the word is and why it does not relax; the owner's
 daily look-back shows these one by one: up to two added lines carrying the word, each with its line number in the

@@ -2465,6 +2465,35 @@ class LaunchCommandCLI(Transport):
         self.assertIn('set_session_effort(session_id=<返りの local_…>, effort=max)',p.stdout)
         self.assertLess(p.stdout.index('⚠️ この依頼の effort max'),p.stdout.index('desktop app の session として起こす'))
 
+    def test_reviewer_handover_notice_only_on_policy_file_requests(self):
+        """A request's reviewer outside the owner's delegation gets the one-line notice only on an implementation of a
+        committed policy file (the board refuses approve-edit for any other request, whatever the reviewer, and this
+        board's default reviewer role is outside the delegation on purpose): no notice on other stages or for a role
+        that may approve. A later `handover --role reviewer` reads the request's stage the same way."""
+        import sys, os
+        script=board.ENGINE/'board.py'
+        env=dict(os.environ,**{board.DELEGATION_CMD_ENV:delegation_stub(['role-qproj-chore-reviewer'])})
+        env.pop('AGENT_BOARD_DEFAULT_REVIEWER',None)
+        def run(*args):
+            p=subprocess.run([sys.executable,str(script),*args],capture_output=True,text=True,env=env)
+            self.assertEqual(p.returncode,0,p.stderr); return p
+        src=self.base/'qproj'
+        if not src.exists(): subprocess.run(['git','init','-q','-b','main',str(src)],check=True)
+        base=['--root',str(self.root),'--agent','claude','--session','claude-win-9','--source',str(src),'--policy','ordinary',
+              '--project','qproj','--summary','通知の形を確かめる','--acceptance','行が出る','--to','codex','--to-session','codex-cli-9']
+        impl=('--stage','implement','--policy-ref','qproj/plans/p.md')
+        p1=run('request',*base,'--thread','2026-01-01-notice-a','--reviewer','role-qproj-owner-review',*impl)
+        self.assertIn('承認を書ける役でない',p1.stderr)
+        p2=run('request',*base,'--thread','2026-01-01-notice-b','--reviewer','role-qproj-owner-review','--stage','exempt','--stage-reason','1: x')
+        self.assertNotIn('承認を書ける役でない',p2.stderr)
+        p3=run('request',*base,'--thread','2026-01-01-notice-c','--reviewer','role-qproj-chore-reviewer',*impl)
+        self.assertNotIn('承認を書ける役でない',p3.stderr)
+        rid=next(l.split('=',1)[1] for l in p3.stdout.splitlines() if l.startswith('event_id='))
+        p4=run('handover','--root',str(self.root),'--agent','claude','--session','role-qproj-chore-reviewer','--source',str(src),
+               '--policy','ordinary','--project','qproj','--thread','2026-01-01-notice-c','--request',rid,'--role','reviewer',
+               '--to','claude','--to-session','role-qproj-owner-review','--summary','検収を渡す')
+        self.assertIn('承認を書ける役でない',p4.stderr)
+
     def test_request_desktop_surface_prints_start_session_arguments(self):
         """--surface desktop (or the owner's env default) prints the desktop app's start_session arguments = model, effort,
         a title with the task first and the model last, the hand-off with step 0 = and writes them and the launch record
@@ -4172,6 +4201,11 @@ class StageAndApproverRole(unittest.TestCase):
             self.assertIn('書ける役 = 無し',board.reviewer_handover_notice('role-x-chore-reviewer'))   # delegation off
         with mock.patch.dict(_os.environ,{board.DELEGATION_CMD_ENV:json.dumps(['false'])}):
             self.assertEqual(board.reviewer_handover_notice('role-x-owner-review'),'')   # the guard cannot answer: nothing said
+        with mock.patch.dict(_os.environ,{board.DELEGATION_CMD_ENV:delegation_stub(['role-x-chore-reviewer'])}):
+            ref='policy-stage: implement\npolicy-ref: x/plans/p.md'
+            self.assertIn('承認を書ける役でない',board.reviewer_handover_notice('role-x-owner-review',details=ref))
+            for other in ('policy-stage: exempt','policy-stage: policy',''):   # approve-edit is refused there anyway
+                self.assertEqual(board.reviewer_handover_notice('role-x-owner-review',details=other),'',other)
 
 
 # ---------------------------------------------------------------- small fixes to the board tool (views, gates, watch, launch)

@@ -1537,7 +1537,7 @@ def first_role_of_window(events, native):
 
 def same_role(first, role):
     """A window opened for `role` itself, or for its standing instance `role-<8 hex>` (the reviewer's standing request
-    opens its window under that id, then works as the role: measured on 6 of the owner board's 22 approvals)."""
+    opens its window under that id, then works as the role: measured)."""
     return first==role or bool(re.fullmatch(re.escape(role)+r'-[0-9a-f]{8}',first or ''))
 
 
@@ -1627,7 +1627,7 @@ def edit_approval_details(a, events, cfg, ev):
         problems.append(f"承認を書けるのはその依頼の検収役 (--session {st['reviewer']['session_id']})")
     if same_session(me,st['assigned_to']):
         problems.append('worker の役では承認を書かない (書いた者と確かめる者を別にする)')
-    # Checked here before anything is posted, read the guard's way (delegation_roles): measured twice, an approval the
+    # Checked here before anything is posted, read the guard's way (delegation_roles): measured, an approval the
     # guard would refuse at apply (a role outside the delegation, or a window opened for another role) was asked for.
     roles,why=delegation_roles(cfg,getattr(a,'root',None))
     if roles is None:
@@ -1909,17 +1909,18 @@ def event_from(a, events, *, ack_receipt=None):
     if kind=='handover':
         if not a.to or not a.to_session or not a.role: raise ValueError('handover needs --to, --to-session, --role')
         ev.update(target={'agent':a.to,'session_id':a.to_session},handover_role=a.role)
-        if a.role=='reviewer' and (bc.load(a.root) or {}).get('audience')=='owner':
-            note=reviewer_handover_notice(a.to_session,bc.load(a.root),a.root)
-            if note: print(note,file=sys.stderr)
     return ev
 
 
-def reviewer_handover_notice(role, cfg=None, root=None):
+def reviewer_handover_notice(role, cfg=None, root=None, details=None):
     """The one line a reviewer handover on the owner's board prints when `role` may not approve a protected file under
-    the owner's delegation ('' when it may, or when the guard cannot answer). A notice, not a refusal: most requests
-    touch no protected file. Measured: a request's reviewer stayed a role outside the delegation, and its approval would
-    have been refused only when the worker applied it."""
+    the owner's delegation ('' when it may, when the guard cannot answer, or when the request is not an implementation
+    of a committed policy file = the board refuses approve-edit for it whatever the role, request_stage). A notice, not
+    a refusal: most requests touch no protected file, and this board's default reviewer role is outside the delegation
+    on purpose (a request through the forwarder hands its receipt to `role-<project>-owner-review`). Measured: a
+    request's reviewer stayed a role outside the delegation, and its approval would have been refused only when the
+    worker applied it."""
+    if details is not None and request_stage(details)!='implement-ref': return ''
     roles,_=delegation_roles(cfg,root)
     if roles is None or role in roles: return ''
     return (f"ℹ️ {role} は本人の委任の設定で守られた file の承認を書ける役でない (書ける役 = {', '.join(roles) or '無し'})。"
@@ -3937,6 +3938,16 @@ def main():
         if reviewer:
             # Both preview and delivery must reject a bad handover target before saving or posting the request.
             probs+=errors({'agent':a.agent,'session_id':reviewer},schema['properties']['target'],'reviewer')
+    # A reviewer that may not approve a protected file, said once where the request's stage is known (reviewer_handover_notice)
+    hrole,hdetails=None,None
+    if a.command=='request' and reviewer:
+        hrole,hdetails=reviewer,ev.get('details') or ''
+    elif a.command=='handover' and a.role=='reviewer':
+        req=next((e for e in events if e['event_id']==a.request and e['kind']=='request'),None)
+        hrole,hdetails=a.to_session,(req or {}).get('details') or ''
+    if hrole and cfg.get('audience')=='owner':
+        note=reviewer_handover_notice(hrole,cfg,a.root,hdetails)
+        if note: print(note,file=sys.stderr)
     if a.preview:
         same=[e for e in events if e['project']['key']==ev['project']['key'] and e['thread_id']==ev['thread_id']]
         probs+=reduce_workflow(same+[ev],view.now_utc())['errors']
