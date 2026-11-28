@@ -15,6 +15,10 @@ What it is:
   `request:<id>`, `session:<id>`). **A key names one question**: an open ask with the same key is shown again under its
   label (`--reword` with what changed keeps the label for the same question in other words), and a question already
   answered under that key is not asked again (the earlier answer is printed; `--reask` with a reason asks anew).
+  A reword names the question it rewords by that key or by its label (`--label`, for an ask without a key: an open ask
+  this session made or showed), and a reword that names no open question is refused instead of making a new label
+  (measured: a reword whose value was a label, on asks without a key, made a new label each time and left the earlier
+  ask open, so the owner's "send it" to the reworded draft matched the earlier ask too and needed a second confirmation).
   The ask block puts the question first and the label after it; the owner is never asked to type a label.
 - Before an ask is made it passes a **gate**: the ground must be one the owner alone can decide (GROUNDS); a policy
   check before implementation is asked once per piece of work (`request:<id>`, or `session:<own id>` for a window
@@ -84,7 +88,8 @@ CLI:
                                    --text '<question>' --recommend '<answer>' --ground <g> [--key K]...
                                    [--prior-term <word>... --prior '<earlier decisions, amounts, promises and where>']
                                    [--evidence <repo>@<rev>:<path>] [--applied] [--denied '<guard's reason>']
-                                   [--reask '<what changed>'] [--reword '<what changed>'] [--negation-reason '<why>']
+                                   [--reask '<what changed>'] [--reword '<what changed>' [--label H12]]
+                                   [--negation-reason '<why>']
                                    [--project P] [--json]
     python3 board_asks.py answer   --root <board> --label H12 [--label …] --quote '<owner words>'
                                    --binding label|order|content|confirmed|guess
@@ -306,6 +311,32 @@ def shown_by(recs, session):
             if lb not in out:
                 out.append(lb)
     return out
+
+
+def _mine(recs, session):
+    """Labels this session made, showed again, printed or answered (a session id or its first 8 characters)."""
+    out = set()
+    for r in recs:
+        if not _same_session(r.get('session'), session):
+            continue
+        if r.get('type') == 'ask':
+            out.add(r['label'])
+        elif r.get('type') in ('shown', 'answer'):
+            out.update((r.get('labels') or []) + (r.get('candidates') or []))
+    return out
+
+
+def sibling_note(st, mine, ground):
+    """The asking side's note when this session already has open asks of the same ground (stderr / JSON, not the
+    owner's block): a reword made as a new ask changes the owner's handle and leaves the earlier ask open, and the
+    owner's next answer then matches both. Asks on other matters stand side by side, so this only notes."""
+    same = [lb for lb, a in reversed(list(st.items()))
+            if lb in mine and a['status'] == 'open' and a.get('ground') == ground][:3]
+    if not same:
+        return ''
+    return (f'この窓が出した同じ理由 ({ground}) の問いが開いている: {", ".join(same)}。 同じ問いの言い直しなら、'
+            ' 新しい印を立てずに --label <その印> --reword \'<何を変えたか>\' で言い直す (新しい印では前の問いが開いたまま残り、'
+            ' 本人の次の答えが両方に当たる)。 別の件なら、 このままでよい')
 
 
 def pending_guess(recs, session, st=None):
@@ -719,7 +750,7 @@ def prior_premise_note(prior):
     if not p or PRIOR_NONE_RE.match(p) or PRIOR_PREMISE_RE.search(p):
         return ''
     return ('⚠️ 前の記録に前の決定があるなら、 その理由 (前提) と今も成り立つかを 1 句添える'
-            ' (--reword で --prior に「前提 = …、 今も成り立つ / 成り立たない / 確かめられない」)。'
+            ' (--label <その印> --reword で --prior に「前提 = …、 今も成り立つ / 成り立たない / 確かめられない」)。'
             ' 額・約束だけなら要らない。 警告だけで、 問いは立てた')
 
 
@@ -730,7 +761,7 @@ def prior_note(prior, found):
         base = found.get('note') or ''
     elif found['weighty'] and PRIOR_NONE_RE.match(prior or ''):
         base = (f'⚠️ 前の記録を「無し」 としたが、 当たり {found["hits"]} 行のうち {found["weighty"]} 行に額・決定の語がある ='
-                ' 当たりを読み、 前の決定・額・約束なら問いを --reword で言い直して --prior に書く')
+                ' 当たりを読み、 前の決定・額・約束なら問いを --label <その印> --reword で言い直して --prior に書く')
     else:
         base = f'前の記録の検索: 当たり {found["hits"]} 行 (額・決定の語のある行 {found["weighty"]})'
     return ' '.join(x for x in (base, premise) if x)
@@ -742,8 +773,43 @@ def _me(session):
     return session or os.environ.get('CLAUDE_CODE_SESSION_ID') or os.environ.get('CODEX_THREAD_ID') or 'unknown'
 
 
-def _decide(root, st, it, me):
-    """What to do with one item before the gate: (status, payload). status = answered-before | reused | refused | ask."""
+REWORD_LABEL_ONLY = re.compile(r'\s*〔?(?:問\s*)?([A-Z]\d{1,5})〕?\s*')
+
+
+def _reword_target(st, it, keys, same, mine):
+    """The open ask a reword names, or a refusal message. A reword names its ask by the same key (`same`) or by its
+    label (`target`): an ask without a key can be reworded only by its label (measured: a reword on asks without a key
+    made a new label each time and left the earlier ask open). Returns (ask or None, message or '')."""
+    target = (it.get('target') or '').strip()
+    if not target:
+        if same is not None or not it.get('reword'):
+            return same, ''
+        m = REWORD_LABEL_ONLY.fullmatch(unicodedata.normalize('NFKC', it['reword']))
+        lb = m.group(1) if m else ''
+        if lb and st.get(lb, {}).get('status') == 'open':
+            return None, (f'--reword の値は「何を変えたか」 で、 印ではない。 {lb} を言い直すなら'
+                          f' --label {lb} --reword \'<何を変えたか>\' で打ち直す (新しい印は立てていない)')
+        return None, ('言い直す開いた問いが見つからない (--key が無いか、 その key の開いた問いが無い)。'
+                      ' --label <言い直す問いの印> --reword \'<何を変えたか>\' で名指す (key のある問いは同じ --key でもよい)。'
+                      ' 新しい問いなら --reword を外す (新しい印は立てていない)')
+    if not it.get('reword'):
+        return None, 'ask の --label は、 言い直す問いを名指すときだけ --reword \'<何を変えたか>\' と一緒に使う'
+    named = st.get(target)
+    if named is None or named['status'] != 'open':
+        return None, (f'名指した問い {target} は開いていない (無い・答え済み・取り下げ済み)。'
+                      ' 新しい問いなら --label と --reword を外して立てる')
+    if mine is not None and target not in mine:
+        return None, f'{target} はこの窓が立てた・出した問いでない。 言い直しは、 その問いを出した窓がする'
+    if same is not None and same['label'] != target:
+        return None, f'--key の開いた問いは {same["label"]}、 --label は {target} で食い違う。 言い直す問いを 1 つに決める'
+    if keys and not set(keys) & set(named.get('keys') or []):
+        return None, f'名指した問い {target} はその --key を持たない。 key を外すか、 その key の問いを名指す'
+    return named, ''
+
+
+def _decide(root, st, it, me, mine=None):
+    """What to do with one item before the gate: (status, payload). status = answered-before | reused | refused | ask.
+    mine = labels this session made or showed (a reword by label names only one of these; None = not checked)."""
     text = (it.get('text') or '').strip()[:MAX_TEXT]
     keys = [k for k in (it.get('keys') or []) if k]
     prior = [a for a in st.values() if a['status'] == 'answered' and keys and set(keys) & set(a.get('keys') or [])]
@@ -787,6 +853,9 @@ def _decide(root, st, it, me):
                     '方針の確認の問いは、 その依頼の worker (宛先・claim した session) からは立てない。'
                     ' 方針の中の選択は依頼元に submit して検収で決める (本人に立てない)')}
     same = next((a for a in st.values() if a['status'] == 'open' and keys and set(keys) & set(a.get('keys') or [])), None)
+    same, why = _reword_target(st, it, keys, same, mine)
+    if why:
+        return 'refused', {'status': 'refused', 'text': text, 'message': why}
     if same:
         if _norm(same['text']) == _norm(text):
             return 'reused', {'status': 'reused', 'label': same['label'], 'text': same['text'], 'recommend': same.get('recommend', ''),
@@ -848,16 +917,19 @@ def _decide(root, st, it, me):
 
 
 def ask(root, items, *, session=None, agent='claude', project='', path=None, validator=None, direction=None):
-    """items = [{text, recommend, ground, keys, evidence, applied, reask, negation_reason}]
+    """items = [{text, recommend, ground, keys, evidence, applied, reask, reword, target, negation_reason}]
+    (target = the label of the ask a reword names, for an ask without a key)
     -> [{status: made|reused|answered-before|refused, label?, message}].
     The validator runs outside the ledger lock (it may take seconds); the lock covers only the decision and the append.
     `direction` = the direction module's path ('' = off; default = _direction_path())."""
     p = Path(path) if path else ledger_path(root)
     me = _me(session)
     pre = []
-    st0 = state(load(p))
+    recs0 = load(p)
+    st0 = state(recs0)
+    mine0 = _mine(recs0, me)
     for it in items:
-        kind, payload = _decide(root, st0, it, me)
+        kind, payload = _decide(root, st0, it, me, mine0)
         if kind in ('ask', 'reworded'):
             if payload.get('groupable') and not _groupable(payload):
                 refused = dict(payload, status='refused', message=GROUPABLE_HELP)
@@ -883,6 +955,7 @@ def ask(root, items, *, session=None, agent='claude', project='', path=None, val
                            validator=validator, session=me, denied=payload.get('denied') or '', root=root)
             note = payload.get('_note')
             msg = ' '.join(x for x in (msg, note, payload.get('_dir_note')) if x)
+            payload = dict(payload, sibling_note=sibling_note(st0, mine0, payload.get('ground')))
             pre.append(('ask', payload, ok, msg))
         else:
             pre.append((kind, payload, None, None))
@@ -890,11 +963,12 @@ def ask(root, items, *, session=None, agent='claude', project='', path=None, val
     with _locked(p):
         recs = load(p)
         st = state(recs)
+        mine = _mine(recs, me)
         pfx = prefix(p)
         new = []
         for kind, payload, ok, msg in pre:
             if kind == 'ask':
-                again, re_payload = _decide(root, st, payload, me)   # another session may have asked it meanwhile
+                again, re_payload = _decide(root, st, payload, me, mine)   # another session may have asked it meanwhile
                 if again != 'ask':
                     kind, payload = again, re_payload
             if kind == 'reused':
@@ -941,7 +1015,8 @@ def ask(root, items, *, session=None, agent='claude', project='', path=None, val
             new.append(rec)
             out.append({'status': 'made', 'label': label, 'text': rec['text'], 'recommend': rec['recommend'], 'message': msg,
                         'ground': rec['ground'], 'about': rec['about'], 'effect': rec['effect'], 'prior': rec.get('prior', ''),
-                        'prior_note': payload.get('prior_note', ''), 'prior_lines': payload.get('prior_lines') or []})
+                        'prior_note': payload.get('prior_note', ''), 'prior_lines': payload.get('prior_lines') or [],
+                        'sibling_note': payload.get('sibling_note', '')})
         _append(p, new)
     return out
 
@@ -2316,7 +2391,7 @@ def digest(root, session, max_chars=8000, path=None):
     lines = ['📌 この session の本人への問い (掲示板の問いの台帳 = board_asks.py。 依頼・調べを出す前に、 同じ問いがあれば前の答えを読む。'
              ' 本人の裁定は TODO の decided・DESIGN に記録したかを確かめる)',
              '　本人に問うときは、 番号を振らずに先に台帳に立てる (ask)。 問いの段は中身が先・印は後ろ、 本人に印や番号を打たせない。'
-             ' 問いを言い直すときは同じ印のまま (--reword)']
+             ' 問いを言い直すときは同じ印のまま (--label <その印> --reword \'<何を変えたか>\'。 key のある問いは同じ --key でもよい)']
     for a in sorted(answered, key=lambda a: _last_settled(a).get('created_at', ''), reverse=True):
         ans = _last_settled(a)
         lines.append(f"✅ {a['text'][:200]} ({a['label']}) → 本人「{(ans.get('quote') or '')[:300]}」"
@@ -2380,13 +2455,16 @@ def main(argv=None):
     ap.add_argument('--applied', action='store_true')
     ap.add_argument('--groupable', action='store_true', help=GROUPABLE_HELP)
     ap.add_argument('--reask', default='', help='同じ問いに本人の答えが既にあっても問い直す理由 (何が変わったか)')
-    ap.add_argument('--reword', default='', help='開いた問いを同じ印のまま言い直す (同じ key、 何を変えたか)')
+    ap.add_argument('--reword', default='',
+                    help='開いた問いを同じ印のまま言い直す (値 = 何を変えたか。 言い直す問いは --label <印> か同じ --key で名指す。'
+                         ' 名指した開いた問いが無ければ断る = 新しい印は立てない)')
     ap.add_argument('--denied', default='', help='その変更を書く時の守りが止めた理由 (判定の道具が「要らない」 と言っても立てる)')
     ap.add_argument('--negation-reason', default='',
                     help='問いの述語の打ち消しと推す答えの向きが逆でも、 打ち消しで聞く理由 (向きの門を通して問いに残す)')
     ap.add_argument('--not-from-review', default='',
                     help='検収係の受け取りから出したのでない問いの印 (この窓の依頼に最近の受け取りがあるとき、 request: などの key が無ければ要る)')
-    ap.add_argument('--label', action='append', default=[])
+    ap.add_argument('--label', action='append', default=[],
+                    help='answer・withdraw・show・group-reading の問いの印。 ask では --reword と一緒に、 言い直す問いの印 (問い 1 つ)')
     ap.add_argument('--quote', default='')
     ap.add_argument('--binding', default='label')
     ap.add_argument('--reading', default='')
@@ -2414,12 +2492,15 @@ def main(argv=None):
                 raise ValueError('key は問い 1 つずつに付ける (--text を 1 つにして呼び分ける)')
             if any(len(v) not in (0, n) for v in (a.about, a.effect, a.prior)):
                 raise ValueError('--about / --effect / --prior は問い 1 つに 1 つ (--text と同じ数。 --effect は無くてもよい)')
+            if a.label and (n > 1 or len(a.label) > 1):
+                raise ValueError('ask の --label は言い直す問い 1 つの印 (--text を 1 つにして、 --reword と一緒に)')
             items = [{'text': t, 'recommend': a.recommend[i] if a.recommend else '',
                       'ground': a.ground[i] if len(a.ground) == n else a.ground[0], 'keys': a.key,
                       'evidence': (a.evidence[i] if len(a.evidence) == n else (a.evidence[0] if a.evidence else '')),
                       'about': a.about[i] if a.about else '', 'effect': a.effect[i] if a.effect else '',
                       'prior': a.prior[i] if a.prior else '', 'prior_terms': a.prior_term,
                       'applied': a.applied, 'groupable': a.groupable, 'reask': a.reask, 'denied': a.denied, 'reword': a.reword,
+                      'target': a.label[0] if a.label else '',
                       'not_from_review': a.not_from_review, 'negation_reason': a.negation_reason}
                      for i, t in enumerate(a.text)]
             res = ask(a.root, items, session=a.session, agent=a.agent, project=a.project)
@@ -2431,6 +2512,8 @@ def main(argv=None):
                         print(f"〔問 {r.get('label', '?')}〕 {r['prior_note']}", file=sys.stderr)
                         for ln in r.get('prior_lines') or []:
                             print(f'　{ln[:200]}', file=sys.stderr)
+                    if r.get('sibling_note'):
+                        print(f"〔問 {r.get('label', '?')}〕 {r['sibling_note']}", file=sys.stderr)
             return 0 if any(r['status'] in ('made', 'reused', 'reworded') for r in res) else 3
         if a.cmd == 'answer':
             _print(answer(a.root, a.label, a.quote, a.binding, reading=a.reading, recorded=a.recorded, session=a.session))
@@ -2821,6 +2904,84 @@ def _deadlock_selftest(check):
             recs = [x for x in load(led) if x.get('type') == 'answer']
             check(not any(x.get('binding') in SETTLED for x in recs),
                   f'名指しの無い短い答え・名指しの弱い答え・問い返しは今までどおり結ばない: {name}')
+
+
+def _reword_selftest(check, ask):
+    """Rewording an ask that has no key, in synthetic words (measured: a reword whose value was a label, on asks without
+    a key, made a new label each time and left the earlier ask open, so the owner's short "send it" to the reworded
+    draft matched both and needed a second confirmation)."""
+    with tempfile.TemporaryDirectory() as td:
+        os.environ['BOARD_ASKS_STATE_DIR'] = str(Path(td) / 'state')
+        led, tr = Path(td) / 'asks.jsonl', Path(td) / 't.jsonl'
+        base = {'ground': 'outbound', 'recommend': 'この下書きのまま送る', 'keys': []}
+        n_asks = lambda: len([x for x in load(led) if x.get('type') == 'ask'])
+        r0 = ask(None, [dict(base, text='研究会の案内の下書きを送ってよいですか')], session='rw-a', path=led)
+        lb = r0[0]['label']
+        check(r0[0].get('sibling_note') == '', '言い直し: 同じ理由の開いた問いが無ければ注意を出さない')
+        r = ask(None, [dict(base, text='日付を直した研究会の案内の下書きを送ってよいですか', reword=lb)], session='rw-a', path=led)
+        check(r[0]['status'] == 'refused' and f'--label {lb}' in r[0]['message'] and n_asks() == 1,
+              f'言い直し: 値が印だけで key が無いと断り、 新しい印を立てない {r}')
+        r = ask(None, [dict(base, text='別の文の案内を送ってよいですか', reword='日付を直した')], session='rw-a', path=led)
+        check(r[0]['status'] == 'refused' and '--label' in r[0]['message'] and n_asks() == 1,
+              f'言い直し: 言い直す相手の無い言い直しは断る {r}')
+        r = ask(None, [dict(base, text='日付を直した研究会の案内の下書きを送ってよいですか', reword='日付を直した', target=lb)],
+                session='rw-a', path=led)
+        st = state(load(led))
+        check(r[0]['status'] == 'reworded' and r[0]['label'] == lb and n_asks() == 1
+              and [x for x, a in st.items() if a['status'] == 'open'] == [lb]
+              and st[lb]['text'].startswith('日付を直した') and (st[lb].get('rewords') or [{}])[-1].get('reason') == '日付を直した',
+              f'言い直し: key の無い問いを印で名指して同じ印のまま言い直す {r}')
+        check(ask(None, [dict(base, text='印だけの問い', target=lb)], session='rw-a', path=led)[0]['status'] == 'refused',
+              '言い直し: ask の --label は言い直しのときだけ')
+        check(ask(None, [dict(base, text='無い印の言い直し', reword='直した', target='H999')], session='rw-a',
+                  path=led)[0]['status'] == 'refused', '言い直し: 開いていない印は断る')
+        check(ask(None, [dict(base, text='別の窓からの言い直し', reword='直した', target=lb)], session='rw-b',
+                  path=led)[0]['status'] == 'refused', '言い直し: 別の窓の問いは言い直さない')
+        rk = ask(None, [dict(base, text='名簿の写しを送ってよいですか', keys=['todo:rw:1'])], session='rw-a', path=led)
+        check(lb in rk[0].get('sibling_note', '') and 'この窓が出した同じ理由' not in format_block(rk),
+              f'言い直し: 同じ理由の開いた問いがあれば依頼側にだけ注意を出す (本人の段には出さない) {rk}')
+        check(ask(None, [dict(base, text='名簿の写しを直して送ってよいですか', keys=['todo:rw:1'], reword='直した', target=lb)],
+                  session='rw-a', path=led)[0]['status'] == 'refused', '言い直し: key の問いと印が食い違えば断る')
+        check(ask(None, [dict(base, text='案内に key を付けて送ってよいですか', keys=['todo:rw:2'], reword='直した', target=lb)],
+                  session='rw-a', path=led)[0]['status'] == 'refused', '言い直し: 名指した問いの持たない key は断る')
+
+        def write_tr(*turns):
+            lines = []
+            for u, a_ in turns:
+                lines.append({'type': 'user', 'message': {'role': 'user', 'content': u}})
+                lines.append({'type': 'assistant', 'message': {'role': 'assistant', 'content': [{'type': 'text', 'text': a_}]}})
+            tr.write_text('\n'.join(json.dumps(x, ensure_ascii=False) for x in lines) + '\n', encoding='utf-8')
+
+        def block(*labels):
+            s = state(load(led))
+            return format_block([dict(s[x], status='made', message='') for x in labels])
+
+        def last_answer(session):
+            return ([x for x in load(led) if x.get('type') == 'answer' and x.get('session') == session] or [{}])[-1]
+        # the measured shape after the fix: the reply before showed the question, the latest reply the same label
+        # reworded, and a short "send it" binds without a second confirmation
+        a1 = ask(None, [dict(base, text='面談の日程の返事を送ってよいですか')], session='rw-c', path=led)[0]['label']
+        before = block(a1)
+        a1r = ask(None, [dict(base, text='結びを短くした面談の日程の返事を送ってよいですか', reword='結びを短くした', target=a1)],
+                  session='rw-c', path=led)[0].get('label') or ''
+        write_tr(('返事の下書きを見せて', before), ('結びを短くして', block(a1r) if a1r else ''))
+        msg = hook_prompt(None, {'session_id': 'rw-c', 'transcript_path': str(tr), 'prompt': '送って'}, path=led) or ''
+        ans = last_answer('rw-c')
+        check(a1r == a1 and '結んだ' in msg and ans.get('binding') == 'order' and ans.get('labels') == [a1],
+              f'言い直し: 同じ印で言い直した問いへの「送って」 は 1 回で結ぶ {msg[:120]} {ans}')
+        # another matter's open question in the reply before: the confirmation stays (the guard against binding the
+        # answer to the wrong ask)
+        b1 = ask(None, [dict(base, text='挨拶の一斉メールを送ってよいですか')], session='rw-d', path=led)[0]['label']
+        b2 = ask(None, [dict(base, text='断りの返事を送ってよいですか')], session='rw-d', path=led)[0]['label']
+        before = block(b1, b2)
+        b2r = ask(None, [dict(base, text='最後の文を消した断りの返事を送ってよいですか', reword='最後の文を消した', target=b2)],
+                  session='rw-d', path=led)[0].get('label') or ''
+        write_tr(('2 通の下書きを見せて', before), ('断りの最後の文を消して', block(b2r) if b2r else ''))
+        msg = hook_prompt(None, {'session_id': 'rw-d', 'transcript_path': str(tr), 'prompt': '送って'}, path=led) or ''
+        ans = last_answer('rw-d')
+        check(b2r == b2 and '結び先が決まらない' in msg and ans.get('binding') == 'guess'
+              and set(ans.get('candidates') or []) == {b1, b2},
+              f'言い直し: 前の返事に別の件の開いた問いがあれば確かめを残す {msg[:120]} {ans}')
 
 
 def selftest():
@@ -3632,6 +3793,7 @@ def selftest():
                 print('skip: 隣の claude-config に向きの部品が無い = 既定の部品の試験を回していない')
         _group_selftest(check)
         _deadlock_selftest(check)
+        _reword_selftest(check, ask)
     finally:
         for k, v in saved.items():
             if v is None:

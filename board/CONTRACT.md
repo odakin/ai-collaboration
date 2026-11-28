@@ -920,7 +920,7 @@ bound to the wrong item, and the agent acts on it in the same turn (measured). A
 answered questions into a one-line "done" (measured).
 
 ```sh
-python3 board_asks.py ask    --root <board> --about '<what it is about>' [--effect '<what changes>'] --text '<question>' --recommend '<answer>' --ground <why the owner> [--prior-term <word>... --prior '<earlier decisions, amounts, promises and where>'] [--key todo:<repo>:<id>] [--evidence <repo>@<rev>:<path>] [--reword '<what changed>'] [--negation-reason '<why>']
+python3 board_asks.py ask    --root <board> --about '<what it is about>' [--effect '<what changes>'] --text '<question>' --recommend '<answer>' --ground <why the owner> [--prior-term <word>... --prior '<earlier decisions, amounts, promises and where>'] [--key todo:<repo>:<id>] [--evidence <repo>@<rev>:<path>] [--reword '<what changed>' [--label H12]] [--negation-reason '<why>']
 python3 board_asks.py answer --root <board> --label H12 --quote '<owner words>' --binding label|order|content|confirmed|guess [--reading '<one line>']
 python3 board_asks.py list   --root <board> [--open] [--session S] [--label H12 ...] [--block]
 python3 board_asks.py group-reading --root <board> [--session S] [--label H12 ...]
@@ -936,9 +936,14 @@ python3 board_asks.py digest --root <board> --session S
   answer by them). **A key names one question**: an open ask with the same key and the same text is shown again under
   its label; the same question in other words is `--reword '<what changed>'` and keeps its label (measured:
   re-asking under a new label changed the owner's handle for one matter twice in a morning); the same key with another
-  question is refused (split the key per question). The letter comes from the hook's configuration and is kept next to the
-  ledger for asks typed by hand; without one it is `Q` (a host name's first letter collides with chip names such as
-  `M5`, measured).
+  question is refused (split the key per question). A reword names its question by the same key or, for an ask without
+  a key, by its label (`--label H12 --reword '<what changed>'`: an open ask this session made or showed), and a reword
+  that names no open question is refused instead of making a new label (measured: a reword whose value was a label, on
+  asks without a key, made a new label each time and left the earlier ask open, so the owner's short "send it" to the
+  reworded draft matched both and needed a second confirmation). A new ask while this session has an open ask of the
+  same ground carries a note to the asking side (stderr, not the owner's block): a reword is made with `--label`.
+  The letter comes from the hook's configuration and is kept next to the ledger for asks typed by hand; without one
+  it is `Q` (a host name's first letter collides with chip names such as `M5`, measured).
 - **What it is about, then what changes, then the question**: every new ask carries `--about`, one sentence on where
   the matter came from (who, when, which case) in the owner's words, without file names, paths, flags, English
   identifiers, commit heads or labels (the engine refuses those), and may carry `--effect` (what changes if the owner
