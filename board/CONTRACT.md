@@ -795,7 +795,10 @@ was narrowed to writes, a long-running reviewer window lost the ability to appro
 commands and a common line it had typed). A candidate whose path ends with the target's repository-relative path
 makes that relative name count before the pickup too, so the worker names candidates flatly (`<repo>__<dir>__<name>`)
 in a new directory (measured). That directory is the request's own: it holds only that submission's files (its candidates and
-the absolute paths the submit lists as deliverables; `.DS_Store` aside). The guard refuses a candidate kept in a shared
+the absolute paths the submit lists as deliverables; `.DS_Store` aside). When that directory sits inside a Git repository,
+keep a full candidate untracked until it is applied, or follow the placement rules in claude-config
+`conventions/closing-sweep.md#protected-files-need-ruling`: a committed `.md` candidate keeps the link targets written
+for the target's place, so the repository's link check stops the commit (measured). The guard refuses a candidate kept in a shared
 folder before it reads the reviewer's transcript, because a note the reviewer writes into that folder would count as
 writing the candidate (measured). Name the file and the candidate only in reading commands (the rule text lists
 them; a `python3 -c` whose code opens the file counts as writing it); review against copies made with `cp` to an
