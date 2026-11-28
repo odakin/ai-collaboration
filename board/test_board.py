@@ -4694,6 +4694,61 @@ class NewestModelOfFamily(unittest.TestCase):
         self.assertEqual(board.resolve_codex_model('',here),'')
         with self.assertRaises(ValueError) as cm: board.resolve_codex_model('luna',here)
         self.assertIn('分からない',str(cm.exception)); self.assertIn('--expect-model',str(cm.exception))
+
+    def test_governed_request_preserves_intent_for_delayed_launch_and_legacy_workers(self):
+        from unittest.mock import patch
+        with self.assertRaisesRegex(ValueError, 'chore は sol'):
+            board.codex_model_intent('chore','gpt-6-astra',None)
+        with self.assertRaisesRegex(ValueError, 'must name the exact version'):
+            board.codex_model_intent('chore','gpt-6-astra','Astra 6.2で')
+        pinned=board.codex_model_intent('chore','gpt-6-astra','Astra 6で')
+        legacy={'model':'gpt-6-astra','host':board.this_host(),'effort':'xhigh'}
+        with self.assertRaisesRegex(ValueError, '旧 Codex 依頼'):
+            board.codex_resume_intent(legacy)
+        latest=board.codex_resume_intent(legacy,'chore')
+        deferred=dict(legacy,**latest)
+        self.assertEqual(board.parse_codex_details(board.codex_details(deferred))['model'],'sol')
+        self.assertEqual(board.codex_model_intent('physics',None,None)['model'],'astra')
+        with patch.object(board,'codex_best_model',return_value='gpt-6.3-sol') as lookup:
+            launch=board.codex_launch_fields(deferred)
+            self.assertEqual((launch['model'],launch['model-selector']),('gpt-6.3-sol','sol'))
+            self.assertEqual(board.codex_launch_fields(dict(legacy,**pinned))['model'],'gpt-6-astra')
+            lookup.assert_called_once_with('sol','xhigh')
+        self.assertEqual(board.codex_launch_fields(dict(deferred,host='another-machine-x'))['model'],'sol')
+        with self.assertRaisesRegex(ValueError, '記録済み'):
+            board.codex_resume_intent(deferred,'physics')
+
+    def test_governed_worker_handoff_distinguishes_exact_version_from_latest(self):
+        args=(Path('/fixture/board'),'role-fixture-worker','20990101T000000Z-codex-000001',None)
+        latest=board.codex_handoff_text(*args, {'model':'gpt-6.2-sol','model-selector':'sol','model-mode':'latest','effort':'xhigh'})
+        exact=board.codex_handoff_text(*args, {'model':'gpt-6.1-sol','model-selector':'gpt-6.1-sol','model-mode':'exact','effort':'xhigh'})
+        self.assertIn('check-self --model gpt-6.2-sol --effort xhigh --latest-family sol --board-root /fixture/board',latest)
+        self.assertIn('check-self --model gpt-6.1-sol --effort xhigh --exact-model --board-root /fixture/board',exact)
+        self.assertNotIn('or a newer',exact)
+
+    def test_reconcile_binds_the_existing_legacy_thread_and_requires_the_requester(self):
+        import contextlib
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        root=self.tmp/'b'; (root/'.local').mkdir(parents=True)
+        req=event('request',0)
+        rid=req['event_id']
+        req['details']='launch-model: gpt-6-astra\nlaunch-effort: xhigh'
+        native='aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+        note=event('note',1,reply=req)
+        note['summary']=f'{board.CODEX_LAUNCHED} {native} (fixture, gpt-6-astra xhigh)。'
+        board.write_launch_record(root,rid,model='gpt-6-astra',effort='xhigh',codex_thread=native,surface='codex-app')
+        a=SimpleNamespace(root=root,request=rid,codex_work='chore',expect_model=None,model_quote=None,agent='codex',session='another')
+        with patch.object(board.bc,'load',return_value={'codex_model_policy':True}), \
+                patch.object(board,'snapshot',return_value=contextlib.nullcontext(root)), \
+                patch.object(board,'read',return_value=[req,note]):
+            with self.assertRaisesRegex(ValueError,'元の依頼元'):
+                board.cmd_codex_reconcile(a)
+            a.agent=req['actor']['agent']; a.session=req['actor']['session_id']
+            board.cmd_codex_reconcile(a)
+            self.assertEqual(board.launch_record(root,rid)['model_policy'],{'work':'chore','mode':'latest','selector':'sol'})
+            with self.assertRaisesRegex(ValueError,'記録済み'):
+                board.cmd_codex_reconcile(a)
     def test_codex_handoff_names_the_family_and_reruns_step_zero(self):
         text=board.codex_handoff_text(Path('/fixture/board'),'role-fixture-worker','20990101T000000Z-codex-000001',None,
                                       {'model':'gpt-6.2-astra','effort':'xhigh'})

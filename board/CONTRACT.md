@@ -190,6 +190,16 @@ parent uses in the same turn. Posting creates the handoff and a local record tie
 contents. Pass the handoff verbatim as the internal tool message. The child claims and submits, and the parent
 handles the result. This route never starts an app window; `launch --request` refuses it.
 
+<a id="codex-owner-model-policy"></a>On an owner board with `codex_model_policy: true`, Codex role requests default to
+Sol for chores. `--codex-work physics` selects Astra for substantive physics. The request preserves a family selector
+and the launcher resolves it against the execution host's listed versions just before starting. A concrete model with
+the owner's verified `--model-quote` is an exact pin. An unquoted ID in the chosen family selects that family's latest.
+When launching an older unstarted request, use `--codex-work` to review its work type and include `--model-quote` only
+for a verified owner pin. `codex-reconcile --request <id> --codex-work <chore|physics>` lets the original requester
+bind an already-open legacy window to its reviewed selector on the launch host. The launcher checks its configured model
+and effort before sending a continuation. When the Codex `UserPromptSubmit` hook is trusted, it also checks the model
+in native Desktop prompts for local `agent-board` worker bindings. The hand-off's first step checks again before work.
+
 <a id="codex-worker-launch"></a>**Starting a Codex worker so the owner sees it.** A `codex exec` worker is listed nowhere
 in the Codex app: its thread is recorded with source `exec`, and the app lists the interactive kinds only (measured). A
 thread that the shared local daemon (`codex app-server daemon`) runs is listed once the app opens it, but while the

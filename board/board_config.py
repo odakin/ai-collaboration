@@ -80,7 +80,7 @@ CONFIG = 'board.json'
 GITCRYPT_MAGIC = b'\x00GITCRYPT'
 AUDIENCES = {'owner', 'collaborators'}
 ENCRYPTIONS = {'git-crypt', 'none'}
-FIELDS = {'board_format', 'name', 'audience', 'encryption', 'branch', 'sources', 'readable', 'labels', 'description', 'launch_effort_floor', 'launch_model_allow', 'policy_stage_check', 'accept_review_form', 'request_desk', 'delegation_roles', 'ask_prior_search', 'title_fallback', 'owner_names'}
+FIELDS = {'board_format', 'name', 'audience', 'encryption', 'branch', 'sources', 'readable', 'labels', 'description', 'launch_effort_floor', 'launch_model_allow', 'policy_stage_check', 'accept_review_form', 'request_desk', 'delegation_roles', 'ask_prior_search', 'title_fallback', 'owner_names', 'codex_model_policy'}
 EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')   # a worker's reasoning effort, lowest first
 KEY_RE = re.compile(r'[a-z0-9][a-z0-9-]{1,63}')
 
@@ -148,6 +148,8 @@ def validate(cfg: dict) -> dict:
         problems.append('readable is for collaborators boards')
     if not isinstance(cfg.get('branch', 'main'), str): problems.append('branch must be a string')
     if not isinstance(cfg.get('labels', {}), dict): problems.append('labels must be an object')
+    if 'codex_model_policy' in cfg and (type(cfg['codex_model_policy']) is not bool or cfg.get('audience') != 'owner'):
+        problems.append('codex_model_policy is a boolean for owner boards')
     floor = cfg.get('launch_effort_floor')
     if floor is not None and not (isinstance(floor, dict) and set(floor) <= {'effort', 'rule'} and floor.get('effort') in EFFORTS
                                   and isinstance(floor.get('rule', ''), str)):

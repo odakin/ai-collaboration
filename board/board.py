@@ -805,7 +805,11 @@ def codex_queue_note(session, events, thread_key, lead='次に動く', *, messag
                                 '--agent','codex','--session',tid,'--request',request,'--sync'])
             if not any(c in command for c in '`\r\n'):
                 msg=f"掲示板 {thread_key}: 割当を同期して読む。まず単独で実行: `{command}`"
-        return f"→ {lead} codex/{tid[:8]} に知らせる ({state}。 Codex に SendMessage は無い): {ct.queue_hint(tid, msg)}"
+        command=ct.queue_hint(tid,msg)
+        if root is not None and (Path(root)/bc.CONFIG).is_file() and bc.load(root).get('codex_model_policy'):
+            command=shlex.join(['python3',str(codex_launcher()),'queue','--thread',tid,
+                                '--board-root',str(Path(root).resolve()),'--message',msg])
+        return f"→ {lead} codex/{tid[:8]} に知らせる ({state}。 Codex に SendMessage は無い): {command}"
     except Exception:
         return None
 
@@ -2730,12 +2734,14 @@ def codex_family(model):
     return m.group(2) if m else ''
 
 
-def codex_best_model(family):
+def codex_best_model(family, effort=None):
     """The newest listed version of a Codex family on this machine (the launcher's best-model), or raises with its
     reason: an unknown one stops the request instead of guessing an id (an old id starts the worker a version behind,
     and its step 0 stopped it when the app's default later moved to the newer one = measured)."""
     try:
-        p=subprocess.run([sys.executable,str(codex_launcher()),'best-model','--family',family],capture_output=True,text=True,timeout=30)
+        command=[sys.executable,str(codex_launcher()),'best-model','--family',family]
+        if effort: command+=['--effort',effort]
+        p=subprocess.run(command,capture_output=True,text=True,timeout=30)
     except Exception as ex:
         raise ValueError(f'Codex の系統 {family} の最新の版を引けない ({ex.__class__.__name__}) = 起こさない。 --expect-model に版つきの id を書いて出し直す')
     got=(p.stdout or '').strip().splitlines()
@@ -2755,6 +2761,84 @@ def resolve_codex_model(model, host):
     return m
 
 
+CODEX_WORK_FAMILY={'chore':'sol','physics':'astra'}
+
+
+def codex_model_intent(work, model, quote):
+    """Record selection intent independently of the list on the machine filing the request."""
+    family=CODEX_WORK_FAMILY[work]
+    model=(model or '').strip().lower()
+    if quote:
+        slug=CODEX_SLUG.fullmatch(model)
+        words=quote.lower()
+        named=slug and (re.search(r'(?<![a-z0-9.-])'+re.escape(model)+r'(?![a-z0-9.-])',words) or (
+            re.search(r'(?<![a-z])'+slug[2]+r'(?![a-z])',words) and
+            re.search(r'(?<![\d.])'+re.escape(slug[1])+r'(?![\d.])',words)))
+        if not named:
+            raise ValueError('--model-quote must name the exact version supplied with --expect-model')
+        return {'work':work,'model-mode':'exact','model':model}
+    if model and model!=family and codex_family(model)!=family:
+        raise ValueError(f'Codex の {work} は {family}。 --codex-work と --expect-model を照合するか、本人の版指定を --model-quote に記録する')
+    return {'work':work,'model-mode':'latest','model':family}
+
+
+def check_codex_model_quote(a):
+    """Use the same native human-message readers as the owner approval gates."""
+    quote=a.model_quote
+    if not quote: return
+    try:
+        if a.agent=='claude':
+            proof=_owner_turn().find_quote(requester_transcript(a.agent,a.session),quote)
+            verified=proof['found'] and proof['in_latest']
+        elif a.agent=='codex':
+            sid=os.environ.get('CODEX_THREAD_ID')
+            if not sid or sid!=a.session:
+                raise ValueError('Codex の現在の窓と依頼元が一致しない')
+            from importlib.machinery import SourceFileLoader
+            path=codex_launcher().parent/'manuscript-claim-guard.py'
+            spec=importlib.util.spec_from_loader('codex_quote_guard',SourceFileLoader('codex_quote_guard',str(path)))
+            guard=importlib.util.module_from_spec(spec)
+            sys.modules[spec.name]=guard
+            spec.loader.exec_module(guard)
+            path=guard.find_transcript('codex',sid)
+            turns=guard.user_messages(path) if path else []
+            verified=bool(turns and quote==turns[-1][1].strip())
+        else:
+            verified=False
+    except Exception:
+        verified=False
+    if not verified:
+        raise ValueError('本人が今回の依頼で指定した版を確認できない。 --model-quote に本人の発言全体をそのまま渡す')
+
+
+def codex_resume_intent(fields, work=None, model=None, quote=None):
+    """An old concrete launch slug has no provenance. Reclassify it before it can be used again."""
+    if fields.get('model-mode'):
+        if work or model or quote:
+            raise ValueError('記録済みの Codex モデル方針を変える場合は、依頼元が新しい依頼に記録する')
+        intent={key:fields.get(key) for key in ('work','model-mode','model')}
+        mode, value=intent['model-mode'],intent['model'] or ''
+        if intent['work'] in CODEX_WORK_FAMILY and (
+            (mode=='latest' and value==CODEX_WORK_FAMILY[intent['work']]) or
+            (mode=='exact' and CODEX_SLUG.fullmatch(value))):
+            return intent
+        raise ValueError('記録された Codex モデル方針が不完全 = 起動・再開しない')
+    if not work:
+        raise ValueError('旧 Codex 依頼の仕事の区分と版の指定元が未記録。依頼元が --codex-work chore または physics で再照合する')
+    return codex_model_intent(work,model,quote)
+
+
+def codex_launch_fields(fields):
+    f=dict(fields)
+    if f.get('model-mode'):
+        f['model-selector']=f['model']
+        if f['model-mode']=='latest' and same_host(f['host'],this_host()):
+            f['model']=codex_best_model(f['model'],f.get('effort'))
+    else:
+        f['model']=resolve_codex_model(f.get('model'),f['host'])
+    return f
+
+
 def codex_fields(a):
     """How a Codex role's worker starts (CONTRACT.md#codex-worker-launch): the machine, model, effort, working directory
     and surface. Written into the request's `details` (one `launch-<key>: <value>` line each), so a session on another
@@ -2764,18 +2848,24 @@ def codex_fields(a):
     dm,de=codex_defaults()
     cwd=a.launch_cwd or str(bc.workspace(a.root))
     host=a.launch_host or this_host()
+    governed=getattr(a,'_codex_model_policy',False)
     f={'host':host,
-       'model':resolve_codex_model((a.expect_model or os.environ.get(CODEX_MODEL_ENV) or dm or '').strip(),host),
+       'model':(a.expect_model or os.environ.get(CODEX_MODEL_ENV) or dm or '').strip(),
        'effort':(a.effort or os.environ.get(CODEX_EFFORT_ENV) or de or '').strip(),
        'cwd':home_tilde(cwd),
        'surface':a.surface if a.surface in ('background','agent') else 'codex-app'}
+    if governed:
+        f.update(codex_model_intent(a.codex_work or 'chore',a.expect_model,a.model_quote))
+        f['effort']=a.effort or 'xhigh'
+    elif a.surface!='agent':
+        f['model']=resolve_codex_model(f['model'],host)
     roots=[home_tilde(r) for r in getattr(a,'launch_writable_root',None) or []]
     if roots: f['writable-root']=roots   # dirs outside cwd the worker writes: an unattended thread cannot be given one later
     if getattr(a,'title',None): f['title']=' '.join(a.title.split())   # the thread's name in the app (measured: --title was ignored)
     if a.surface=='background': f['headless-reason']=' '.join((a.headless_reason or '').split())
     if a.surface=='agent':
-        f.update(model=(a.expect_model or '').strip(), effort=(a.effort or '').strip(),
-                 **{'same-turn-reason':' '.join((a.reason or '').split())})
+        if not governed: f.update(model=(a.expect_model or '').strip(),effort=(a.effort or '').strip())
+        f['same-turn-reason']=' '.join((a.reason or '').split())
     a._codex_fields=f
     return f
 
@@ -2858,17 +2948,20 @@ def codex_handoff_text(root, role, request_id, spec, f, project=None, policy=Non
     --sync` and `note` reached the board)."""
     eng=Path(__file__).resolve(); launcher=codex_launcher(); m,e=f.get('model'),f.get('effort')
     scope=(f" --project {project}" if project else '')+(f" --policy {policy}" if policy else '')
-    fam=codex_family(m)
-    target=(f"the newest {fam.capitalize()} ({m} when it was started) or a newer {fam.capitalize()}" if fam else m)
+    mode=f.get('model-mode')
+    fam=f.get('model-selector') if mode=='latest' else codex_family(m)
+    target=(f"the newest {fam.capitalize()} ({m} when it was started) or a newer {fam.capitalize()}" if fam and mode!='exact' else m)
     run=(f" The assigned work must run on {target}"+(f" at {e} effort" if e else '')+'.') if m else ''
     src,claim_tail,submit_tail,restricted=restricted_handoff_parts(policy,source,f"<your full thread id, typed out> ({m or '<model>'})")
     # A later assignment turn can run on a different model from the launch. Keep the same check for work and route an
     # explicitly requested wrap through a separate readiness check and the applicable wrap model in that turn.
+    selector=(f" --latest-family {fam}" if mode=='latest' else " --exact-model" if mode=='exact' else '')
+    if mode: selector+=f" --board-root {shlex.quote(str(Path(root).resolve()))}"
     hold=(f"0. At launch and at the start of each later assignment turn, run `python3 {launcher} check-self --model {m}"
-          +(f" --effort {e}" if e else '')+"`: if it does not print ✅,"
+          +(f" --effort {e}" if e else '')+selector+"`: if it does not print ✅,"
           " stop at once without reading the request or its materials and say so in one line."
           +(" If it prints that a newer version runs, go on, and after your claim (step 2) post that line once as a `note`"
-            " on this request." if fam and not restricted else '')+"\n") if m else ''
+            " on this request." if fam and mode!='exact' and not restricted else '')+"\n") if m else ''
     ready=(" Verify the receipt, this thread's claim and any remaining work through the restricted request's source."
            if restricted else
            f" Before any wrap operation, run `python3 {eng} show --root {root} --agent codex --session {role}"
@@ -2920,13 +3013,16 @@ def codex_plan(root, role, request_id, spec, f, project=None, policy=None, title
     if git_status: print(git_status,file=sys.stderr)
     text=codex_handoff_text(root,role,request_id,spec,f,project=project,policy=policy,source=source,git_status=git_status)
     hpath=write_outbox(root,request_id+'.handoff.txt',text)
+    model_policy=({'work':f['work'],'mode':f['model-mode'],'selector':f['model-selector']} if f.get('model-mode') else None)
     rec=write_launch_record(root,request_id,role=role,spec=spec,model=f.get('model'),effort=f.get('effort'),surface='codex-app',
-                            launch_host=f.get('host'),cwd=f.get('cwd'))
+                            launch_host=f.get('host'),cwd=f.get('cwd'),**({'model_policy':model_policy} if model_policy else {}))
     label=' '.join(x for x in (f.get('model'),f.get('effort')) if x)
     name=titled((title or role)[:60],label,f.get('model'),f.get('effort'))
     argv=[sys.executable,str(codex_launcher()),'start','--cwd',os.path.expanduser(f['cwd']),'--prompt-file',str(hpath),
           '--name',name,'--host',f['host'],'--record',str(rec),'--json']
     if f.get('model'): argv+=['--model',f['model']]
+    if model_policy and model_policy['mode']=='latest': argv+=['--latest-family',model_policy['selector']]
+    if model_policy and model_policy['mode']=='exact': argv+=['--exact-model']
     if f.get('effort'): argv+=['--effort',f['effort']]
     # The sandbox keeps `.git` read-only inside writable roots unless the git dir itself is named (measured: a worker's
     # `--sync` was refused at .git/FETCH_HEAD; naming the git dir let it write).
@@ -2963,7 +3059,9 @@ def _codex_threads_ok():
 def codex_announce(a, ev, audience):
     """For a request to a Codex role: write the hand-off and the launch record, print how the worker starts, and return
     (argv, env) when it starts on this machine (None when another machine launches it, or for the headless line)."""
-    f=codex_fields(a); rid=ev['event_id']; spec=handoff_spec(a)
+    fields=codex_fields(a)
+    f=fields if fields['surface']=='agent' and not fields.get('model-mode') else codex_launch_fields(fields)
+    rid=ev['event_id']; spec=handoff_spec(a)
     if f['surface']=='agent':
         import hashlib
         prompt = (
@@ -3095,12 +3193,47 @@ def cmd_launch(a):
         raise ValueError('この依頼は headless の codex exec を選んでいる (理由 = '+f.get('headless-reason','')+') = 依頼元の shell が起こす')
     if f.get('writable-root'): normalize_writable_roots(f['writable-root'])   # this machine starts it: each root must be a dir here
     a.policy=req['source_policy']; a.project=req['project']['key']
-    f['model']=resolve_codex_model(f.get('model'),f['host'])   # a family word from another machine's request: this machine's newest
+    if bc.load(a.root).get('codex_model_policy'):
+        check_codex_model_quote(a)
+        f.update(codex_resume_intent(f,a.codex_work,a.expect_model,a.model_quote))
+    f=codex_launch_fields(f)
     spec=handoff_spec(a,req,launch_record(a.root,a.request))
     argv,line,_=codex_plan(a.root,asg['session_id'],a.request,spec,f,project=a.project,policy=a.policy,source=getattr(a,'source',None),
                            title=f.get('title') or summary_title(req.get('summary'),a.policy,title_fallback(a.root)) or None)
     print('→ 起こす: '+line)
     run_codex_launch(a,a.request,argv,dict(os.environ))
+
+
+def cmd_codex_reconcile(a):
+    """Bind a legacy worker's existing window to its request's reviewed model intent."""
+    if not a.request or not a.codex_work or not bc.load(a.root).get('codex_model_policy'):
+        raise ValueError('codex-reconcile requires --request, --codex-work and an owner board model policy')
+    with snapshot(a.root,fresh=True) as dest:
+        events=read(dest)
+    req=next((e for e in events if e['event_id']==a.request and e['kind']=='request'),None)
+    if req is None or not same_session(req.get('actor'),{'agent':a.agent,'session_id':a.session}):
+        raise ValueError('再開の条件は元の依頼元が照合して記録する')
+    record=launch_record(a.root,a.request) or {}
+    tid=record.get('codex_thread')
+    launches=codex_launched(events,a.request)
+    if not tid or not launches or f'Codex thread {tid} (' not in launches[-1]['summary']:
+        raise ValueError('この機械にある窓と掲示板の起動記録が一致しない')
+    if record.get('model_policy'):
+        raise ValueError('この窓のモデル方針は記録済み。変更は依頼元が新しい依頼に記録する')
+    fields=parse_codex_details(req.get('details'))
+    check_codex_model_quote(a)
+    intent=codex_resume_intent(fields,a.codex_work,a.expect_model,a.model_quote)
+    launch=codex_launch_fields(dict(fields,**intent,host=this_host()))
+    record['model_policy']={'work':intent['work'],'mode':intent['model-mode'],'selector':intent['model']}
+    path=outbox_dir(a.root)/(a.request+'.launch.json')
+    with tempfile.NamedTemporaryFile(mode='w',encoding='utf-8',dir=path.parent,delete=False) as out:
+        json.dump(record,out,ensure_ascii=False,indent=1)
+        temp=Path(out.name)
+    try:
+        os.replace(temp,path)
+    finally:
+        temp.unlink(missing_ok=True)
+    print(f"→ {tid} の依頼に {launch['model']} / {record.get('effort') or '?'} を記録した。モデルを切り替え、照合が通れば再開する")
 
 
 def premium_note(model, effort, reason):
@@ -3469,7 +3602,7 @@ def inbox_show(a, root, *, board_name=None, collect=None):
 
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('command',choices=sorted(KINDS|{'inbox','show','retry','sessions','watch','touch','untouch','touching','boards','init','launch','pickup','approve-edit','edit-approvals'}))
+    ap.add_argument('command',choices=sorted(KINDS|{'inbox','show','retry','sessions','watch','touch','untouch','touching','boards','init','launch','pickup','approve-edit','edit-approvals','codex-reconcile'}))
     ap.add_argument('--root',type=Path,help='the board directory (holds board.json and events/)')
     ap.add_argument('--board',help='a board in the workspace by name (`boards` lists them)')
     ap.add_argument('--all-boards',action='store_true',help='inbox / show: every unlocked board in the workspace')
@@ -3489,6 +3622,7 @@ def main():
     ap.add_argument('--to',choices=['claude','codex','human','other'])
     ap.add_argument('--to-session'); ap.add_argument('--role',choices=['assignee','reviewer'])
     ap.add_argument('--expect-model',help='request/handover: refuse to post when the addressed session\'s actual model (its transcript) is known and does not match this tier (fable/opus) or model-id substring')
+    ap.add_argument('--codex-work',choices=sorted(CODEX_WORK_FAMILY),help='owner board model policy: chore uses Sol; physics uses Astra')
     ap.add_argument('--effort',choices=EFFORTS,help=f'request to a role: the effort its worker starts on, in the launch record, the start_session arguments, the CLI line, the hand-off text and the title (default: env {LAUNCH_EFFORT_ENV}, else the requester\'s CLAUDE_EFFORT); request/handover to a live session: report when its known effort differs')
     ap.add_argument('--reason',help='request to a role / launch --request for a Claude role: why its worker needs the top tier or max'
                     ' effort (what it must derive or judge); kept in the launch record and the hand-off line. The desktop launch'
@@ -3608,13 +3742,14 @@ def main():
         if not p.is_file(): ap.error(f'--spec-local: no such file: {a.spec_local}')
         a.spec_local=str(p.resolve())
     if a.detach and a.nested: ap.error('--detach and --nested contradict (nested is the default)')
+    if a.codex_work and a.command not in {'request','launch','codex-reconcile'}: ap.error('--codex-work is for request, launch and codex-reconcile')
     if a.dialogue:
         if a.command not in {'request','launch'}: ap.error('--dialogue is for request and launch only')
         try: dialogue_gate(True,a.surface,a.worktree,codex=(a.command=='request' and bool(a.to) and a.to!='claude'))
         except ValueError as e: ap.error(str(e))
     if a.reason and a.command not in {'request','launch'}: ap.error('--reason is for request and launch only')
     if a.effort_quote and a.command not in {'request','launch'}: ap.error('--effort-quote is for request and launch only')
-    if a.model_quote and a.command not in {'request','launch'}: ap.error('--model-quote is for request and launch only')
+    if a.model_quote and a.command not in {'request','launch','codex-reconcile'}: ap.error('--model-quote is for request, launch and codex-reconcile')
     if a.command=='submit':
         # The review form's fields belong to the receipt (accept): submit kept none of them and said nothing (measured:
         # a worker's checks and leftovers passed this way were missing from the submission, and the review ran them again).
@@ -3665,6 +3800,8 @@ def main():
     ws=touch_base(a.root)
     if a.command=='launch':
         cmd_launch(a); return
+    if a.command=='codex-reconcile':
+        cmd_codex_reconcile(a); return
     if a.command=='pickup':
         cmd_pickup(a); return
     if a.command == 'touching':
@@ -3810,6 +3947,10 @@ def main():
         inbox_show(a,a.root); return
     # ---- posting
     cfg=bc.load(a.root)
+    if is_codex_role_request(a) and cfg.get('codex_model_policy'):
+        a._codex_model_policy=True
+        codex_fields(a)  # reject a mismatched family before posting or raising a reviewer
+        check_codex_model_quote(a)
     if a.command=='request' and a.to=='claude' and (a.to_session or '').startswith('role-'):
         check_effort_floor(cfg,launch_effort(a.effort),a.effort_quote)   # before the board is fetched or anything is written
         check_model_allow(cfg,launch_settings(a.expect_model,a.session,a.effort)[0],a.model_quote,a.agent,a.session)
