@@ -80,7 +80,7 @@ CONFIG = 'board.json'
 GITCRYPT_MAGIC = b'\x00GITCRYPT'
 AUDIENCES = {'owner', 'collaborators'}
 ENCRYPTIONS = {'git-crypt', 'none'}
-FIELDS = {'board_format', 'name', 'audience', 'encryption', 'branch', 'sources', 'readable', 'labels', 'description', 'launch_effort_floor', 'launch_model_allow', 'policy_stage_check', 'accept_review_form', 'request_desk', 'ask_prior_search', 'title_fallback', 'owner_names'}
+FIELDS = {'board_format', 'name', 'audience', 'encryption', 'branch', 'sources', 'readable', 'labels', 'description', 'launch_effort_floor', 'launch_model_allow', 'policy_stage_check', 'accept_review_form', 'request_desk', 'delegation_roles', 'ask_prior_search', 'title_fallback', 'owner_names'}
 EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')   # a worker's reasoning effort, lowest first
 KEY_RE = re.compile(r'[a-z0-9][a-z0-9-]{1,63}')
 
@@ -179,6 +179,16 @@ def validate(cfg: dict) -> dict:
         elif cfg.get('audience') != 'owner':
             # the engine runs the command on the requester's machine: a collaborators board's board.json is written by others
             problems.append('request_desk is for owner boards (the engine runs its command on the requester\'s machine)')
+    dr = cfg.get('delegation_roles')
+    if dr is not None:
+        if not (isinstance(dr, dict) and set(dr) <= {'command', 'rule'} and isinstance(dr.get('command'), list)
+                and dr['command'] and all(isinstance(c, str) and c.strip() for c in dr['command'])
+                and isinstance(dr.get('rule', ''), str)):
+            problems.append('delegation_roles is {"command": ["<python script, relative to the board directory>", "<argument>", ...],'
+                            ' "rule": "<where the rule is written>"}')
+        elif cfg.get('audience') != 'owner':
+            # the engine runs the command on the approving machine: a collaborators board's board.json is written by others
+            problems.append('delegation_roles is for owner boards (the engine runs its command on the approving machine)')
     aps = cfg.get('ask_prior_search')
     if aps is not None:
         hit = aps.get('hit_line', '') if isinstance(aps, dict) else ''

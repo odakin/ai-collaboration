@@ -297,7 +297,9 @@ Operating facts (measured):
   above for the worker subcommands, else an approval). Reads of the local checkout (`inbox` without `--sync`,
   `board-view.py --surface`) work there.
 - `handover` replies to the request itself: name it with `--request` or `--reply-to` (either one is enough; a submission or other event id in `--reply-to` is refused). A session about to close hands the requests it reviews to its
-  successor with `handover --role reviewer`. A reviewer whose session has died is replaced by a `human` handover on
+  successor with `handover --role reviewer`. On the owner's board, a reviewer handover to a role the owner's delegation
+  does not let approve protected files prints one line saying so (a notice, not a refusal: most requests touch no
+  protected file; [#approver-role-check](#approver-role-check)). A reviewer whose session has died is replaced by a `human` handover on
   the owner's explicit instruction: `--agent human --session <chat>:<user id>` (a bare name is refused).
 
 ## <a id="naming-conventions"></a>Naming conventions
@@ -805,7 +807,13 @@ implement` with a `--policy-ref` naming one regular file committed at HEAD in a 
 workspace: no `..`, no directory, no symlink; only that the file is committed is checked, the section and the
 owner's confirmation are the reviewer's to read; a request with only the owner's words is outside the delegation); a poster that is not the request's current reviewer, or that is the worker's role; a
 request whose requester window is not recorded by its native id, the window that made the request, or the worker's
-window (the requester does not take over a protected approval: with the reviewer's window down, the owner is asked); a
+window (the requester does not take over a protected approval: with the reviewer's window down, the owner is asked); <a id="approver-role-check"></a>a
+poster role the owner's delegation does not let approve, read through the rule guard itself (claude-config
+`agent-rule-guard.py delegation --json`, so the board and the guard read one setting one way; when the guard cannot
+answer, the board says so and leaves the check to the guard's `apply`); a window whose first board event under a role
+id was under another role (a window opened for an approval-only or second-review role that writes the approval under
+the reviewer's role id; a window opened for the role's standing instance `<role>-<8 hex>` counts as the role) —
+measured twice, an approval the guard would refuse at `apply` was asked for; a
 region outside `authority:*`; a missing check, a check that only names an artifact, or a missing `--nothing-lost`; and
 a change stopped on a relaxing word without `--relax-why` (where the word is and why it does not relax; the owner's
 daily look-back shows these one by one: up to two added lines carrying the word, each with its line number in the
@@ -1330,6 +1338,13 @@ python3 board_asks.py digest --root <board> --session S
   own replies (measured: the owner answered a question a worker listed in its window while the requester asked the same).
   Approvals of protected files that the owner
   delegated to the reviewer role are not asked there either: the reviewer writes them ([#edit-approval](#edit-approval)).
+  <a id="handoff-protected-by-stage"></a>The protected-file paragraph follows the request's stage
+  (`board.py` `request_stage`): an implementation of a committed policy file (`--stage implement` with `--policy-ref`)
+  names both ways (the reviewer's approval and the owner's words); any other request (exempt, unmarked, or quoting only
+  the owner's words) names only the owner's way and asks the worker to say in its submit when the guard's refusal speaks
+  of the delegation (the requester may then post an implementation-stage request quoting the policy file); a policy-only
+  request changes no protected file. Measured: the hand-off named the reviewer's approval for an exempt request, the
+  board refused it, and the worker learnt that only after the guard stopped its file.
   The owner's own approval of a protected file is not asked in the worker's window: the worker submits the full candidate
   with its SHA-256, the requester shows the file name and that SHA-256 to the owner in its own window and sends the
   worker the owner's words and its session id, and the worker applies with the rule guard's `--owner-session` and

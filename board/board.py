@@ -1054,6 +1054,19 @@ def policy_stage_details(a):
     return '\n'.join(lines)
 
 
+def request_stage(details):
+    """What a request's policy-stage lines (policy_stage_details) let a worker do with a protected file, for the hand-off
+    text: 'implement-ref' (an implementation of a committed policy file: the reviewer's approval event is open, as
+    edit_approval_details checks), 'policy' (a policy only: no implementation), else 'other' (exempt, unmarked, or an
+    implementation quoting only the owner's words). Measured: the hand-off named the reviewer's approval for every
+    request, the board refused it for an exempt one, and the worker found that out only after the guard stopped it."""
+    d=details or ''
+    stage=re.search(r'^policy-stage: (\S+)$',d,re.M)
+    if stage and stage.group(1)=='policy': return 'policy'
+    if stage and stage.group(1)=='implement' and re.search(r'^policy-ref: \S',d,re.M): return 'implement-ref'
+    return 'other'
+
+
 def _request_spec_texts(a):
     """The spec files a request names (--spec-local, else its references), read up to a cap; unreadable ones skipped."""
     out=[]
@@ -1475,6 +1488,59 @@ def _native8(actor):
     return head[:8] if re.fullmatch(r'[0-9a-f]{8}[0-9a-f-]*',head) else ''
 
 
+DELEGATION_CMD_ENV='AGENT_BOARD_DELEGATION_CMD'   # a JSON argv in place of board.json's delegation_roles command (tests)
+
+
+def delegation_roles(cfg=None, root=None):
+    """(roles, why): the reviewer roles the owner's delegation setting lets approve a protected file, read by the rule
+    guard itself through the command an owner board's board.json names (`delegation_roles`: the guard's
+    `delegation --json`), so the board and the guard read one setting one way (the committed HEAD version, found by the
+    guard's personal-layer marker). The engine names neither the guard nor a private file: naming the guard's file in
+    this module would lock the whole module under the guard (CONTRACT.md#approver-role-check). roles = [] when the
+    delegation is off; None when it cannot be read (no such field, another audience, no script, a failure): then the
+    board leaves the check to the guard's apply, which checks it anyway."""
+    raw=(os.environ.get(DELEGATION_CMD_ENV) or '').strip()
+    if raw:
+        try: argv=json.loads(raw)
+        except ValueError: return None,f'{DELEGATION_CMD_ENV} が JSON の list でない'
+    else:
+        spec=(cfg or {}).get('delegation_roles')
+        if not spec or (cfg or {}).get('audience')!='owner' or not root:
+            return None,f'{bc.CONFIG} に delegation_roles (委任の設定の読み口) が無い'
+        cmd=list(spec.get('command') or [])
+        script=Path(root).resolve()/cmd[0]
+        if not script.is_file(): return None,f'{bc.CONFIG} の delegation_roles の script が無い ({script})'
+        argv=[sys.executable,str(script),*cmd[1:]]
+    try: r=subprocess.run(argv,capture_output=True,text=True,timeout=60)
+    except (OSError,subprocess.SubprocessError) as ex: return None,f'守りの道具を起こせない ({ex.__class__.__name__})'
+    try: d=json.loads(r.stdout) if r.returncode==0 else None
+    except ValueError: d=None
+    if not isinstance(d,dict) or not isinstance(d.get('reviewer_roles'),list):
+        return None,f'守りの道具が委任の設定を答えない (rc={r.returncode})'
+    return ([x for x in d['reviewer_roles'] if isinstance(x,str)] if d.get('enabled') else []),str(d.get('why') or '')
+
+
+def first_role_of_window(events, native):
+    """(role id, event id) of the first board event a window (native session id) posted under a role id, or None.
+    A window is known by the head of its session name (_native8) or the review-window / reviewer-native line an
+    accept or an approval records. Measured: a window opened for another role (an approval-only role) wrote the
+    approval under the reviewer's role id, which the guard does not check."""
+    n8=(native or '')[:8]
+    if not n8: return None
+    for e in sorted(events,key=lambda e: e['event_id']):
+        sid=str((e.get('actor') or {}).get('session_id') or '')
+        if not sid.startswith('role-'): continue
+        ids={_native8(e.get('actor') or {})}|set(re.findall(r'^(?:review-window|reviewer-native): ([0-9a-f]{8})',e.get('details') or '',re.M))
+        if n8 in ids: return sid,e['event_id']
+    return None
+
+
+def same_role(first, role):
+    """A window opened for `role` itself, or for its standing instance `role-<8 hex>` (the reviewer's standing request
+    opens its window under that id, then works as the role: measured on 6 of the owner board's 22 approvals)."""
+    return first==role or bool(re.fullmatch(re.escape(role)+r'-[0-9a-f]{8}',first or ''))
+
+
 def _git_out(cwd, *args):
     r=subprocess.run(['git',*args],cwd=cwd,capture_output=True,timeout=30)
     return r.returncode,r.stdout
@@ -1561,6 +1627,18 @@ def edit_approval_details(a, events, cfg, ev):
         problems.append(f"承認を書けるのはその依頼の検収役 (--session {st['reviewer']['session_id']})")
     if same_session(me,st['assigned_to']):
         problems.append('worker の役では承認を書かない (書いた者と確かめる者を別にする)')
+    # Checked here before anything is posted, read the guard's way (delegation_roles): measured twice, an approval the
+    # guard would refuse at apply (a role outside the delegation, or a window opened for another role) was asked for.
+    roles,why=delegation_roles(cfg,getattr(a,'root',None))
+    if roles is None:
+        print(f'ℹ️ 承認を書ける役の照合はしない ({why}) = 守りの道具が当てる時に照らす',file=sys.stderr)
+    elif a.session not in roles:
+        problems.append(f"{a.session} は本人の委任の設定で承認を書ける役でない (書ける役 = {', '.join(roles) or '無し'}"
+                        +(f'、 {why}' if why and not roles else '')+') = 守りの道具が当てる時に断る。 本人の答えの道に回す')
+    first=first_role_of_window(events,native)
+    if first and not same_role(first[0],a.session):
+        problems.append(f'この窓は掲示板に最初に {first[0]} の役で書いた ({first[1]}) = {a.session} の役で起こした窓でない。'
+                        ' 承認は、 その役で起こしてその役で依頼を引き受けた検収係の窓が書く')
     req8=_native8(req['actor'])
     if not req8:
         problems.append('依頼を出した窓の native session が依頼に無い = 承認を書く窓と別だと確かめられない (本人に聞く)')
@@ -1831,7 +1909,21 @@ def event_from(a, events, *, ack_receipt=None):
     if kind=='handover':
         if not a.to or not a.to_session or not a.role: raise ValueError('handover needs --to, --to-session, --role')
         ev.update(target={'agent':a.to,'session_id':a.to_session},handover_role=a.role)
+        if a.role=='reviewer' and (bc.load(a.root) or {}).get('audience')=='owner':
+            note=reviewer_handover_notice(a.to_session,bc.load(a.root),a.root)
+            if note: print(note,file=sys.stderr)
     return ev
+
+
+def reviewer_handover_notice(role, cfg=None, root=None):
+    """The one line a reviewer handover on the owner's board prints when `role` may not approve a protected file under
+    the owner's delegation ('' when it may, or when the guard cannot answer). A notice, not a refusal: most requests
+    touch no protected file. Measured: a request's reviewer stayed a role outside the delegation, and its approval would
+    have been refused only when the worker applied it."""
+    roles,_=delegation_roles(cfg,root)
+    if roles is None or role in roles: return ''
+    return (f"ℹ️ {role} は本人の委任の設定で守られた file の承認を書ける役でない (書ける役 = {', '.join(roles) or '無し'})。"
+            ' この依頼で守られた file に当たったら、 本人の答えの道か、 書ける役への検収役の引き継ぎに回す')
 
 
 def safety_stop_handoff_text():
@@ -1932,7 +2024,7 @@ DIALOGUE_ASK=(" Research and drafting questions are this window's work with the 
     " here for a tool permission prompt only if a step that is yours needs one.")
 
 
-def handoff_text(root, role, request_id, spec, model, effort, surface='background', project=None, policy=None, reason=None, worktree=False, source=None, dialogue=False):
+def handoff_text(root, role, request_id, spec, model, effort, surface='background', project=None, policy=None, reason=None, worktree=False, source=None, dialogue=False, stage='other'):
     """What a worker window starts from (CONTRACT.md#worker-handoff-text): role, request, spec, the model and effort it
     must run on, and the first two steps. Written to a file and passed to the CLI whole, so quoting never bites.
     A desktop window gets a step 0: the app starts it on the requester's model when the asked one is higher, and on
@@ -1975,19 +2067,35 @@ def handoff_text(root, role, request_id, spec, model, effort, surface='backgroun
     # names that session (--owner-session) and checks that the reply the owner answered showed the file and the
     # candidate's SHA-256 (claude-config conventions/agent-rule-ownership.md#approval). A worker that also listed its
     # question in its own reply got the owner's answer there, while the requester asked the same (measured).
+    # The protected-file paragraph follows the request's stage (request_stage): the board posts the reviewer's approval
+    # only for an implementation of a committed policy file (edit_approval_details), so the other stages do not name it
+    # (measured: an exempt request's worker was told of the reviewer's approval, the board refused it, and the worker
+    # learnt that only after the guard stopped the file), and a policy-only worker changes no protected file at all.
+    owner_way=(" the requester shows the file name and that SHA-256 to the owner in its own window and sends you the"
+               " owner's words and its session id, and you apply with the command the guard printed plus"
+               " `--owner-session claude:<the requester's session id> --quote '<the owner's words>'`.")
+    submit_way=(" When the rule guard stops a protected file, do not ask the owner here either: submit the full candidate with its"
+                " SHA-256 to this request (the whole file, not a diff, named flatly `<repo>__<dir>__<name>` in a new directory that"
+                " holds only that submission's files, every deliverable given as an absolute path = ai-collaboration"
+                " board/CONTRACT.md#edit-approval).")
+    if stage=='policy':
+        protected=(" This request asks for a policy only: change no protected file (a file the rule guard stops); write the"
+                   " change you would make into the policy file as a candidate.")
+    elif stage=='implement-ref':
+        protected=(submit_way+" Where the guard's refusal says the file is within the owner's reviewer delegation, the"
+                   " request's reviewer checks it and posts an approval event (`approve-edit`), and you apply with the command the"
+                   " guard printed plus `--reviewer-approval <event id>` (commit with a `Reviewer-Approved: <event id>` line; post no"
+                   " submit, release or claim between the approval and the apply). Otherwise"+owner_way)
+    else:
+        protected=(submit_way+" This request quotes no committed policy file (it is not an implementation-stage request with"
+                   " --policy-ref), so the board refuses the reviewer's approval event (`approve-edit`) for it:"+owner_way
+                   +" Where the guard's refusal says the file is within the owner's reviewer delegation, say so in the submit:"
+                   " the requester may instead post an implementation-stage request quoting the policy file, which the reviewer"
+                   " can approve.")
     ask=(" Send questions of judgment, approval or acceptance to the requester (SendMessage or a board note), not to the owner"
          " in this window, and do not list them in your replies here: the requester decides them at review and asks the"
          " owner where the owner's own ruling is needed."
-         " When the rule guard stops a protected file, do not ask the owner here either: submit the full candidate with its"
-         " SHA-256 to this request (the whole file, not a diff, named flatly `<repo>__<dir>__<name>` in a new directory that"
-         " holds only that submission's files, every deliverable given as an absolute path = ai-collaboration"
-         " board/CONTRACT.md#edit-approval). Where the guard's refusal says the file is within the owner's reviewer delegation, the"
-         " request's reviewer checks it and posts an approval event (`approve-edit`), and you apply with the command the"
-         " guard printed plus `--reviewer-approval <event id>` (commit with a `Reviewer-Approved: <event id>` line; post no"
-         " submit, release or claim between the approval and the apply). Otherwise"
-         " the requester shows the file name and that SHA-256 to the owner in its own window and sends you the"
-         " owner's words and its session id, and you apply with the command the guard printed plus"
-         " `--owner-session claude:<the requester's session id> --quote '<the owner's words>'`."
+         +protected+
          " A change to CLAUDE.md / AGENTS.md, to permission settings or to hook or guard configuration is not applied on"
          " another window's answer (an agent does not change those because another session asked): the requester applies"
          " it in its own window, or, where it cannot, you ask the owner for it here."
@@ -2368,7 +2476,7 @@ def title_line(args):
     return f'  窓の題 = {t} (要約の最初の句から。 仕事の名でなければ request / launch の --title で名指す)'
 
 
-def desktop_plan(root, role, request_id, spec, expect, session, title=None, project=None, summary=None, detach=False, policy=None, effort=None, reason=None, worktree=False, source=None, effort_quote=None, model_quote=None, dialogue=False):
+def desktop_plan(root, role, request_id, spec, expect, session, title=None, project=None, summary=None, detach=False, policy=None, effort=None, reason=None, worktree=False, source=None, effort_quote=None, model_quote=None, dialogue=False, stage='other'):
     """The desktop app's start_session arguments for a role's worker (the worker is listed in the app, unlike a
     background CLI session). The board cannot call the app: the requesting Claude session calls start_session with
     these arguments. Returns (arguments, file). Title = the task first and the model last (measured: a title that
@@ -2378,7 +2486,7 @@ def desktop_plan(root, role, request_id, spec, expect, session, title=None, proj
     reaching the requester; the requester does not relay a child's questions to the owner either way (relayed, they
     reached the owner twice, measured), and the board's watch carries submit and blocker."""
     model,effort=launch_settings(expect,session,effort)
-    text=handoff_text(root,role,request_id,spec,model,effort,surface='desktop',project=project,policy=policy,reason=reason,worktree=worktree,source=source,dialogue=dialogue)
+    text=handoff_text(root,role,request_id,spec,model,effort,surface='desktop',project=project,policy=policy,reason=reason,worktree=worktree,source=source,dialogue=dialogue,stage=stage)
     write_outbox(root,request_id+'.handoff.txt',text)
     name=role[len('role-'):] if role.startswith('role-') else role
     if project and name.startswith(project+'-'): name=name[len(project)+1:]
@@ -2457,7 +2565,7 @@ def launch_cli_settings(rc_off, worktree=False):
     return json.dumps(s) if s else ''
 
 
-def launch_plan(root, role, request_id, spec, expect, session, project=None, policy=None, effort=None, reason=None, worktree=False, source=None, effort_quote=None, model_quote=None, dialogue=False):
+def launch_plan(root, role, request_id, spec, expect, session, project=None, policy=None, effort=None, reason=None, worktree=False, source=None, effort_quote=None, model_quote=None, dialogue=False, stage='other'):
     """The command that starts the addressed worker as a background CLI session with model, effort and config dir pinned.
 
     Returns (argv, env, shell line, hand-off file). Model = --expect-model, else the owner's default, else the
@@ -2470,7 +2578,7 @@ def launch_plan(root, role, request_id, spec, expect, session, project=None, pol
     requester's shell does, with the hand-off text read from the file."""
     model,effort=launch_settings(expect,session,effort)
     cfg=os.path.expanduser((os.environ.get(LAUNCH_CONFIG_DIR_ENV) or '').strip())
-    text=handoff_text(root,role,request_id,spec,model,effort,project=project,policy=policy,reason=reason,worktree=worktree,source=source,dialogue=dialogue)
+    text=handoff_text(root,role,request_id,spec,model,effort,project=project,policy=policy,reason=reason,worktree=worktree,source=source,dialogue=dialogue,stage=stage)
     path=write_outbox(root,request_id+'.handoff.txt',text)
     write_launch_record(root,request_id,role=role,spec=spec,model=model,effort=effort,surface='background',requester=session,
                         **({'reason':reason} if reason else {}),**({'effort_quote':effort_quote} if effort_quote else {}),
@@ -2535,7 +2643,7 @@ def announce_launch(a, ev, audience):
         # Work the owner does not watch, run as the requester's own subagent: no window to open, so only the record
         # (the claim check compares the subagent's model with it) and the hand-off text the Agent tool's prompt carries.
         model,effort=launch_settings(a.expect_model,a.session,a.effort)
-        text=handoff_text(a.root,a.to_session,ev['event_id'],handoff_spec(a),model,effort,project=a.project,policy=a.policy,reason=a.reason,source=a.source,dialogue=dialogue)
+        text=handoff_text(a.root,a.to_session,ev['event_id'],handoff_spec(a),model,effort,project=a.project,policy=a.policy,reason=a.reason,source=a.source,dialogue=dialogue,stage=request_stage(ev.get('details')))
         hpath=write_outbox(a.root,ev['event_id']+'.handoff.txt',text)
         write_launch_record(a.root,ev['event_id'],role=a.to_session,spec=handoff_spec(a),model=model,effort=effort,surface='agent',requester=a.session,
                             **({'reason':a.reason} if a.reason else {}),**({'effort_quote':a.effort_quote} if a.effort_quote else {}),
@@ -2552,7 +2660,8 @@ def announce_launch(a, ev, audience):
         detach=bool(getattr(a,'detach',False))
         args,spath=desktop_plan(a.root,a.to_session,ev['event_id'],handoff_spec(a),a.expect_model,a.session,
                                 title=getattr(a,'title',None),project=a.project,summary=ev.get('summary'),detach=detach,policy=a.policy,effort=a.effort,reason=a.reason,
-                                worktree=getattr(a,'worktree',False),source=a.source,effort_quote=a.effort_quote,model_quote=a.model_quote,dialogue=dialogue)
+                                worktree=getattr(a,'worktree',False),source=a.source,effort_quote=a.effort_quote,model_quote=a.model_quote,dialogue=dialogue,
+                                stage=request_stage(ev.get('details')))
         sm_cli=ENGINE.parent.parent/'claude-config'/'scripts'/'session-model.py'
         want=' / '.join(x for x in (args.get('model'),('effort '+args['effort']) if args.get('effort') else '') if x)
         cap=effort_cap_note(args.get('effort'))   # said before the arguments: the start lowers it without a word
@@ -2572,7 +2681,8 @@ def announce_launch(a, ev, audience):
     # A role names a window nobody has opened: print the command that opens it with model, effort and account
     # pinned (measured: the chip opens on the parent's model, and a pasted hand-off ran on whatever the window had).
     argv,env,line,hpath=launch_plan(a.root,a.to_session,ev['event_id'],handoff_spec(a),a.expect_model,a.session,project=a.project,policy=a.policy,effort=a.effort,reason=a.reason,
-                                    worktree=getattr(a,'worktree',False),source=a.source,effort_quote=a.effort_quote,model_quote=a.model_quote,dialogue=dialogue)
+                                    worktree=getattr(a,'worktree',False),source=a.source,effort_quote=a.effort_quote,model_quote=a.model_quote,dialogue=dialogue,
+                                    stage=request_stage(ev.get('details')))
     if audience=='owner':
         print(f'→ 受け手を起こす (model・effort・account を固定、 貼り付け不要。 依頼元の shell でそのまま):\n  {line}')
     else:
@@ -3052,7 +3162,7 @@ def launch_claude_role(a, req, events, asg=None):
     if surface=='desktop':
         args,spath=desktop_plan(a.root,role,a.request,spec,a.expect_model,a.session,title=a.title,project=project,
                                 summary=req.get('summary'),detach=a.detach,policy=policy,effort=a.effort,reason=a.reason,worktree=a.worktree,source=getattr(a,'source',None),
-                                effort_quote=a.effort_quote,model_quote=a.model_quote,dialogue=dialogue)
+                                effort_quote=a.effort_quote,model_quote=a.model_quote,dialogue=dialogue,stage=request_stage(req.get('details')))
         args['background']=(f'Board request {a.request} for role {role}, posted by {poster} and opened here by session'
                             f' {(a.session or "")[:8]}. The request and its spec are the task; report through the board (claim,'
                             ' a note at each milestone, submit). The poster reviews the submission on the board.')
@@ -3069,7 +3179,7 @@ def launch_claude_role(a, req, events, asg=None):
         return
     argv,env,line,hpath=launch_plan(a.root,role,a.request,spec,a.expect_model,a.session,project=project,policy=policy,
                                     effort=a.effort,reason=a.reason,worktree=a.worktree,source=getattr(a,'source',None),effort_quote=a.effort_quote,
-                                    model_quote=a.model_quote,dialogue=dialogue)
+                                    model_quote=a.model_quote,dialogue=dialogue,stage=request_stage(req.get('details')))
     print(f'→ 既にある依頼 {a.request} の worker を起こす 1 行 (掲示板には何も書いていない):\n  {line}')
     if a.launch: print('→ 起動した: '+launch(argv,env,cwd=bc.workspace(a.root)).replace('\n','\n  '))
 

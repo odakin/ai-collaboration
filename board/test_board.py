@@ -12,6 +12,19 @@ import board
 import board_transport as bt
 from board_workflow import reduce_workflow, COARSE
 from board_schema import errors, check_schema, history_errors
+import os as _os
+import sys as _sys
+
+# The board reads the owner's delegation through the sibling rule guard (delegation_roles); the tests never read the real
+# personal layer: a failing command = "the guard cannot answer" = the role check is left to the guard's apply.
+_os.environ.setdefault(board.DELEGATION_CMD_ENV, json.dumps(['false']))
+
+
+def delegation_stub(roles, enabled=True):
+    """A JSON argv for board.DELEGATION_CMD_ENV that answers like the rule guard's `delegation --json`."""
+    return json.dumps([_sys.executable, '-c',
+                       'import json,sys; print(json.dumps({"enabled": sys.argv[2] == "1", "reviewer_roles": json.loads(sys.argv[1]), "why": ""}))',
+                       json.dumps(list(roles)), '1' if enabled else '0'])
 
 NOW=dt.datetime.now(dt.timezone.utc)
 SCHEMA=json.loads(board.SCHEMA_PATH.read_text())
@@ -2499,9 +2512,9 @@ class LaunchCommandCLI(Transport):
             self.assertIn('the permission check holds until the owner approves it in this session',args['prompt'])   # a relayed approval does not reach the worker's session
             # a protected file the rule guard stops: the owner answers in the requester's window, the worker applies with that answer
             self.assertIn("--owner-session claude:<the requester's session id> --quote '<the owner's words>'",args['prompt'])
-            # ... and within the owner's reviewer delegation, the reviewer's approval event is the other way to apply it
-            # (measured: the hand-off named only the owner's way, and workers asked the owner for files the reviewer could approve)
-            self.assertIn('--reviewer-approval <event id>',args['prompt']); self.assertIn('Reviewer-Approved: <event id>',args['prompt'])
+            # ... the reviewer's approval is named only for an implementation of a committed policy file (StageAndApproverRole):
+            # this request has no stage mark, so the board would refuse the approval and the owner's way is the one named
+            self.assertNotIn('--reviewer-approval <event id>',args['prompt']); self.assertIn('the board refuses the reviewer',args['prompt'])
             self.assertIn('do not list them in your replies here',args['prompt'])   # one question in one window
             self.assertIn("is not applied on another window's answer",args['prompt'])   # CLAUDE.md, permissions, config stay where the owner speaks
             self.assertNotIn('guard.py',args['prompt'])   # the hand-off names no guard file (naming one in board.py would lock the whole file)
@@ -3938,6 +3951,31 @@ class RequestDesk(EffortFlag):
         collab={'board_format':1,'audience':'collaborators','encryption':'none','sources':['eproj']}
         with self.assertRaisesRegex(ValueError,'request_desk is for owner boards'): bc.validate({**collab,'request_desk':good})
 
+    def test_validate_delegation_roles(self):
+        # approve-edit reads the approving roles through the rule guard by the command board.json names (CONTRACT.md#approver-role-check)
+        import board_config as bc
+        base={'board_format':1,'audience':'owner','encryption':'git-crypt'}
+        good={'command':['../x/guard.py','delegation','--json'],'rule':'x.md#y'}
+        self.assertEqual(bc.validate({**base,'delegation_roles':good})['delegation_roles'],good)
+        for bad in ({'command':[]},{'command':'g.py'},{'command':['']},{'command':['g.py'],'other':1},'on'):
+            with self.assertRaisesRegex(ValueError,'delegation_roles'): bc.validate({**base,'delegation_roles':bad})
+        collab={'board_format':1,'audience':'collaborators','encryption':'none','sources':['eproj']}
+        with self.assertRaisesRegex(ValueError,'delegation_roles is for owner boards'): bc.validate({**collab,'delegation_roles':good})
+
+    def test_delegation_roles_from_board_config(self):
+        # without the test override the engine runs the command board.json names, relative to the board directory
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td)/'board'; root.mkdir()
+            (Path(td)/'stub.py').write_text('import json; print(json.dumps({"enabled": True, "reviewer_roles": ["role-z-chore-reviewer"]}))\n')
+            cfg={'audience':'owner','delegation_roles':{'command':['../stub.py']}}
+            with mock.patch.dict(_os.environ,{board.DELEGATION_CMD_ENV:''}):
+                self.assertEqual(board.delegation_roles(cfg,root)[0],['role-z-chore-reviewer'])
+                self.assertIsNone(board.delegation_roles({'audience':'owner'},root)[0])                      # no field
+                self.assertIsNone(board.delegation_roles({**cfg,'audience':'collaborators'},root)[0])      # not the owner's board
+                self.assertIsNone(board.delegation_roles({'audience':'owner','delegation_roles':{'command':['none.py']}},root)[0])
+                self.assertIn('承認を書ける役でない',board.reviewer_handover_notice('role-z-owner-review',cfg,root))
+
     def test_validate_ask_prior_search(self):
         # board_asks.py runs the named search with the asked words (CONTRACT.md#owner-asks, the prior record)
         import board_config as bc
@@ -3991,12 +4029,13 @@ class EditApprovalUnit(unittest.TestCase):
                   target_mode=None)
         base.update(kw); return argparse.Namespace(**base)
 
-    def run_form(self, events=None, cfg=None, native=None, **kw):
+    def run_form(self, events=None, cfg=None, native=None, delegation=('role-example-chore-reviewer',), **kw):
         from unittest import mock
         import contextlib
         import io
         import os as _os
-        env={'CLAUDE_CODE_SESSION_ID':self.NATIVE if native is None else native}
+        env={'CLAUDE_CODE_SESSION_ID':self.NATIVE if native is None else native,
+             board.DELEGATION_CMD_ENV:json.dumps(['false']) if delegation is None else delegation_stub(delegation)}
         with mock.patch.dict(_os.environ,env), mock.patch.object(board,'touch_base',return_value=Path(self.td.name)), \
                 contextlib.redirect_stderr(io.StringIO()):
             return board.edit_approval_details(self.ns(**kw),events or self.events,cfg or {'audience':'owner'},{})
@@ -4038,6 +4077,24 @@ class EditApprovalUnit(unittest.TestCase):
         self.refused('--region',region=['abstract'])
         self.refused('--candidate',candidate=str(self.repo/'missing.txt'))
 
+    def test_approver_role(self):
+        # measured twice: an approval the guard refuses at apply was asked for (a role outside the delegation, or a
+        # window opened for another role); the board says so before anything is posted
+        self.refused('承認を書ける役でない',delegation=('role-example-other',))
+        self.refused('書ける役 = 無し',delegation=())
+        self.run_form(delegation=None)                                    # the guard cannot answer: left to its apply
+        def window_claim(role):
+            c=event('claim',2,agent='claude',thread='2026-09-06-other'); c['actor'].update(session_id=role,task='bbbbbbbb (opus)')
+            return c
+        why=self.refused('最初に role-example-chore-approver',events=[window_claim('role-example-chore-approver')]+self.events)
+        self.assertIn('その役で起こして',why)
+        self.run_form(events=[window_claim('role-example-chore-reviewer-0a1b2c3d')]+self.events)   # the role's standing instance
+        self.run_form(events=[window_claim('role-example-chore-reviewer')]+self.events)
+        self.refused('最初に role-example-chore-reviewer-extra',events=[window_claim('role-example-chore-reviewer-extra')]+self.events)
+        rec=event('note',3,agent='claude',thread='2026-09-06-other'); rec['actor']['session_id']='role-example-second-reviewer'
+        rec['details']='review-window: bbbbbbbb'                          # an accept's record names the window as well
+        self.refused('最初に role-example-second-reviewer',events=[rec]+self.events)
+
     def test_crlf_candidate_hash_matches_the_guard(self):
         import hashlib
         self.cand.write_bytes('# r\r\n- 検収は検収係。\r\n- 足す。\r\n'.encode())
@@ -4074,6 +4131,47 @@ class EditApprovalUnit(unittest.TestCase):
         self.assertEqual([(r['repo'],r['file'],len(r['checks'])) for r in rows],[('work','rules.md',1)])
         self.assertIn('例外として',rows[0]['after'])
         self.assertEqual(board.edit_approvals(self.events+[n],since='2999-01-01'),[])
+
+
+class StageAndApproverRole(unittest.TestCase):
+    """The hand-off text names the reviewer's approval only for an implementation of a committed policy file, the owner's
+    way for the other stages, and no protected-file step for a policy-only request (measured: an exempt request's worker
+    was told of an approval the board then refused); a reviewer handover names a role outside the owner's delegation."""
+    RID='20260101T000000Z-claude-000001'
+
+    def text(self, **kw):
+        return board.handoff_text(Path('/fixture/board'),'role-fixture-worker',self.RID,None,'fixture-model','high',surface='desktop',**kw)
+
+    def test_request_stage(self):
+        s=board.request_stage
+        self.assertEqual(s('policy-stage: implement\npolicy-ref: work/plans/p.md'),'implement-ref')
+        self.assertEqual(s('policy-stage: implement\npolicy-quote: それで'),'other')
+        self.assertEqual(s('policy-stage: exempt\npolicy-stage-reason: x'),'other')
+        self.assertEqual(s('policy-stage: policy'),'policy')
+        self.assertEqual((s(None),s('launch-host: x')),('other','other'))
+
+    def test_paragraph_by_stage(self):
+        ref,other,pol=self.text(stage='implement-ref'),self.text(stage='other'),self.text(stage='policy')
+        owner="--owner-session claude:<the requester's session id>"
+        self.assertIn('--reviewer-approval <event id>',ref); self.assertIn(owner,ref)
+        self.assertNotIn('--reviewer-approval <event id>',other); self.assertIn('the board refuses the reviewer',other)
+        self.assertIn(owner,other); self.assertIn('implementation-stage request quoting the policy file',other)
+        self.assertIn('asks for a policy only: change no protected file',pol)
+        self.assertNotIn('--owner-session',pol); self.assertNotIn('--reviewer-approval',pol)
+        for t in (ref,other,pol): self.assertIn("is not applied on another window's answer",t)
+        self.assertEqual(self.text(),other)                              # no stage given = the owner's way
+        self.assertNotIn('approve-edit',board.handoff_text(Path('/fixture/board'),'role-fixture-worker',self.RID,None,
+                                                           'fixture-model','high',stage='implement-ref'))   # CLI: no such paragraph
+
+    def test_handover_notice(self):
+        from unittest import mock
+        with mock.patch.dict(_os.environ,{board.DELEGATION_CMD_ENV:delegation_stub(['role-x-chore-reviewer'])}):
+            self.assertIn('承認を書ける役でない',board.reviewer_handover_notice('role-x-owner-review'))
+            self.assertEqual(board.reviewer_handover_notice('role-x-chore-reviewer'),'')
+        with mock.patch.dict(_os.environ,{board.DELEGATION_CMD_ENV:delegation_stub([],enabled=False)}):
+            self.assertIn('書ける役 = 無し',board.reviewer_handover_notice('role-x-chore-reviewer'))   # delegation off
+        with mock.patch.dict(_os.environ,{board.DELEGATION_CMD_ENV:json.dumps(['false'])}):
+            self.assertEqual(board.reviewer_handover_notice('role-x-owner-review'),'')   # the guard cannot answer: nothing said
 
 
 # ---------------------------------------------------------------- small fixes to the board tool (views, gates, watch, launch)
