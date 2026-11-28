@@ -3913,6 +3913,17 @@ class RequestDesk(EffortFlag):
         self.assertEqual(board.DESK_ENV_KEYS,(board.DEFAULT_REVIEWER_ENV,board.SEPARATE_REVIEWER_ENV,board.DIALOGUE_DESK_ENV))
         self.assertFalse(any(l.startswith(board.DIALOGUE_DESK_PREFIX) for l in (req.get('details') or '').splitlines()))  # not a dialogue request
 
+    def test_explicit_block_leaves_no_request_or_launch(self):
+        self.turn_on()
+        result = {'env': {}, 'block': 'reviewer has not claimed'}
+        self.desk.write_text(f'import json\nprint(json.dumps({result!r}))\n')
+        p = self.cli('request', *self.post_args(), '--thread', '2026-01-01-desk-blocked',
+                     '--to', 'codex', '--to-session', 'codex-w-9', ok=False)
+        self.assertIn('reviewer has not claimed', p.stderr)
+        self.assertNotIn('event_id=', p.stdout)
+        with board.snapshot(self.root, fresh=True) as snap:
+            self.assertFalse(any(e['thread_id']=='2026-01-01-desk-blocked' for e in board.read(snap)))
+
     def dialogue(self, thread, role, *extra):
         p=self.cli('request',*self.post_args(),'--thread',thread,'--to','claude','--to-session',role,'--dialogue',*extra)
         rid=self.rid(p.stdout)

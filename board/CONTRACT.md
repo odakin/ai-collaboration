@@ -751,7 +751,9 @@ command line after `--`, the board directory in `AGENT_BOARD_ROOT` and `AGENT_BO
 posts requests of its own does not run itself again). The desk's last stdout line is `{"env": {...}}`; the engine
 applies only `AGENT_BOARD_DEFAULT_REVIEWER`, `AGENT_BOARD_REVIEWER_SEPARATE` and, for a `--dialogue` request,
 `AGENT_BOARD_DIALOGUE_DESK` ([the window's copy-and-typeset desk](#dialogue-desk)) from it (an explicit `--reviewer`
-still wins), and the desk's stderr reaches the requester. A missing script, a non-zero exit or unreadable output leaves the
+still wins), and the desk's stderr reaches the requester. A successful desk can return a short nonempty `"block"`
+string alongside `"env": {}` to refuse this request with a reason before an event or launch is made. This decision
+does not set any environment values. A missing script, a non-zero exit or unreadable output leaves the
 request as it would be without the desk, with one line. `AGENT_BOARD_REQUEST_DESK=0` in the requester's environment
 skips the desk. The engine refuses the field on a collaborators board: the command would run on the requester's
 machine, and that board's `board.json` is written by others. This is where an owner's per-window reviewer wiring

@@ -3347,7 +3347,8 @@ def run_request_desk(a, cfg, argv=None):
     board.json is written by others; validate refuses the field there). The desk gets the request's command line after
     `--`, the board directory in AGENT_BOARD_ROOT and REQUEST_DESK_ENV=0 (a desk that posts requests of its own does
     not run itself again). Fail-open: no script, a failure or unreadable output leaves the request as before, with one
-    line on stderr. Returns the variables it set."""
+    line on stderr. An owner desk can explicitly block the request with a short "block" string.
+    This is a decision, rather than a failed process. Returns the variables it set."""
     spec=cfg.get('request_desk')
     if not spec or cfg.get('audience')!='owner' or os.environ.get(REQUEST_DESK_ENV,'').strip()=='0': return {}
     cmd=list(spec.get('command') or [])
@@ -3362,11 +3363,17 @@ def run_request_desk(a, cfg, argv=None):
                          stdout=subprocess.PIPE,text=True,timeout=240,env=env)
         lines=(p.stdout or '').strip().splitlines()
         if p.returncode or not lines: raise ValueError(f'exit {p.returncode}, {len(lines)} stdout lines')
-        got=json.loads(lines[-1]).get('env')
+        result=json.loads(lines[-1])
+        got=result.get('env')
         if not isinstance(got,dict): raise ValueError('env is not an object')
+        block=result.get('block')
+        if block is not None and (not isinstance(block,str) or not block.strip() or len(block)>1000):
+            raise ValueError('block must be a short non-empty string')
     except Exception as exc:
         print(f'ℹ️ {bc.CONFIG} の request_desk を回せなかった ({type(exc).__name__}) = この依頼に desk の既定 (検収役) を当てていない',file=sys.stderr)
         return {}
+    if block is not None:
+        raise ValueError('request desk: '+' '.join(block.split()))
     got={k:str(v) for k,v in got.items() if k in DESK_ENV_KEYS}
     os.environ.update(got)
     return got
